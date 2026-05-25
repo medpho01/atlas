@@ -3,17 +3,20 @@
 #               Data persisted in a named docker volume so restarts don't wipe it.
 #               Init scripts in sql/init/ run ONCE on first boot.
 #   atlas-web → Next.js app. Reads operational data from the external LabStack DB
-#               (host-network or remote), reads/writes Atlas state from atlas-db.
+#               (SOURCE_DATABASE_URL), reads/writes Atlas state from atlas-db
+#               (APP_DATABASE_URL).
 #
-# Quick start:
-#   cp .env.production.example .env.production   # fill in SOURCE_DATABASE_URL
+# Quick start (on the VM):
+#   cp .env.production.example .env.production   # fill in SOURCE_DATABASE_URL etc.
 #   docker compose up -d --build
-#   docker compose logs -f atlas-web
-#   # Seed an admin (runs against atlas-db inside the container network):
-#   docker compose exec atlas-web sh -lc 'node scripts/create-user.cjs admin@labstack.local <pw> "Admin" admin'
-#   # Or from outside docker:
-#   APP_DATABASE_URL=postgres://atlas:atlas@localhost:5433/atlas \
-#     npm run user:create -- admin@labstack.local <pw> "Admin" admin
+#   docker compose logs -f atlas-db              # watch for "atlas.pincode_directory ready"
+#
+# Seed the first admin from the VM host:
+#   APP_DATABASE_URL=postgres://atlas:${ATLAS_DB_PASSWORD}@localhost:15432/atlas \
+#     npm run user:create -- admin@labstack.in <pw> "Admin" admin
+#
+# Health checks:
+#   curl http://localhost:8001/api/health   →  {"status":"ok","db":"up"}
 
 services:
   atlas-db:
@@ -52,7 +55,10 @@ services:
       atlas-db:
         condition: service_healthy
     ports:
-      - "3010:3010"
+      # Host 8001 → container's internal 3010. The reverse proxy on the VM
+      # (Caddy/nginx terminating https://atlas.labstack.in) forwards to :8001.
+      # The Next.js process itself still listens on 3010 inside the container.
+      - "8001:3010"
     env_file:
       - .env.production
     environment:
