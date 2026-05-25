@@ -23,16 +23,25 @@ services:
     image: postgres:16-alpine
     container_name: atlas-db
     restart: unless-stopped
+    env_file:
+      # Provides SOURCE_DATABASE_URL to the container at runtime. 03_fdw.sh
+      # reads it to configure the postgres_fdw foreign server.
+      - .env.production
     environment:
       POSTGRES_USER: atlas
       POSTGRES_PASSWORD: ${ATLAS_DB_PASSWORD:-atlas}
       POSTGRES_DB: atlas
     volumes:
       - atlas-data:/var/lib/postgresql/data
-      # Init scripts run in lexical order on first boot. The CSV sits inside
-      # sql/init alongside the SQL, so the \copy in 02_pincode_directory.sql
-      # finds it via /docker-entrypoint-initdb.d/pincode_directory_india_post.csv.
+      # Init scripts run lexically on first boot:
+      #   01_schema.sql              — atlas.* tables
+      #   02_pincode_directory.sql   — load India Post CSV
+      #   03_fdw.sh                  — postgres_fdw + src.* foreign tables
+      #   04_analytics_views.sh      — build analytics.mv_* by reading from /atlas-sql
       - ./sql/init:/docker-entrypoint-initdb.d:ro
+      # The MV definitions live in the parent sql/ directory; 04_analytics_views.sh
+      # reads them from here. Mounted read-only — the container can't modify them.
+      - ./sql:/atlas-sql:ro
     ports:
       # Expose to the host for direct CLI access (npm run user:create, psql).
       # 15432 picked to avoid clashes with host Postgres (5432) and any other

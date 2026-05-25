@@ -102,12 +102,14 @@ JOIN "User" u ON u.id = po."userId"
 JOIN "Profile" p ON p."profileUserId" = u.id
 WHERE p.pincode IS NOT NULL AND p.pincode <> '';
 
-CREATE UNIQUE INDEX idx_mv_demand_event ON mv_unified_demand(event_id);
-CREATE INDEX idx_mv_demand_pin ON mv_unified_demand(pincode);
-CREATE INDEX idx_mv_demand_service ON mv_unified_demand(service_line);
-CREATE INDEX idx_mv_demand_created ON mv_unified_demand(created_at);
-CREATE INDEX idx_mv_demand_service_pin_created ON mv_unified_demand(service_line, pincode, created_at);
-CREATE INDEX idx_mv_demand_user ON mv_unified_demand(user_id);
+-- Index names prefixed with idx_mv_unified_demand_* so they don't collide
+-- with the older mv_pincode_demand indexes defined in materialized_views.sql.
+CREATE UNIQUE INDEX idx_mv_unified_demand_event   ON mv_unified_demand(event_id);
+CREATE INDEX        idx_mv_unified_demand_pin     ON mv_unified_demand(pincode);
+CREATE INDEX        idx_mv_unified_demand_service ON mv_unified_demand(service_line);
+CREATE INDEX        idx_mv_unified_demand_created ON mv_unified_demand(created_at);
+CREATE INDEX        idx_mv_unified_demand_sp_ts   ON mv_unified_demand(service_line, pincode, created_at);
+CREATE INDEX        idx_mv_unified_demand_user    ON mv_unified_demand(user_id);
 
 -- ----------------------------------------------------------------------------
 -- mv_service_line_momentum
