@@ -1,0 +1,84 @@
+# Two services:
+#   atlas-db  → Postgres for Atlas-owned state (users, sessions, audit, pincode_directory).
+#               Data persisted in a named docker volume so restarts don't wipe it.
+#               Init scripts in sql/init/ run ONCE on first boot.
+#   atlas-web → Next.js app. Reads operational data from the external LabStack DB
+#               (host-network or remote), reads/writes Atlas state from atlas-db.
+#
+# Quick start:
+#   cp .env.production.example .env.production   # fill in SOURCE_DATABASE_URL
+#   docker compose up -d --build
+#   docker compose logs -f atlas-web
+#   # Seed an admin (runs against atlas-db inside the container network):
+#   docker compose exec atlas-web sh -lc 'node scripts/create-user.cjs admin@labstack.local <pw> "Admin" admin'
+#   # Or from outside docker:
+#   APP_DATABASE_URL=postgres://atlas:atlas@localhost:5433/atlas \
+#     npm run user:create -- admin@labstack.local <pw> "Admin" admin
+
+services:
+  atlas-db:
+    image: postgres:16-alpine
+    container_name: atlas-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: atlas
+      POSTGRES_PASSWORD: ${ATLAS_DB_PASSWORD:-atlas}
+      POSTGRES_DB: atlas
+    volumes:
+      - atlas-data:/var/lib/postgresql/data
+      # Init scripts run in lexical order on first boot. The CSV sits inside
+      # sql/init alongside the SQL, so the \copy in 02_pincode_directory.sql
+      # finds it via /docker-entrypoint-initdb.d/pincode_directory_india_post.csv.
+      - ./sql/init:/docker-entrypoint-initdb.d:ro
+    ports:
+      # Expose to the host for direct CLI access (npm run user:create, psql).
+      # 15432 picked to avoid clashes with host Postgres (5432) and any other
+      # Docker port leases that often sit on 5433-5434.
+      - "15432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U atlas -d atlas"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+
+  atlas-web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: atlas-web
+    restart: unless-stopped
+    depends_on:
+      atlas-db:
+        condition: service_healthy
+    ports:
+      - "3010:3010"
+    env_file:
+      - .env.production
+    environment:
+      NODE_ENV: production
+      PORT: "3010"
+      HOSTNAME: "0.0.0.0"
+      # Default: atlas-web reaches atlas-db via the compose network's DNS name.
+      # The .env.production file can override APP_DATABASE_URL if you point
+      # atlas-web at an externally-managed Postgres instead.
+      APP_DATABASE_URL: ${APP_DATABASE_URL:-postgres://atlas:${ATLAS_DB_PASSWORD:-atlas}@atlas-db:5432/atlas}
+    # host.docker.internal: lets atlas-web reach a Postgres running on the
+    # VM's host network (the operational LabStack DB) on Linux.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3010/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+
+volumes:
+  atlas-data:
+    name: atlas-data
