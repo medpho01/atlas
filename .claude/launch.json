@@ -2,8 +2,8 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "labstack-network",
-      "runtimeExecutable": "/Users/maverick/Documents/labstack-network/scripts/dev.sh",
+      "name": "atlas",
+      "runtimeExecutable": "/Users/maverick/Documents/atlas/scripts/dev.sh",
       "runtimeArgs": [],
       "port": 3010
     }
