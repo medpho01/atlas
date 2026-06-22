@@ -30,6 +30,11 @@ PG="psql -h atlas-db -U atlas -d atlas -v ON_ERROR_STOP=1 -X -q"
 LOG=/var/log/atlas-refresh.log
 BIG_TABLE_WINDOW='18 months'
 CHUNK_SIZE=1000
+# Iterate id ranges blindly from 0 up to this ceiling. Past the real MAX(id)
+# every chunk is fast no-op. Raise this if the source DB grows past ~200k ids.
+BIG_TABLE_CEILING=200000
+# Stop a table's loop after this many consecutive empty chunks — table is done.
+EMPTY_THRESHOLD=20
 
 log()  { echo "[$(date -Iseconds)] $*" | tee -a "$LOG" >&2; }
 fail() { log "FATAL: $*"; exit 1; }
@@ -40,6 +45,30 @@ log "Atlas data refresh starting"
 # Sanity check — atlas-db reachable + has the expected schemas.
 $PG -c "SELECT 1 FROM information_schema.schemata WHERE schema_name='src_local';" -t -A \
   | grep -q 1 || fail "src_local schema missing on atlas-db. Was init run?"
+
+# ---- Phase 0: sync enum values from source -------------------------------
+# Source DB may add new enum values over time (e.g. LabAPIProvider gained
+# 'GENEBOX' after initial setup). FDW foreign tables would then fail with
+# "invalid input value for enum" because atlas-db's local enum copy is stale.
+# Pull every enum value from source and idempotently ALTER TYPE ADD VALUE
+# on the local side. SOURCE_DATABASE_URL is provided to this container via
+# env_file in docker-compose.
+if [ -n "${SOURCE_DATABASE_URL:-}" ]; then
+  log "Phase 0/4 · syncing enum values from source"
+  SRC_PSQL="psql $SOURCE_DATABASE_URL -v ON_ERROR_STOP=1 -X -q -t -A"
+  $SRC_PSQL -c "
+    SELECT format('ALTER TYPE public.%I ADD VALUE IF NOT EXISTS %L;',
+                  t.typname, e.enumlabel)
+    FROM pg_type t
+    JOIN pg_enum e ON e.enumtypid = t.oid
+    WHERE t.typnamespace = (SELECT oid FROM pg_namespace WHERE nspname = 'public')
+    ORDER BY t.typname, e.enumsortorder;
+  " 2>>"$LOG" | $PG >>"$LOG" 2>&1 \
+    && log "  enum sync ok" \
+    || log "  WARN: enum sync failed (refresh may fail on rows with new enum values)"
+else
+  log "Phase 0/4 · SOURCE_DATABASE_URL not set; skipping enum sync"
+fi
 
 # ---- Phase 1: TRUNCATE -----------------------------------------------------
 log "Phase 1/4 · TRUNCATE src_local tables"
@@ -70,18 +99,21 @@ for t in Chain ProviderType Pharmacy Store PincodeToLatLong Lab Provider Profile
 done
 
 # ---- Phase 2b: big tables (chunked by id, with retry per chunk) ------------
-log "Phase 2b/4 · chunked copy of big tables (window=$BIG_TABLE_WINDOW, step=$CHUNK_SIZE)"
+# We do NOT query SELECT MAX(id) FROM src.<table> — even though it's
+# logically a cheap index lookup, against the source standby it can block
+# for many minutes (replication conflict / lag). Instead we iterate blindly
+# from 0 to BIG_TABLE_CEILING, stopping early when we see EMPTY_THRESHOLD
+# consecutive empty chunks. Each chunk is bounded by id BETWEEN x AND y,
+# which pushes a fast range scan to the source.
+log "Phase 2b/4 · chunked copy of big tables (window=$BIG_TABLE_WINDOW, step=$CHUNK_SIZE, ceiling=$BIG_TABLE_CEILING)"
 for big in Order Appointment PharmaOrder; do
-  MAX=$($PG -t -A -c "SELECT MAX(id) FROM src.\"$big\";" 2>/dev/null)
-  if [ -z "$MAX" ] || [ "$MAX" = "" ]; then
-    log "  $big: source empty or unreachable; skipping"
-    continue
-  fi
   start=0
   failed_chunks=0
-  while [ "$start" -le "$MAX" ]; do
+  empty_streak=0
+  while [ "$start" -le "$BIG_TABLE_CEILING" ] && [ "$empty_streak" -lt "$EMPTY_THRESHOLD" ]; do
     end=$((start + CHUNK_SIZE - 1))
     chunk_ok=0
+    rows_before=$($PG -t -A -c "SELECT COUNT(*) FROM src_local.\"$big\";" 2>/dev/null || echo 0)
     for try in 1 2 3; do
       if $PG -c "INSERT INTO src_local.\"$big\"
                  SELECT * FROM src.\"$big\"
@@ -93,11 +125,20 @@ for big in Order Appointment PharmaOrder; do
       fi
       sleep 2
     done
-    [ "$chunk_ok" -eq 0 ] && failed_chunks=$((failed_chunks + 1))
+    if [ "$chunk_ok" -eq 0 ]; then
+      failed_chunks=$((failed_chunks + 1))
+    else
+      rows_after=$($PG -t -A -c "SELECT COUNT(*) FROM src_local.\"$big\";" 2>/dev/null || echo 0)
+      if [ "$rows_after" -eq "$rows_before" ]; then
+        empty_streak=$((empty_streak + 1))
+      else
+        empty_streak=0
+      fi
+    fi
     start=$((start + CHUNK_SIZE))
   done
   n=$($PG -t -A -c "SELECT COUNT(*) FROM src_local.\"$big\";")
-  log "  $big → $n rows ($failed_chunks chunks failed)"
+  log "  $big → $n rows ($failed_chunks failed chunks, stopped at id $start)"
 done
 
 # ---- Phase 3: ANALYZE ------------------------------------------------------

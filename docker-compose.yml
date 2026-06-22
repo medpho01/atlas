@@ -111,6 +111,10 @@ services:
     depends_on:
       atlas-db:
         condition: service_healthy
+    env_file:
+      # Provides SOURCE_DATABASE_URL — used by Phase 0 enum sync (psql talks
+      # directly to source to discover any new enum values added since init).
+      - .env.production
     environment:
       # psql uses PGPASSWORD; matches ATLAS_DB_PASSWORD on the db side.
       PGPASSWORD: ${ATLAS_DB_PASSWORD:-atlas}
