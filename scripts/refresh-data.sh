@@ -54,8 +54,30 @@ $PG -c "SELECT 1 FROM information_schema.schemata WHERE schema_name='src_local';
 # on the local side. SOURCE_DATABASE_URL is provided to this container via
 # env_file in docker-compose.
 if [ -n "${SOURCE_DATABASE_URL:-}" ]; then
-  log "Phase 0/4 · syncing enum values from source"
+  log "Phase 0/4 · syncing enum schema from source"
   SRC_PSQL="psql $SOURCE_DATABASE_URL -v ON_ERROR_STOP=1 -X -q -t -A"
+
+  # Step a: CREATE TYPE for any enum that doesn't yet exist on atlas-db.
+  # We wrap each CREATE in a DO block with EXCEPTION WHEN duplicate_object
+  # so it's idempotent — types we already have are skipped silently.
+  $SRC_PSQL -c "
+    SELECT format(
+      E'DO \$\$ BEGIN CREATE TYPE public.%I AS ENUM (%s); EXCEPTION WHEN duplicate_object THEN NULL; END \$\$;',
+      t.typname,
+      string_agg(quote_literal(e.enumlabel), ', ' ORDER BY e.enumsortorder)
+    )
+    FROM pg_type t
+    JOIN pg_enum e ON e.enumtypid = t.oid
+    WHERE t.typnamespace = (SELECT oid FROM pg_namespace WHERE nspname = 'public')
+    GROUP BY t.typname
+    ORDER BY t.typname;
+  " 2>>"$LOG" | $PG >>"$LOG" 2>&1 \
+    && log "  enum types ensured" \
+    || log "  WARN: enum CREATE TYPE pass failed (continuing anyway)"
+
+  # Step b: ALTER TYPE ADD VALUE for any enum value missing on atlas-db.
+  # If a type just got created in step a, this is a no-op (values already in
+  # the CREATE). If a type pre-existed but has new values, this catches them.
   $SRC_PSQL -c "
     SELECT format('ALTER TYPE public.%I ADD VALUE IF NOT EXISTS %L;',
                   t.typname, e.enumlabel)
@@ -64,8 +86,8 @@ if [ -n "${SOURCE_DATABASE_URL:-}" ]; then
     WHERE t.typnamespace = (SELECT oid FROM pg_namespace WHERE nspname = 'public')
     ORDER BY t.typname, e.enumsortorder;
   " 2>>"$LOG" | $PG >>"$LOG" 2>&1 \
-    && log "  enum sync ok" \
-    || log "  WARN: enum sync failed (refresh may fail on rows with new enum values)"
+    && log "  enum values synced" \
+    || log "  WARN: enum ALTER TYPE pass failed (refresh may fail on rows with new enum values)"
 else
   log "Phase 0/4 · SOURCE_DATABASE_URL not set; skipping enum sync"
 fi
