@@ -127,18 +127,25 @@ for big in Order Appointment PharmaOrder; do
     done
     if [ "$chunk_ok" -eq 0 ]; then
       failed_chunks=$((failed_chunks + 1))
+      log "  $big id $start..$end: FAILED after 3 attempts"
     else
       rows_after=$($PG -t -A -c "SELECT COUNT(*) FROM src_local.\"$big\";" 2>/dev/null || echo 0)
-      if [ "$rows_after" -eq "$rows_before" ]; then
+      added=$((rows_after - rows_before))
+      if [ "$added" -eq 0 ]; then
         empty_streak=$((empty_streak + 1))
+        # Only log every 10 empty chunks to keep the log readable
+        if [ $((empty_streak % 10)) -eq 0 ]; then
+          log "  $big id $start..$end: empty (streak $empty_streak)"
+        fi
       else
         empty_streak=0
+        log "  $big id $start..$end → +$added rows (total $rows_after)"
       fi
     fi
     start=$((start + CHUNK_SIZE))
   done
   n=$($PG -t -A -c "SELECT COUNT(*) FROM src_local.\"$big\";")
-  log "  $big → $n rows ($failed_chunks failed chunks, stopped at id $start)"
+  log "  $big DONE → $n rows total ($failed_chunks failed chunks, stopped at id $start after empty streak $empty_streak)"
 done
 
 # ---- Phase 3: ANALYZE ------------------------------------------------------
