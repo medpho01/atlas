@@ -35,6 +35,9 @@ CHUNK_SIZE=1000
 BIG_TABLE_CEILING=200000
 # Stop a table's loop after this many consecutive empty chunks — table is done.
 EMPTY_THRESHOLD=20
+# ALSO stop a table's loop after this many consecutive failed chunks. Without
+# this, a persistent source-side issue can grind the script for hours.
+FAILED_STREAK_THRESHOLD=5
 # Hard timeout per chunk INSERT. Without this an FDW cursor can hang for
 # hours when the source standby gets congested. 60s is enough for healthy
 # chunks (each is ~5s) and short enough that retries don't waste a day.
@@ -136,7 +139,10 @@ for big in Order Appointment PharmaOrder; do
   start=0
   failed_chunks=0
   empty_streak=0
-  while [ "$start" -le "$BIG_TABLE_CEILING" ] && [ "$empty_streak" -lt "$EMPTY_THRESHOLD" ]; do
+  failed_streak=0
+  while [ "$start" -le "$BIG_TABLE_CEILING" ] \
+     && [ "$empty_streak" -lt "$EMPTY_THRESHOLD" ] \
+     && [ "$failed_streak" -lt "$FAILED_STREAK_THRESHOLD" ]; do
     end=$((start + CHUNK_SIZE - 1))
     chunk_ok=0
     rows_before=$($PG -t -A -c "SELECT COUNT(*) FROM src_local.\"$big\";" 2>/dev/null || echo 0)
@@ -156,8 +162,10 @@ for big in Order Appointment PharmaOrder; do
     done
     if [ "$chunk_ok" -eq 0 ]; then
       failed_chunks=$((failed_chunks + 1))
-      log "  $big id $start..$end: FAILED after 3 attempts"
+      failed_streak=$((failed_streak + 1))
+      log "  $big id $start..$end: FAILED after 3 attempts (streak $failed_streak)"
     else
+      failed_streak=0
       rows_after=$($PG -t -A -c "SELECT COUNT(*) FROM src_local.\"$big\";" 2>/dev/null || echo 0)
       added=$((rows_after - rows_before))
       if [ "$added" -eq 0 ]; then
@@ -174,7 +182,11 @@ for big in Order Appointment PharmaOrder; do
     start=$((start + CHUNK_SIZE))
   done
   n=$($PG -t -A -c "SELECT COUNT(*) FROM src_local.\"$big\";")
-  log "  $big DONE → $n rows total ($failed_chunks failed chunks, stopped at id $start after empty streak $empty_streak)"
+  if [ "$failed_streak" -ge "$FAILED_STREAK_THRESHOLD" ]; then
+    log "  $big GIVING UP → $n rows total ($failed_chunks failed chunks, $failed_streak consecutive — source standby unreliable, moving on)"
+  else
+    log "  $big DONE → $n rows total ($failed_chunks failed chunks, stopped at id $start after empty streak $empty_streak)"
+  fi
 done
 
 # ---- Phase 3: ANALYZE ------------------------------------------------------
