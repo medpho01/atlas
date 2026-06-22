@@ -1,12 +1,20 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { SESSION_COOKIE } from '@/lib/authConstants';
 
-// Routes that don't require a session.
+// Routes that don't require a session (exact match).
 const PUBLIC_PATHS = new Set<string>([
   '/login',
   '/api/login',
   '/api/health',
 ]);
+
+// Prefix-matched public paths. Anything starting with one of these is open
+// to the world — used for the customer-facing /network coverage page and its
+// JSON API. Keep this list small; everything here is intentionally public.
+const PUBLIC_PREFIXES = [
+  '/network',        // /network, /network/<pincode>
+  '/api/public/',    // /api/public/pincode, etc.
+];
 
 // Static / framework paths are excluded via the matcher below — middleware
 // doesn't even run for them. Here we only handle real page/api routes.
@@ -22,6 +30,7 @@ export function middleware(req: NextRequest) {
 
   // Allow public paths through.
   if (PUBLIC_PATHS.has(pathname)) return pass;
+  if (PUBLIC_PREFIXES.some((p) => pathname.startsWith(p))) return pass;
 
   // Has session cookie? Optimistic pass — the real session is verified
   // server-side via getSessionUser() inside pages. Middleware can't talk to

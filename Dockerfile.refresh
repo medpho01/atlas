@@ -1,0 +1,21 @@
+# Tiny sidecar: alpine + postgresql-client. Runs the daily Atlas refresh
+# against atlas-db at 3 AM IST. Uses a bash loop instead of dcron because
+# BusyBox crond hits `setpgid: Operation not permitted` on Docker Desktop.
+#
+# Manual trigger:  docker compose exec atlas-refresh /refresh.sh
+# Tail logs:       docker compose exec atlas-refresh tail -f /var/log/atlas-refresh.log
+#                  docker compose logs atlas-refresh -f
+
+FROM alpine:3.19
+
+RUN apk add --no-cache postgresql16-client bash tzdata coreutils \
+ && cp /usr/share/zoneinfo/Asia/Kolkata /etc/localtime \
+ && echo "Asia/Kolkata" > /etc/timezone
+
+COPY scripts/refresh-data.sh /refresh.sh
+COPY scripts/refresh-loop.sh /loop.sh
+RUN chmod +x /refresh.sh /loop.sh \
+ && mkdir -p /var/log \
+ && touch /var/log/atlas-refresh.log
+
+ENTRYPOINT ["/loop.sh"]

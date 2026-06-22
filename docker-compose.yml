@@ -83,7 +83,9 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:3010/api/health"]
+      # 127.0.0.1 (not localhost) — BusyBox wget resolves localhost to ::1 but
+      # Node listens IPv4-only on 0.0.0.0:3010.
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3010/api/health"]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -94,6 +96,30 @@ services:
           cpus: "1.0"
           memory: 512M
 
+  atlas-refresh:
+    # Daily cron sidecar — re-snapshots src_local from FDW and REFRESHes the
+    # analytics MVs at 3 AM IST. Manual trigger:
+    #   docker compose exec atlas-refresh /refresh.sh
+    # Tail logs:
+    #   docker compose logs atlas-refresh -f
+    #   docker compose exec atlas-refresh tail -f /var/log/atlas-refresh.log
+    build:
+      context: .
+      dockerfile: Dockerfile.refresh
+    container_name: atlas-refresh
+    restart: unless-stopped
+    depends_on:
+      atlas-db:
+        condition: service_healthy
+    environment:
+      # psql uses PGPASSWORD; matches ATLAS_DB_PASSWORD on the db side.
+      PGPASSWORD: ${ATLAS_DB_PASSWORD:-atlas}
+      TZ: Asia/Kolkata
+    volumes:
+      - atlas-refresh-logs:/var/log
+
 volumes:
   atlas-data:
     name: atlas-data
+  atlas-refresh-logs:
+    name: atlas-refresh-logs
