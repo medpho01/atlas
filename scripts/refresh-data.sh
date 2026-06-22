@@ -35,6 +35,10 @@ CHUNK_SIZE=1000
 BIG_TABLE_CEILING=200000
 # Stop a table's loop after this many consecutive empty chunks — table is done.
 EMPTY_THRESHOLD=20
+# Hard timeout per chunk INSERT. Without this an FDW cursor can hang for
+# hours when the source standby gets congested. 60s is enough for healthy
+# chunks (each is ~5s) and short enough that retries don't waste a day.
+CHUNK_TIMEOUT_MS=60000
 
 log()  { echo "[$(date -Iseconds)] $*" | tee -a "$LOG" >&2; }
 fail() { log "FATAL: $*"; exit 1; }
@@ -137,7 +141,10 @@ for big in Order Appointment PharmaOrder; do
     chunk_ok=0
     rows_before=$($PG -t -A -c "SELECT COUNT(*) FROM src_local.\"$big\";" 2>/dev/null || echo 0)
     for try in 1 2 3; do
-      if $PG -c "INSERT INTO src_local.\"$big\"
+      # statement_timeout caps each chunk's wait. If the FDW remote stalls,
+      # postgres cancels the cursor after CHUNK_TIMEOUT_MS and we move on.
+      if $PG -c "SET statement_timeout = $CHUNK_TIMEOUT_MS;
+                 INSERT INTO src_local.\"$big\"
                  SELECT * FROM src.\"$big\"
                  WHERE id BETWEEN $start AND $end
                    AND \"createdAt\" >= now() - interval '$BIG_TABLE_WINDOW';" \
