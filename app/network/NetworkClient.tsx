@@ -17,6 +17,7 @@ type Lab = {
   city: string | null;
   state: string | null;
   modalities: string[];
+  distance_km?: number | null;   // present for center-visit results from neighbour pincodes
 };
 
 type Lookup = {
@@ -28,6 +29,7 @@ type Lookup = {
   center_visit: Lab[];
   home_sample: Lab[];
   found: boolean;
+  cv_radius_km: number;
 };
 
 export function NetworkClient({ points }: { points: NetworkPoint[] }) {
@@ -150,9 +152,10 @@ function ResultPanel({ result, onClose }: { result: Lookup; onClose: () => void 
           <LabSection
             icon={<Building2 className="w-4 h-4 text-blue-600" />}
             title="Center visit"
-            desc="Walk-in sample collection at a lab or hospital"
+            desc={`Walk-in sample collection within ${result.cv_radius_km} km of the searched pincode`}
             labs={result.center_visit}
-            emptyMsg="No center-visit partners at this pincode yet."
+            emptyMsg={`No center-visit partners within ${result.cv_radius_km} km.`}
+            showDistance
           />
           <LabSection
             icon={<Home className="w-4 h-4 text-violet-600" />}
@@ -169,10 +172,11 @@ function ResultPanel({ result, onClose }: { result: Lookup; onClose: () => void 
 }
 
 function LabSection({
-  icon, title, desc, labs, emptyMsg, hideLocation = false,
+  icon, title, desc, labs, emptyMsg, hideLocation = false, showDistance = false,
 }: {
   icon: React.ReactNode; title: string; desc: string; labs: Lab[]; emptyMsg: string;
   hideLocation?: boolean;
+  showDistance?: boolean;
 }) {
   return (
     <div>
@@ -193,8 +197,15 @@ function LabSection({
                 <div className="min-w-0">
                   <div className="font-medium text-slate-900 text-sm leading-tight truncate">{l.name}</div>
                   {!hideLocation && l.city && (
-                    <div className="text-[11px] text-slate-500 mt-0.5">
-                      {l.city}{l.state ? `, ${l.state}` : ''}
+                    <div className="text-[11px] text-slate-500 mt-0.5 flex items-center gap-1.5">
+                      <span>{l.city}{l.state ? `, ${l.state}` : ''}</span>
+                      {showDistance && l.distance_km != null && (
+                        <span className="inline-flex items-center px-1.5 py-px rounded text-[10px] font-semibold bg-blue-50 text-blue-700 border border-blue-100 tabular-nums">
+                          {l.distance_km < 1
+                            ? '<1 km'
+                            : `${Number(l.distance_km).toFixed(1)} km`}
+                        </span>
+                      )}
                     </div>
                   )}
                 </div>

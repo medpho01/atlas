@@ -33,7 +33,8 @@ for f in \
   $SQL_DIR/customer_views.sql     \
   $SQL_DIR/demand_views.sql       \
   $SQL_DIR/quality_v2.sql         \
-  $SQL_DIR/geo_inferred.sql       ; do
+  $SQL_DIR/geo_inferred.sql       \
+  $SQL_DIR/cv_reach.sql           ; do
   echo "→ running $(basename $f) against atlas-db…"
   # Prepend a SET search_path so the file's unqualified table names resolve
   # via src (foreign tables) without requiring any edits to the file itself.

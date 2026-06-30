@@ -224,6 +224,9 @@ REFRESH MATERIALIZED VIEW analytics.mv_service_line_city;
 REFRESH MATERIALIZED VIEW analytics.mv_lab_quality_v2;
 REFRESH MATERIALIZED VIEW analytics.mv_chain_summary;
 REFRESH MATERIALIZED VIEW analytics.mv_pincode_geo;
+-- Center-visit radius reach depends on both mv_provider_unified and
+-- mv_pincode_geo, so it must refresh after them.
+REFRESH MATERIALIZED VIEW analytics.mv_pincode_cv_reach;
 SQL
 
 MV_COUNT=$($PG -t -A -c "SELECT COUNT(*) FROM pg_matviews WHERE schemaname='analytics';")
