@@ -314,11 +314,12 @@ export type CoverageCell = {
   providers: number;
   local_providers: number;
   serviced_providers: number;
+  radius_providers: number;       // CENTER_VISIT only — labs/hospitals within 10 km
 };
 
 export async function getPincodeCoverageMatrix(pincode: string): Promise<CoverageCell[]> {
   return query<CoverageCell>(`
-    SELECT kind, modality, providers, local_providers, serviced_providers
+    SELECT kind, modality, providers, local_providers, serviced_providers, radius_providers
     FROM mv_pincode_coverage
     WHERE pincode = $1
   `, [pincode]);

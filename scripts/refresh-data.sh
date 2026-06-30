@@ -214,6 +214,9 @@ REFRESH MATERIALIZED VIEW analytics.mv_pincode_summary;
 REFRESH MATERIALIZED VIEW analytics.mv_city_rollup;
 REFRESH MATERIALIZED VIEW analytics.mv_lab_health;
 REFRESH MATERIALIZED VIEW analytics.mv_provider_unified;
+-- mv_pincode_geo must refresh BEFORE mv_pincode_coverage — coverage's RADIUS
+-- rows haversine-join against the geo MV. Same dependency at first-boot init.
+REFRESH MATERIALIZED VIEW analytics.mv_pincode_geo;
 REFRESH MATERIALIZED VIEW analytics.mv_pincode_coverage;
 REFRESH MATERIALIZED VIEW analytics.mv_pincode_city;
 REFRESH MATERIALIZED VIEW analytics.mv_city_coverage;
@@ -223,9 +226,8 @@ REFRESH MATERIALIZED VIEW analytics.mv_service_line_momentum;
 REFRESH MATERIALIZED VIEW analytics.mv_service_line_city;
 REFRESH MATERIALIZED VIEW analytics.mv_lab_quality_v2;
 REFRESH MATERIALIZED VIEW analytics.mv_chain_summary;
-REFRESH MATERIALIZED VIEW analytics.mv_pincode_geo;
--- Center-visit radius reach depends on both mv_provider_unified and
--- mv_pincode_geo, so it must refresh after them.
+-- Center-visit per-lab distance detail. Stays last — only used by the public
+-- /network page for "X.Y km" labels on neighbour-pincode cards.
 REFRESH MATERIALIZED VIEW analytics.mv_pincode_cv_reach;
 SQL
 

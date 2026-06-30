@@ -29,12 +29,16 @@ SQL
 # DROP IF EXISTS CASCADE then CREATE, so re-running is safe.
 for f in \
   $SQL_DIR/materialized_views.sql \
+  $SQL_DIR/geo_inferred.sql       \
   $SQL_DIR/coverage_views.sql     \
   $SQL_DIR/customer_views.sql     \
   $SQL_DIR/demand_views.sql       \
   $SQL_DIR/quality_v2.sql         \
-  $SQL_DIR/geo_inferred.sql       \
   $SQL_DIR/cv_reach.sql           ; do
+  # Order note: geo_inferred.sql must run BEFORE coverage_views.sql, because
+  # mv_pincode_coverage now includes RADIUS rows that haversine-join against
+  # mv_pincode_geo. cv_reach.sql stays after coverage_views.sql since it
+  # only adds distance detail used by the public /network page.
   echo "→ running $(basename $f) against atlas-db…"
   # Prepend a SET search_path so the file's unqualified table names resolve
   # via src (foreign tables) without requiring any edits to the file itself.

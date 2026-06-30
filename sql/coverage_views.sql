@@ -102,10 +102,21 @@ CREATE INDEX idx_mv_provider_unified_latlng ON mv_provider_unified(latitude, lon
 
 -- ----------------------------------------------------------------------------
 -- 2. mv_pincode_coverage
---    Per (pincode × kind × modality): in-pincode counts + serviced counts.
---    "Local" = provider's home pincode equals this pincode.
---    "Serviced" = pincode is listed in provider's serviced_pincodes (labs only, HOME_SAMPLE).
---    Radius-based coverage is computed live on query (since radius is user-controlled).
+--    Per (pincode × kind × modality): in-pincode counts + serviced counts +
+--    radius-reach counts.
+--
+--    Coverage types:
+--      LOCAL    — provider's home pincode equals this pincode.
+--      SERVICED — pincode is listed in provider's serviced_pincodes (Labs only, HOME_SAMPLE).
+--      RADIUS   — provider's home pincode is within 10 km of this pincode (CENTER_VISIT only).
+--                 Adds neighbouring pincodes to a lab/hospital's reach so the
+--                 portal and the public /network page tell the same story:
+--                 "a lab in Indiranagar can serve HSR Layout, 5 km away".
+--
+--    `providers` = COUNT(DISTINCT entity_id) across all three types — this is
+--    what every downstream page reads. `local_providers`, `serviced_providers`,
+--    and `radius_providers` are the disaggregated counts for the pincode
+--    detail breakdown.
 -- ----------------------------------------------------------------------------
 DROP MATERIALIZED VIEW IF EXISTS mv_pincode_coverage CASCADE;
 
@@ -132,14 +143,43 @@ WITH expanded AS (
   WHERE 'HOME_SAMPLE' = ANY(p.modalities)
     AND sp IS NOT NULL AND sp <> ''
     AND p.active
+  UNION ALL
+  -- RADIUS reach for CENTER_VISIT: every active LAB/HOSPITAL implicitly serves
+  -- pincodes within 10 km of its physical location. Excludes the lab's own
+  -- pincode (already in LOCAL above — the GROUP BY+DISTINCT handles dedup, but
+  -- excluding here keeps the row count down by ~10%).
+  SELECT
+    ap.pincode AS pincode,
+    p.kind,
+    'CENTER_VISIT' AS modality,
+    p.entity_id,
+    'RADIUS' AS coverage_type
+  FROM mv_provider_unified p
+  JOIN mv_pincode_geo lg ON lg.pincode = p.pincode
+  JOIN mv_pincode_geo ap
+    -- bbox prefilter for haversine — ~10 km ≈ 0.09° lat/lng
+    ON ap.latitude  BETWEEN lg.latitude  - 0.09 AND lg.latitude  + 0.09
+   AND ap.longitude BETWEEN lg.longitude - 0.09 AND lg.longitude + 0.09
+  WHERE p.active
+    AND p.kind IN ('LAB','HOSPITAL')
+    AND 'CENTER_VISIT' = ANY(p.modalities)
+    AND lg.latitude  IS NOT NULL
+    AND ap.latitude  IS NOT NULL
+    AND ap.pincode  <> p.pincode
+    AND 6371 * acos(GREATEST(-1, LEAST(1,
+      cos(radians(lg.latitude)) * cos(radians(ap.latitude)) *
+      cos(radians(ap.longitude) - radians(lg.longitude)) +
+      sin(radians(lg.latitude)) * sin(radians(ap.latitude))
+    ))) <= 10
 )
 SELECT
   pincode,
   kind,
   modality,
   COUNT(DISTINCT entity_id)::int AS providers,
-  COUNT(DISTINCT entity_id) FILTER (WHERE coverage_type = 'LOCAL')::int AS local_providers,
-  COUNT(DISTINCT entity_id) FILTER (WHERE coverage_type = 'SERVICED')::int AS serviced_providers
+  COUNT(DISTINCT entity_id) FILTER (WHERE coverage_type = 'LOCAL')::int    AS local_providers,
+  COUNT(DISTINCT entity_id) FILTER (WHERE coverage_type = 'SERVICED')::int AS serviced_providers,
+  COUNT(DISTINCT entity_id) FILTER (WHERE coverage_type = 'RADIUS')::int   AS radius_providers
 FROM expanded
 GROUP BY pincode, kind, modality;
 
