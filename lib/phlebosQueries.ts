@@ -20,9 +20,13 @@ export type Phlebo = {
   state: string | null;
   pincode: string | null;
   orders_served: number;
+  active_days: number | null;
+  avg_orders_per_day: number | null;
   labs: string[] | null;
   first_order_at: string | null;
   last_order_at: string | null;
+  is_shared_phone: boolean;
+  variants_at_phone: number;
   email: string | null;
   notes: string | null;
   source: 'derived' | 'manual' | 'both';
@@ -121,7 +125,9 @@ export async function listPhlebos(
       )
       SELECT
         p.phone, p.name, p.city, p.state, p.pincode,
-        p.orders_served, p.labs, p.first_order_at, p.last_order_at,
+        p.orders_served, p.active_days, p.avg_orders_per_day::float8 AS avg_orders_per_day,
+        p.labs, p.first_order_at, p.last_order_at,
+        p.is_shared_phone, p.variants_at_phone,
         p.email, p.notes, p.source,
         ROUND((6371 * acos(
           GREATEST(-1, LEAST(1,
@@ -157,7 +163,9 @@ export async function listPhlebos(
   return query<Phlebo>(`
     SELECT
       p.phone, p.name, p.city, p.state, p.pincode,
-      p.orders_served, p.labs, p.first_order_at, p.last_order_at,
+      p.orders_served, p.active_days, p.avg_orders_per_day::float8 AS avg_orders_per_day,
+      p.labs, p.first_order_at, p.last_order_at,
+      p.is_shared_phone, p.variants_at_phone,
       p.email, p.notes, p.source,
       NULL::float8 AS distance_km
     FROM atlas.phlebos_all p

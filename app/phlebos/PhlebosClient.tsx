@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState, useTransition } from 'react';
-import { Phone, MapPin, Search, X, Sparkles, Database, Users } from 'lucide-react';
+import { Phone, MapPin, Search, X, Sparkles, Database, Users, Building2 } from 'lucide-react';
 
 type Phlebo = {
   phone: string;
@@ -10,9 +10,13 @@ type Phlebo = {
   state: string | null;
   pincode: string | null;
   orders_served: number;
+  active_days: number | null;
+  avg_orders_per_day: number | null;
   labs: string[] | null;
   first_order_at: string | null;
   last_order_at: string | null;
+  is_shared_phone: boolean;
+  variants_at_phone: number;
   email: string | null;
   notes: string | null;
   source: 'derived' | 'manual' | 'both';
@@ -252,7 +256,17 @@ function PhleboRow({ p }: { p: Phlebo }) {
   return (
     <tr className="border-b border-ink-100 hover:bg-slate-50/50 transition">
       <td className="px-4 py-3">
-        <div className="font-semibold text-ink-900 text-[13px]">{p.name || '—'}</div>
+        <div className="font-semibold text-ink-900 text-[13px] flex items-center gap-1.5">
+          {p.name || '—'}
+          {p.is_shared_phone && (
+            <span
+              title={`Phone shared by ${p.variants_at_phone} phlebos — likely a dispatch/API integration number`}
+              className="inline-flex items-center gap-1 px-1.5 py-px rounded text-[9px] font-semibold bg-violet-50 text-violet-700 border border-violet-100"
+            >
+              <Building2 className="w-2.5 h-2.5" /> Shared phone · {p.variants_at_phone}
+            </span>
+          )}
+        </div>
         {p.email && <div className="text-[11px] text-ink-500 mt-0.5">{p.email}</div>}
       </td>
       <td className="px-4 py-3">
@@ -278,7 +292,14 @@ function PhleboRow({ p }: { p: Phlebo }) {
         </a>
       </td>
       <td className="px-4 py-3 text-right tabular-nums">
-        <span className="text-[13px] font-semibold text-ink-900">{p.orders_served.toLocaleString('en-IN')}</span>
+        <div className="text-[13px] font-semibold text-ink-900">
+          {p.orders_served.toLocaleString('en-IN')}
+        </div>
+        {p.active_days != null && p.avg_orders_per_day != null && (
+          <div className="text-[10px] text-ink-500 mt-0.5">
+            {p.active_days} days · {p.avg_orders_per_day.toFixed(1)}/day
+          </div>
+        )}
       </td>
       <td className="px-4 py-3">
         {p.labs && p.labs.length > 0 ? (
