@@ -229,6 +229,9 @@ REFRESH MATERIALIZED VIEW analytics.mv_chain_summary;
 -- Center-visit per-lab distance detail. Stays last — only used by the public
 -- /network page for "X.Y km" labels on neighbour-pincode cards.
 REFRESH MATERIALIZED VIEW analytics.mv_pincode_cv_reach;
+-- Phlebo repository: derived from src_local."Order" so must refresh AFTER
+-- the snapshot is loaded (Phase 2). Merged view atlas.phlebos_all reads this.
+REFRESH MATERIALIZED VIEW analytics.mv_phlebos_derived;
 SQL
 
 MV_COUNT=$($PG -t -A -c "SELECT COUNT(*) FROM pg_matviews WHERE schemaname='analytics';")

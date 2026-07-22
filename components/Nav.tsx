@@ -13,6 +13,7 @@ import {
   Scale,
   Building2,
   Briefcase,
+  Users,
   type LucideIcon,
 } from 'lucide-react';
 
@@ -33,6 +34,7 @@ const navLinks: NavItem[] = [
   { href: '/pincodes', label: 'Pincodes', icon: MapPin, alsoActiveOn: ['/pincode'] },
   { href: '/heatmap', label: 'Heatmap', icon: Map },
   { href: '/directory', label: 'Directory', icon: BookOpenText, alsoActiveOn: ['/chain'] },
+  { href: '/phlebos', label: 'Phlebos', icon: Users },
   { href: '/quality', label: 'Quality', icon: Activity },
 ];
 

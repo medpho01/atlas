@@ -34,7 +34,8 @@ for f in \
   $SQL_DIR/customer_views.sql     \
   $SQL_DIR/demand_views.sql       \
   $SQL_DIR/quality_v2.sql         \
-  $SQL_DIR/cv_reach.sql           ; do
+  $SQL_DIR/cv_reach.sql           \
+  $SQL_DIR/phlebos_derived.sql    ; do
   # Order note: geo_inferred.sql must run BEFORE coverage_views.sql, because
   # mv_pincode_coverage now includes RADIUS rows that haversine-join against
   # mv_pincode_geo. cv_reach.sql stays after coverage_views.sql since it
