@@ -91,7 +91,11 @@ export function PhlebosClient({
   const isPincodeValid = /^\d{6}$/.test(filters.pincode);
 
   return (
-    <div className="rounded-2xl border border-ink-200 bg-white overflow-hidden">
+    <div>
+      {/* Sticky filter card — stays reachable while scrolling the table.
+          top-14 = the app's h-14 sticky header. Sticky can't live inside the
+          results card because that card is overflow-hidden. */}
+      <div className="sticky top-14 z-30 rounded-2xl border border-ink-200 bg-white shadow-sm mb-3 overflow-hidden">
       {/* Filter bar */}
       <div className="p-4 border-b border-ink-200 space-y-3">
         <div className="grid grid-cols-1 md:grid-cols-4 gap-2">
@@ -195,8 +199,8 @@ export function PhlebosClient({
         </div>
       </div>
 
-      {/* Result count */}
-      <div className="px-4 py-2 flex items-center gap-2 bg-slate-50 border-b border-ink-200 text-xs text-ink-600">
+      {/* Result count — bottom strip of the sticky card */}
+      <div className="px-4 py-2 flex items-center gap-2 bg-slate-50 text-xs text-ink-600">
         <span>{pending ? 'Searching…' : `${total.toLocaleString('en-IN')} phlebos`}</span>
         {filters.nearby && isPincodeValid && (
           <span className="text-brand-700 font-medium">
@@ -204,7 +208,10 @@ export function PhlebosClient({
           </span>
         )}
       </div>
+      </div>
 
+      {/* Results card */}
+      <div className="rounded-2xl border border-ink-200 bg-white overflow-hidden">
       {/* Error */}
       {error && (
         <div className="px-4 py-3 bg-red-50 border-b border-red-200 text-sm text-red-700">
@@ -248,6 +255,7 @@ export function PhlebosClient({
           Showing top 200. Refine filters to see specific phlebos.
         </div>
       )}
+      </div>
     </div>
   );
 }

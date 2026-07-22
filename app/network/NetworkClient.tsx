@@ -63,37 +63,40 @@ export function NetworkClient({ points }: { points: NetworkPoint[] }) {
 
   return (
     <div>
-      {/* Search bar — prominent but not overpowering. Centered above the map. */}
-      <div className="max-w-2xl mx-auto mb-6">
-        <form
-          onSubmit={(e) => { e.preventDefault(); lookup(pinInput); }}
-          className="flex items-stretch gap-2"
-        >
-          <div className="relative flex-1">
-            <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-            <input
-              value={pinInput}
-              onChange={(e) => setPinInput(e.target.value.replace(/\D/g, '').slice(0, 6))}
-              placeholder="Check coverage by pincode (e.g. 560102)"
-              inputMode="numeric"
-              pattern="[0-9]{6}"
-              className="w-full h-12 pl-10 pr-3 rounded-lg border border-slate-300 bg-white text-base text-slate-900 placeholder:text-slate-400
-                         focus:outline-none focus:ring-2 focus:ring-emerald-200 focus:border-emerald-500 transition"
-            />
-          </div>
-          <button
-            type="submit"
-            disabled={pending}
-            className="h-12 px-5 bg-slate-900 hover:bg-slate-800 disabled:opacity-60 text-white rounded-lg font-semibold transition shadow-sm"
+      {/* Sticky strip: search + mode pills stay reachable while the user pans
+          the map or scrolls the result list. top-16 = the h-16 page header. */}
+      <div className="sticky top-16 z-30 bg-white/95 backdrop-blur-sm -mx-6 px-6 pt-2 pb-1 mb-4 border-b border-slate-100">
+        <div className="max-w-2xl mx-auto mb-3">
+          <form
+            onSubmit={(e) => { e.preventDefault(); lookup(pinInput); }}
+            className="flex items-stretch gap-2"
           >
-            {pending ? 'Looking up…' : 'Check coverage'}
-          </button>
-        </form>
-        {error && <p className="text-center text-sm text-rose-600 mt-2">{error}</p>}
-      </div>
+            <div className="relative flex-1">
+              <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+              <input
+                value={pinInput}
+                onChange={(e) => setPinInput(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                placeholder="Check coverage by pincode (e.g. 560102)"
+                inputMode="numeric"
+                pattern="[0-9]{6}"
+                className="w-full h-12 pl-10 pr-3 rounded-lg border border-slate-300 bg-white text-base text-slate-900 placeholder:text-slate-400
+                           focus:outline-none focus:ring-2 focus:ring-emerald-200 focus:border-emerald-500 transition"
+              />
+            </div>
+            <button
+              type="submit"
+              disabled={pending}
+              className="h-12 px-5 bg-slate-900 hover:bg-slate-800 disabled:opacity-60 text-white rounded-lg font-semibold transition shadow-sm"
+            >
+              {pending ? 'Looking up…' : 'Check coverage'}
+            </button>
+          </form>
+          {error && <p className="text-center text-sm text-rose-600 mt-2">{error}</p>}
+        </div>
 
-      {/* Controls above the map */}
-      <NetworkMapControls mode={mode} onChange={setMode} />
+        {/* Controls above the map */}
+        <NetworkMapControls mode={mode} onChange={setMode} />
+      </div>
 
       {/* Result either splits with the map (desktop) or stacks below (mobile) */}
       {result ? (

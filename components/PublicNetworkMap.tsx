@@ -96,9 +96,17 @@ export function PublicNetworkMap({
         {visible.map((p) => {
           const isFocus = focusPincode?.pincode === p.pincode;
           const hasBoth = p.cv > 0 && p.hs > 0;
-          const baseColor = hasBoth ? COLOR.both : p.cv > 0 ? COLOR.cvOnly : COLOR.hsOnly;
+          // In a single-service mode, colour every matching dot in that mode's
+          // colour. Without this, ~95% of pincodes have both services and stay
+          // green in every mode — switching modes looks like it does nothing.
+          const baseColor =
+            mode === 'cv' ? COLOR.cvOnly :
+            mode === 'hs' ? COLOR.hsOnly :
+            hasBoth ? COLOR.both : p.cv > 0 ? COLOR.cvOnly : COLOR.hsOnly;
           const color = isFocus ? COLOR.focus : baseColor;
-          const baseR = Math.max(3, Math.min(10, 3 + Math.log2(Math.max(1, p.cv + p.hs))));
+          // Size by the count relevant to the selected mode.
+          const magnitude = mode === 'cv' ? p.cv : mode === 'hs' ? p.hs : p.cv + p.hs;
+          const baseR = Math.max(3, Math.min(10, 3 + Math.log2(Math.max(1, magnitude))));
           const r = isFocus ? 14 : baseR;
           return (
             <CircleMarker
@@ -160,9 +168,16 @@ export function NetworkMapControls({
         <PillButton active={mode === 'hs'}   onClick={() => onChange('hs')}>Home sample</PillButton>
       </div>
       <div className="flex items-center gap-4 text-[12px] text-slate-600">
-        <LegendDot color={COLOR.both}   label="Both services" />
-        <LegendDot color={COLOR.cvOnly} label="Center visit only" />
-        <LegendDot color={COLOR.hsOnly} label="Home sample only" />
+        {/* Legend follows the selected mode — single-mode views use one colour */}
+        {mode === 'both' && (
+          <>
+            <LegendDot color={COLOR.both}   label="Both services" />
+            <LegendDot color={COLOR.cvOnly} label="Center visit only" />
+            <LegendDot color={COLOR.hsOnly} label="Home sample only" />
+          </>
+        )}
+        {mode === 'cv' && <LegendDot color={COLOR.cvOnly} label="Pincodes with center visit — dot size = number of centres" />}
+        {mode === 'hs' && <LegendDot color={COLOR.hsOnly} label="Pincodes with home sample — dot size = number of labs" />}
       </div>
     </div>
   );
