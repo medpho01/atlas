@@ -256,16 +256,8 @@ function PhleboRow({ p }: { p: Phlebo }) {
   return (
     <tr className="border-b border-ink-100 hover:bg-slate-50/50 transition">
       <td className="px-4 py-3">
-        <div className="font-semibold text-ink-900 text-[13px] flex items-center gap-1.5">
+        <div className="font-semibold text-ink-900 text-[13px]">
           {p.name || '—'}
-          {p.is_shared_phone && (
-            <span
-              title={`Phone shared by ${p.variants_at_phone} phlebos — likely a dispatch/API integration number`}
-              className="inline-flex items-center gap-1 px-1.5 py-px rounded text-[9px] font-semibold bg-violet-50 text-violet-700 border border-violet-100"
-            >
-              <Building2 className="w-2.5 h-2.5" /> Shared phone · {p.variants_at_phone}
-            </span>
-          )}
         </div>
         {p.email && <div className="text-[11px] text-ink-500 mt-0.5">{p.email}</div>}
       </td>
@@ -283,13 +275,31 @@ function PhleboRow({ p }: { p: Phlebo }) {
         </div>
       </td>
       <td className="px-4 py-3">
-        <a
-          href={`tel:${p.phone}`}
-          className="inline-flex items-center gap-1 text-[13px] text-brand-700 hover:text-brand-900 hover:underline tabular-nums font-medium"
-        >
-          <Phone className="w-3.5 h-3.5" />
-          {formatPhone(p.phone)}
-        </a>
+        {p.is_shared_phone ? (
+          <div>
+            <div className="inline-flex items-center gap-1 text-[13px] text-ink-500 tabular-nums font-medium">
+              <Building2 className="w-3.5 h-3.5" />
+              <span>{formatPhone(p.phone)}</span>
+            </div>
+            <div
+              className="text-[10px] text-violet-700 font-semibold mt-0.5 flex items-center gap-1"
+              title={`This phone is shared across ${p.variants_at_phone} phlebos${p.labs && p.labs.length ? ` at ${p.labs[0]}` : ''}. It's the lab's central dispatch/API line, not this phlebo's direct number.`}
+            >
+              Central lab number
+              {p.labs && p.labs.length > 0 && (
+                <span className="text-violet-500 font-medium normal-case">· {p.labs[0]}{p.labs.length > 1 ? ` +${p.labs.length - 1}` : ''}</span>
+              )}
+            </div>
+          </div>
+        ) : (
+          <a
+            href={`tel:${p.phone}`}
+            className="inline-flex items-center gap-1 text-[13px] text-brand-700 hover:text-brand-900 hover:underline tabular-nums font-medium"
+          >
+            <Phone className="w-3.5 h-3.5" />
+            {formatPhone(p.phone)}
+          </a>
+        )}
       </td>
       <td className="px-4 py-3 text-right tabular-nums">
         <div className="text-[13px] font-semibold text-ink-900">
