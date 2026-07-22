@@ -38,11 +38,36 @@ export type PhleboFilters = {
   pincode?: string;               // exact pincode (6 digits)
   city?: string;
   state?: string;
+  lab?: string;                   // exact lab name — matches phlebos whose labs[] contains it
   source?: 'derived' | 'manual' | 'both' | 'all';
   nearby?: boolean;               // if true + pincode set, radius search
   radiusKm?: number;
   minOrders?: number;
+  sortBy?: SortKey;
+  sortDir?: 'asc' | 'desc';
 };
+
+export type SortKey = 'name' | 'city' | 'phone' | 'orders' | 'labs' | 'source' | 'distance';
+
+// Whitelisted ORDER BY expressions — sort keys come from the query string, so
+// they must never be interpolated raw. Distance only applies to nearby mode.
+const SORT_EXPRS: Record<SortKey, string> = {
+  name:     'lower(p.name)',
+  city:     'lower(p.city)',
+  phone:    'p.phone',
+  orders:   'p.orders_served',
+  labs:     'COALESCE(array_length(p.labs, 1), 0)',
+  source:   'p.source',
+  distance: 'distance_km',
+};
+
+function orderClause(filters: PhleboFilters, isNearby: boolean): string {
+  const key: SortKey = filters.sortBy && SORT_EXPRS[filters.sortBy] ? filters.sortBy : (isNearby ? 'distance' : 'orders');
+  const dir = filters.sortDir === 'asc' ? 'ASC' : 'DESC';
+  const expr = key === 'distance' && !isNearby ? SORT_EXPRS.orders : SORT_EXPRS[key];
+  // Stable tiebreakers keep pagination deterministic.
+  return `ORDER BY ${expr} ${dir} NULLS LAST, p.orders_served DESC NULLS LAST, p.phone ASC`;
+}
 
 export type PhleboRepoStats = {
   total: number;
@@ -106,6 +131,9 @@ export async function listPhlebos(
   if (filters.source && filters.source !== 'all') {
     conds.push(`p.source = ${push(filters.source)}`);
   }
+  if (filters.lab && filters.lab.trim()) {
+    conds.push(`${push(filters.lab.trim())} = ANY(p.labs)`);
+  }
   if (filters.minOrders && filters.minOrders > 0) {
     conds.push(`p.orders_served >= ${push(filters.minOrders)}`);
   }
@@ -149,7 +177,7 @@ export async function listPhlebos(
           ))
         ) <= ${radius}
         ${whereClause}
-      ORDER BY distance_km ASC, p.orders_served DESC NULLS LAST
+      ${orderClause(filters, true)}
       LIMIT ${push(limit)} OFFSET ${push(offset)}
     `, params);
   }
@@ -170,7 +198,7 @@ export async function listPhlebos(
       NULL::float8 AS distance_km
     FROM atlas.phlebos_all p
     ${whereClause}
-    ORDER BY p.orders_served DESC NULLS LAST, p.name ASC
+    ${orderClause(filters, false)}
     LIMIT ${push(limit)} OFFSET ${push(offset)}
   `, params);
 }
@@ -193,6 +221,7 @@ export async function countPhlebos(filters: PhleboFilters): Promise<number> {
   if (filters.city && filters.city.trim()) conds.push(`lower(p.city) = ${push(filters.city.trim().toLowerCase())}`);
   if (filters.state && filters.state.trim()) conds.push(`lower(p.state) = ${push(filters.state.trim().toLowerCase())}`);
   if (filters.source && filters.source !== 'all') conds.push(`p.source = ${push(filters.source)}`);
+  if (filters.lab && filters.lab.trim()) conds.push(`${push(filters.lab.trim())} = ANY(p.labs)`);
   if (filters.minOrders && filters.minOrders > 0) conds.push(`p.orders_served >= ${push(filters.minOrders)}`);
 
   if (isNearby) {
@@ -228,6 +257,24 @@ export async function countPhlebos(filters: PhleboFilters): Promise<number> {
     params,
   );
   return row?.n ?? 0;
+}
+
+/**
+ * Distinct lab names across all phlebos — powers the Labs filter dropdown.
+ */
+export async function listPhleboLabs(): Promise<{ lab: string; n: number }[]> {
+  return query<{ lab: string; n: number }>(`
+    SELECT lab, COUNT(*)::int AS n
+    FROM (
+      SELECT unnest(labs) AS lab
+      FROM atlas.phlebos_all
+      WHERE labs IS NOT NULL
+    ) x
+    WHERE lab IS NOT NULL AND TRIM(lab) <> ''
+    GROUP BY lab
+    ORDER BY n DESC, lab ASC
+    LIMIT 200
+  `);
 }
 
 /**

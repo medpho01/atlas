@@ -1,4 +1,4 @@
-import { getPhleboRepoStats, listPhlebos, countPhlebos, PHLEBO_REACH_RADIUS_KM } from '@/lib/phlebosQueries';
+import { getPhleboRepoStats, listPhlebos, countPhlebos, listPhleboLabs, PHLEBO_REACH_RADIUS_KM } from '@/lib/phlebosQueries';
 import { getSessionUser } from '@/lib/auth';
 import { PhlebosClient } from './PhlebosClient';
 import Link from 'next/link';
@@ -18,16 +18,18 @@ export default async function PhlebosPage({ searchParams }: { searchParams: Prom
     pincode:   s(sp.pincode),
     city:      s(sp.city),
     state:     s(sp.state),
+    lab:       s(sp.lab),
     source:    (s(sp.source) || 'all') as 'derived' | 'manual' | 'both' | 'all',
     nearby:    s(sp.nearby) === '1',
     radiusKm:  Number(s(sp.radius)) || PHLEBO_REACH_RADIUS_KM,
     minOrders: Number(s(sp.min)) || 0,
   };
 
-  const [stats, phlebos, totalCount] = await Promise.all([
+  const [stats, phlebos, totalCount, labs] = await Promise.all([
     getPhleboRepoStats(),
     listPhlebos(filters, 200, 0),
     countPhlebos(filters),
+    listPhleboLabs(),
   ]);
 
   const isAdmin = user?.role === 'admin';
@@ -89,11 +91,15 @@ export default async function PhlebosPage({ searchParams }: { searchParams: Prom
           q: filters.q,
           pincode: filters.pincode,
           city: filters.city,
+          lab: filters.lab,
           source: filters.source,
           nearby: filters.nearby,
           radiusKm: filters.radiusKm,
           minOrders: filters.minOrders,
+          sortBy: 'orders',
+          sortDir: 'desc',
         }}
+        labOptions={labs}
         defaultRadius={PHLEBO_REACH_RADIUS_KM}
         isAdmin={isAdmin}
       />

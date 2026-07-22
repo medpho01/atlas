@@ -23,26 +23,33 @@ type Phlebo = {
   distance_km?: number | null;
 };
 
+type SortKey = 'name' | 'city' | 'phone' | 'orders' | 'labs' | 'source' | 'distance';
+
 type Filters = {
   q: string;
   pincode: string;
   city: string;
+  lab: string;
   source: 'derived' | 'manual' | 'both' | 'all';
   nearby: boolean;
   radiusKm: number;
   minOrders: number;
+  sortBy: SortKey;
+  sortDir: 'asc' | 'desc';
 };
 
 export function PhlebosClient({
   initialPhlebos,
   initialTotal,
   initialFilters,
+  labOptions,
   defaultRadius,
   isAdmin,
 }: {
   initialPhlebos: Phlebo[];
   initialTotal: number;
   initialFilters: Filters;
+  labOptions: { lab: string; n: number }[];
   defaultRadius: number;
   isAdmin: boolean;
 }) {
@@ -57,17 +64,20 @@ export function PhlebosClient({
     const t = setTimeout(() => runSearch(filters), 250);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filters.q, filters.pincode, filters.city, filters.source, filters.nearby, filters.radiusKm, filters.minOrders]);
+  }, [filters.q, filters.pincode, filters.city, filters.lab, filters.source, filters.nearby, filters.radiusKm, filters.minOrders, filters.sortBy, filters.sortDir]);
 
   const runSearch = (f: Filters) => {
     const params = new URLSearchParams();
     if (f.q) params.set('q', f.q);
     if (f.pincode) params.set('pincode', f.pincode);
     if (f.city) params.set('city', f.city);
+    if (f.lab) params.set('lab', f.lab);
     if (f.source !== 'all') params.set('source', f.source);
     if (f.nearby) params.set('nearby', '1');
     if (f.radiusKm !== defaultRadius) params.set('radius', String(f.radiusKm));
     if (f.minOrders > 0) params.set('min', String(f.minOrders));
+    params.set('sort', f.sortBy);
+    params.set('dir', f.sortDir);
 
     startTransition(async () => {
       try {
@@ -84,10 +94,20 @@ export function PhlebosClient({
   };
 
   const clearAll = () => {
-    setFilters({ q: '', pincode: '', city: '', source: 'all', nearby: false, radiusKm: defaultRadius, minOrders: 0 });
+    setFilters({ q: '', pincode: '', city: '', lab: '', source: 'all', nearby: false, radiusKm: defaultRadius, minOrders: 0, sortBy: 'orders', sortDir: 'desc' });
   };
 
-  const hasFilters = filters.q || filters.pincode || filters.city || filters.source !== 'all' || filters.minOrders > 0;
+  const toggleSort = (key: SortKey) => {
+    setFilters((f) => ({
+      ...f,
+      sortBy: key,
+      // Same column → flip direction; new column → sensible default per type
+      sortDir: f.sortBy === key ? (f.sortDir === 'desc' ? 'asc' : 'desc')
+             : (key === 'name' || key === 'city' || key === 'source' ? 'asc' : 'desc'),
+    }));
+  };
+
+  const hasFilters = filters.q || filters.pincode || filters.city || filters.lab || filters.source !== 'all' || filters.minOrders > 0;
   const isPincodeValid = /^\d{6}$/.test(filters.pincode);
 
   return (
@@ -163,6 +183,22 @@ export function PhlebosClient({
           )}
 
           <label className="inline-flex items-center gap-1.5 text-xs text-ink-600">
+            <span>Lab:</span>
+            <select
+              value={filters.lab}
+              onChange={(e) => setFilters({ ...filters, lab: e.target.value })}
+              className="text-xs px-2 py-1 rounded-md border border-ink-200 bg-white font-medium max-w-[220px]"
+            >
+              <option value="">All labs</option>
+              {labOptions.map((l) => (
+                <option key={l.lab} value={l.lab}>
+                  {l.lab} ({l.n})
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="inline-flex items-center gap-1.5 text-xs text-ink-600">
             <span>Source:</span>
             <select
               value={filters.source}
@@ -224,12 +260,12 @@ export function PhlebosClient({
         <table className="w-full text-sm">
           <thead className="bg-white sticky top-0">
             <tr className="text-left text-[11px] uppercase tracking-wider text-ink-500 border-b border-ink-200">
-              <th className="px-4 py-2 font-semibold">Phlebo</th>
-              <th className="px-4 py-2 font-semibold">Location</th>
-              <th className="px-4 py-2 font-semibold">Contact</th>
-              <th className="px-4 py-2 font-semibold text-right">Orders</th>
-              <th className="px-4 py-2 font-semibold">Labs</th>
-              <th className="px-4 py-2 font-semibold">Source</th>
+              <SortableTh label="Phlebo"   sortKey="name"   filters={filters} onSort={toggleSort} />
+              <SortableTh label="Location" sortKey="city"   filters={filters} onSort={toggleSort} />
+              <SortableTh label="Contact"  sortKey="phone"  filters={filters} onSort={toggleSort} />
+              <SortableTh label="Orders"   sortKey="orders" filters={filters} onSort={toggleSort} align="right" />
+              <SortableTh label="Labs"     sortKey="labs"   filters={filters} onSort={toggleSort} />
+              <SortableTh label="Source"   sortKey="source" filters={filters} onSort={toggleSort} />
             </tr>
           </thead>
           <tbody>
@@ -257,6 +293,37 @@ export function PhlebosClient({
       )}
       </div>
     </div>
+  );
+}
+
+function SortableTh({
+  label,
+  sortKey,
+  filters,
+  onSort,
+  align = 'left',
+}: {
+  label: string;
+  sortKey: SortKey;
+  filters: Filters;
+  onSort: (k: SortKey) => void;
+  align?: 'left' | 'right';
+}) {
+  const active = filters.sortBy === sortKey;
+  const arrow = !active ? '↕' : filters.sortDir === 'asc' ? '↑' : '↓';
+  return (
+    <th className={`px-4 py-2 font-semibold ${align === 'right' ? 'text-right' : ''}`}>
+      <button
+        onClick={() => onSort(sortKey)}
+        className={`inline-flex items-center gap-1 uppercase tracking-wider transition select-none ${
+          active ? 'text-brand-700' : 'text-ink-500 hover:text-ink-800'
+        }`}
+        title={`Sort by ${label.toLowerCase()}`}
+      >
+        {label}
+        <span className={`text-[10px] ${active ? 'opacity-100' : 'opacity-40'}`}>{arrow}</span>
+      </button>
+    </th>
   );
 }
 
