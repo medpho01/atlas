@@ -54,6 +54,7 @@ export async function searchTests(q: string, limit = 12): Promise<TestHit[]> {
 export type TestRate = {
   master_id: number;
   test_name: string;
+  ls_id: string;
   lab_id: number;
   lab_name: string;
   lab_city: string | null;
@@ -117,7 +118,7 @@ export async function getRatesForTests(masterIds: number[]): Promise<TestRate[]>
   const ids = masterIds.filter((n) => Number.isInteger(n)).slice(0, 100);
   return query<TestRate>(
     `
-    SELECT master_id, test_name, lab_id, lab_name, lab_city, lab_state,
+    SELECT master_id, test_name, ls_id, lab_id, lab_name, lab_city, lab_state,
            lab_code, mrp, b2b, tat_hours, nabl, in_house
     FROM analytics.mv_test_rates
     WHERE master_id = ANY($1::int[])
