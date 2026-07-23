@@ -74,7 +74,11 @@ export function PricingClient() {
   const [labDiscounts, setLabDiscounts] = useState<Record<number, Discounts>>({});
   const [packages, setPackages] = useState<LabPackage[]>([]);
   const [loadingPackages, setLoadingPackages] = useState(false);
+  const [labQuery, setLabQuery] = useState('');
+  const [labOpen, setLabOpen] = useState(false);
+  const [railFilter, setRailFilter] = useState('');
   const searchRef = useRef<HTMLDivElement>(null);
+  const labBoxRef = useRef<HTMLDivElement>(null);
 
   // ---- search typeahead ----
   useEffect(() => {
@@ -95,6 +99,7 @@ export function PricingClient() {
   useEffect(() => {
     const h = (e: MouseEvent) => {
       if (searchRef.current && !searchRef.current.contains(e.target as Node)) setHits([]);
+      if (labBoxRef.current && !labBoxRef.current.contains(e.target as Node)) setLabOpen(false);
     };
     document.addEventListener('mousedown', h);
     return () => document.removeEventListener('mousedown', h);
@@ -170,6 +175,22 @@ export function PricingClient() {
     })();
     return () => { cancelled = true; };
   }, [selectedLabId, basket]);
+
+  const labMatches = useMemo(() => {
+    const needle = labQuery.trim().toLowerCase();
+    if (!needle) return eligible;
+    return eligible.filter(
+      (l) => l.lab_name.toLowerCase().includes(needle) || (l.lab_city ?? '').toLowerCase().includes(needle),
+    );
+  }, [eligible, labQuery]);
+
+  const railLabs = useMemo(() => {
+    const needle = railFilter.trim().toLowerCase();
+    if (!needle) return eligible;
+    return eligible.filter(
+      (l) => l.lab_name.toLowerCase().includes(needle) || (l.lab_city ?? '').toLowerCase().includes(needle),
+    );
+  }, [eligible, railFilter]);
 
   const discountsFor = (labId: number): Discounts => labDiscounts[labId] ?? DEFAULT_DISCOUNTS;
   const setDiscount = (labId: number, key: keyof Discounts, value: number) =>
@@ -252,20 +273,56 @@ export function PricingClient() {
       {/* Sticky action bar */}
       <div className="sticky top-14 z-30 rounded-2xl border border-ink-200 bg-surface shadow-sm p-3 mb-4">
         <div className="flex flex-wrap items-center gap-3">
-          <div className="flex items-center gap-2 flex-1 min-w-[240px]">
+          <div ref={labBoxRef} className="relative flex items-center gap-2 flex-1 min-w-[240px]">
             <Building2 className="w-4 h-4 text-ink-400 shrink-0" />
-            <select
-              value={selectedLabId ?? ''}
-              onChange={(e) => setSelectedLabId(Number(e.target.value) || null)}
-              className="flex-1 h-9 text-sm rounded-md border border-ink-200 bg-surface px-2 font-medium text-ink-900"
-            >
-              {eligible.length === 0 && <option value="">Add tests to see eligible labs</option>}
-              {eligible.map((l) => (
-                <option key={l.lab_id} value={l.lab_id}>
-                  {l.lab_name}{l.lab_city ? ` — ${l.lab_city}` : ''} · {l.covered}/{basket.length} tests · B2B {inr(l.sumB2b)}
-                </option>
-              ))}
-            </select>
+            <input
+              type="text"
+              value={labOpen ? labQuery : selectedLab ? `${selectedLab.lab_name}${selectedLab.lab_city ? ` — ${selectedLab.lab_city}` : ''}` : ''}
+              placeholder={eligible.length ? 'Search labs by name or city' : 'Add tests to see eligible labs'}
+              disabled={!eligible.length}
+              onFocus={() => { setLabOpen(true); setLabQuery(''); }}
+              onChange={(e) => { setLabQuery(e.target.value); setLabOpen(true); }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && labMatches.length) {
+                  setSelectedLabId(labMatches[0].lab_id);
+                  setLabOpen(false);
+                  (e.target as HTMLInputElement).blur();
+                }
+                if (e.key === 'Escape') setLabOpen(false);
+              }}
+              className="flex-1 h-9 text-sm rounded-md border border-ink-200 bg-surface px-2 font-medium text-ink-900 focus:outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500 disabled:opacity-50"
+            />
+            {labOpen && eligible.length > 0 && (
+              <div className="absolute left-6 right-0 top-10 z-40 rounded-lg border border-ink-200 bg-surface shadow-pop overflow-hidden max-h-[320px] overflow-y-auto">
+                {labMatches.length === 0 && (
+                  <div className="px-3 py-2.5 text-sm text-ink-500">No lab matches “{labQuery}”.</div>
+                )}
+                {labMatches.slice(0, 40).map((l) => {
+                  const full = l.covered === basket.length;
+                  return (
+                    <button
+                      key={l.lab_id}
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={() => { setSelectedLabId(l.lab_id); setLabOpen(false); }}
+                      className={`w-full text-left px-3 py-2 flex items-center gap-2 border-b border-ink-100 last:border-0 hover:bg-ink-50 transition ${
+                        l.lab_id === selectedLabId ? 'bg-brand-50' : ''
+                      }`}
+                    >
+                      <div className="min-w-0 flex-1">
+                        <div className="text-[13px] font-medium text-ink-900 truncate">{l.lab_name}</div>
+                        <div className="text-[10px] text-ink-500">{l.lab_city ?? '—'}</div>
+                      </div>
+                      <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full border shrink-0 ${
+                        full ? 'bg-success-50 text-success-600 border-success-100' : 'bg-warn-50 text-warn-600 border-warn-100'
+                      }`}>
+                        {l.covered}/{basket.length}
+                      </span>
+                      <span className="text-[12px] font-semibold text-ink-900 tabular-nums shrink-0">{inr(l.sumB2b)}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
           </div>
           <div className="text-[11px] text-ink-500">
             {loadingRates ? 'Loading rates…' : `${eligible.length} labs with ≥80% match`}
@@ -354,11 +411,19 @@ export function PricingClient() {
           {/* Labs list (compact comparison) */}
           {eligible.length > 0 && (
             <div className="rounded-2xl border border-ink-200 bg-surface overflow-hidden">
-              <div className="px-4 py-2.5 border-b border-ink-200 text-[11px] uppercase tracking-wider text-ink-500 font-semibold">
-                Labs — sorted by coverage, then cheapest B2B
+              <div className="px-4 py-2.5 border-b border-ink-200 flex items-center gap-3">
+                <span className="text-[11px] uppercase tracking-wider text-ink-500 font-semibold shrink-0">Labs</span>
+                <input
+                  type="text"
+                  value={railFilter}
+                  onChange={(e) => setRailFilter(e.target.value)}
+                  placeholder="Filter by name or city"
+                  className="flex-1 h-7 text-[12px] rounded-md border border-ink-200 bg-surface px-2 focus:outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500"
+                />
+                <span className="text-[10px] text-ink-500 tabular-nums shrink-0">{railLabs.length}/{eligible.length}</span>
               </div>
               <div className="max-h-[480px] overflow-y-auto">
-                {eligible.map((l) => {
+                {railLabs.map((l) => {
                   const d = discountsFor(l.lab_id);
                   const isSel = l.lab_id === selectedLabId;
                   const full = l.covered === basket.length;
