@@ -35,6 +35,7 @@ SELECT DISTINCT ON (d.master_id, d.lab_id)
   l."labName"                   AS lab_name,
   l.city                        AS lab_city,
   l.state                       AS lab_state,
+  d."dosID"                     AS lab_code,
   d.price                       AS mrp,
   d."labCost"                   AS b2b,
   d."turnAroundTime"            AS tat_hours,

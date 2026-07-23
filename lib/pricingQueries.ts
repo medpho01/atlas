@@ -58,6 +58,7 @@ export type TestRate = {
   lab_name: string;
   lab_city: string | null;
   lab_state: string | null;
+  lab_code: string | null;
   mrp: number;
   b2b: number | null;
   tat_hours: number | null;
@@ -117,7 +118,7 @@ export async function getRatesForTests(masterIds: number[]): Promise<TestRate[]>
   return query<TestRate>(
     `
     SELECT master_id, test_name, lab_id, lab_name, lab_city, lab_state,
-           mrp, b2b, tat_hours, nabl, in_house
+           lab_code, mrp, b2b, tat_hours, nabl, in_house
     FROM analytics.mv_test_rates
     WHERE master_id = ANY($1::int[])
     ORDER BY lab_name, test_name

@@ -26,6 +26,7 @@ type TestRate = {
   lab_name: string;
   lab_city: string | null;
   lab_state: string | null;
+  lab_code: string | null;
   mrp: number;
   b2b: number | null;
   tat_hours: number | null;
@@ -199,6 +200,7 @@ export function PricingClient() {
         rateRows.push({
           Lab: l.lab_name,
           Test: t.test_name,
+          'Lab code': r?.lab_code ?? '',
           Available: r ? 'yes' : 'NO',
           MRP: r?.mrp ?? '',
           B2B: r?.b2b ?? '',
@@ -489,6 +491,7 @@ function LabAnalytics({
           <thead>
             <tr className="text-left text-[11px] uppercase tracking-wider text-ink-500 border-b border-ink-200">
               <th className="px-4 py-2 font-semibold">Test</th>
+              <th className="px-2 py-2 font-semibold">Lab code</th>
               <th className="px-2 py-2 font-semibold text-right">MRP</th>
               <th className="px-2 py-2 font-semibold text-right">B2B</th>
               <th className="px-4 py-2 font-semibold text-right">TAT</th>
@@ -503,6 +506,7 @@ function LabAnalytics({
                     <td className="px-4 py-2 text-warn-600 flex items-center gap-1.5">
                       <AlertTriangle className="w-3.5 h-3.5" /> {t.test_name} — not available at this lab
                     </td>
+                    <td className="px-2 py-2 text-warn-600">—</td>
                     <td className="px-2 py-2 text-right text-warn-600">—</td>
                     <td className="px-2 py-2 text-right text-warn-600">—</td>
                     <td className="px-4 py-2 text-right text-warn-600">—</td>
@@ -512,6 +516,7 @@ function LabAnalytics({
               return (
                 <tr key={t.master_id} className="border-b border-ink-100">
                   <td className="px-4 py-2 text-ink-800">{t.test_name}</td>
+                  <td className="px-2 py-2 text-[12px] font-mono text-ink-500">{r.lab_code ?? '—'}</td>
                   <td className="px-2 py-2 text-right tabular-nums text-ink-700">{inr(r.mrp)}</td>
                   <td className="px-2 py-2 text-right tabular-nums text-ink-700">{r.b2b != null ? inr(r.b2b) : '—'}</td>
                   <td className="px-4 py-2 text-right tabular-nums text-ink-500">{r.tat_hours != null ? `${r.tat_hours}h` : '—'}</td>
