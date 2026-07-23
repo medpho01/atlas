@@ -51,7 +51,7 @@ export default async function PhlebosPage({ searchParams }: { searchParams: Prom
         {isAdmin && (
           <Link
             href="/phlebos/upload"
-            className="inline-flex items-center gap-1.5 px-3 h-9 text-sm font-semibold rounded-md bg-ink-900 text-white hover:bg-ink-800 transition shrink-0"
+            className="inline-flex items-center gap-1.5 px-3 h-9 text-sm font-semibold rounded-md bg-ink-900 text-ink-50 hover:bg-ink-800 transition shrink-0"
           >
             <Upload className="w-4 h-4" /> Upload phlebos
           </Link>
@@ -66,17 +66,17 @@ export default async function PhlebosPage({ searchParams }: { searchParams: Prom
           value={stats.total.toLocaleString('en-IN')}
         />
         <StatTile
-          icon={<TrendingUp className="w-4 h-4 text-violet-600" />}
+          icon={<TrendingUp className="w-4 h-4 text-violet-600 dark:text-violet-400" />}
           label="Orders covered"
           value={stats.total_orders_covered.toLocaleString('en-IN')}
         />
         <StatTile
-          icon={<MapPin className="w-4 h-4 text-emerald-600" />}
+          icon={<MapPin className="w-4 h-4 text-success-600" />}
           label="Cities"
           value={stats.distinct_cities.toLocaleString('en-IN')}
         />
         <StatTile
-          icon={<Sparkles className="w-4 h-4 text-amber-600" />}
+          icon={<Sparkles className="w-4 h-4 text-warn-600" />}
           label="Uploaded (manual)"
           value={stats.manual.toLocaleString('en-IN')}
           sub={stats.overlap > 0 ? `${stats.overlap.toLocaleString('en-IN')} also in order data` : undefined}
@@ -109,7 +109,7 @@ export default async function PhlebosPage({ searchParams }: { searchParams: Prom
 
 function StatTile({ icon, label, value, sub }: { icon: React.ReactNode; label: string; value: string; sub?: string }) {
   return (
-    <div className="rounded-xl border border-ink-200 bg-white p-3.5">
+    <div className="rounded-xl border border-ink-200 bg-surface p-3.5">
       <div className="flex items-center gap-2 mb-1">
         {icon}
         <div className="text-[11px] uppercase tracking-wider text-ink-500 font-semibold">{label}</div>

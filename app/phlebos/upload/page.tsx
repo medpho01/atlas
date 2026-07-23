@@ -41,12 +41,12 @@ export default async function PhleboUploadPage() {
 
       <UploadClient uploadedBy={user.name || user.email} />
 
-      <div className="mt-8 p-4 rounded-xl border border-ink-200 bg-slate-50 text-sm text-ink-700">
+      <div className="mt-8 p-4 rounded-xl border border-ink-200 bg-ink-50 text-sm text-ink-700">
         <h3 className="font-semibold text-ink-900 mb-2">Expected columns</h3>
         <p className="text-xs text-ink-600 mb-3">
           The first row of your file should be a header. Column names are matched case-insensitively.
-          Only <code className="bg-white px-1 rounded border border-ink-200 text-[11px]">phone</code> and{' '}
-          <code className="bg-white px-1 rounded border border-ink-200 text-[11px]">name</code> are required.
+          Only <code className="bg-surface px-1 rounded border border-ink-200 text-[11px]">phone</code> and{' '}
+          <code className="bg-surface px-1 rounded border border-ink-200 text-[11px]">name</code> are required.
         </p>
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-xs">
           {[
@@ -58,9 +58,9 @@ export default async function PhleboUploadPage() {
             ['email', 'optional'],
             ['notes', 'optional'],
           ].map(([col, tag]) => (
-            <div key={col} className="flex items-center justify-between px-2 py-1 rounded bg-white border border-ink-200">
+            <div key={col} className="flex items-center justify-between px-2 py-1 rounded bg-surface border border-ink-200">
               <code className="text-[11px] font-semibold text-ink-900">{col}</code>
-              <span className={`text-[10px] font-medium ${tag === 'required' ? 'text-red-600' : 'text-ink-500'}`}>{tag}</span>
+              <span className={`text-[10px] font-medium ${tag === 'required' ? 'text-danger-500' : 'text-ink-500'}`}>{tag}</span>
             </div>
           ))}
         </div>

@@ -115,7 +115,7 @@ export function PhlebosClient({
       {/* Sticky filter card — stays reachable while scrolling the table.
           top-14 = the app's h-14 sticky header. Sticky can't live inside the
           results card because that card is overflow-hidden. */}
-      <div className="sticky top-14 z-30 rounded-2xl border border-ink-200 bg-white shadow-sm mb-3 overflow-hidden">
+      <div className="sticky top-14 z-30 rounded-2xl border border-ink-200 bg-surface shadow-sm mb-3 overflow-hidden">
       {/* Filter bar */}
       <div className="p-4 border-b border-ink-200 space-y-3">
         <div className="grid grid-cols-1 md:grid-cols-4 gap-2">
@@ -127,7 +127,7 @@ export function PhlebosClient({
               placeholder="Search by name, phone, or city"
               value={filters.q}
               onChange={(e) => setFilters({ ...filters, q: e.target.value })}
-              className="w-full pl-8 pr-3 h-9 text-sm rounded-md border border-ink-200 bg-white focus:outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500"
+              className="w-full pl-8 pr-3 h-9 text-sm rounded-md border border-ink-200 bg-surface focus:outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500"
             />
           </div>
 
@@ -140,7 +140,7 @@ export function PhlebosClient({
               value={filters.pincode}
               onChange={(e) => setFilters({ ...filters, pincode: e.target.value.replace(/\D/g, '').slice(0, 6) })}
               maxLength={6}
-              className="w-full pl-8 pr-3 h-9 text-sm tabular-nums rounded-md border border-ink-200 bg-white focus:outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500"
+              className="w-full pl-8 pr-3 h-9 text-sm tabular-nums rounded-md border border-ink-200 bg-surface focus:outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500"
             />
           </div>
 
@@ -150,14 +150,14 @@ export function PhlebosClient({
             placeholder="City"
             value={filters.city}
             onChange={(e) => setFilters({ ...filters, city: e.target.value })}
-            className="w-full px-3 h-9 text-sm rounded-md border border-ink-200 bg-white focus:outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500"
+            className="w-full px-3 h-9 text-sm rounded-md border border-ink-200 bg-surface focus:outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500"
           />
         </div>
 
         {/* Row 2 — nearby toggle + source + min orders + clear */}
         <div className="flex flex-wrap items-center gap-2.5 text-sm">
           {isPincodeValid && (
-            <label className="inline-flex items-center gap-1.5 px-2.5 h-8 rounded-md border border-ink-200 bg-white cursor-pointer hover:bg-ink-50 transition">
+            <label className="inline-flex items-center gap-1.5 px-2.5 h-8 rounded-md border border-ink-200 bg-surface cursor-pointer hover:bg-ink-50 transition">
               <input
                 type="checkbox"
                 checked={filters.nearby}
@@ -187,7 +187,7 @@ export function PhlebosClient({
             <select
               value={filters.lab}
               onChange={(e) => setFilters({ ...filters, lab: e.target.value })}
-              className="text-xs px-2 py-1 rounded-md border border-ink-200 bg-white font-medium max-w-[220px]"
+              className="text-xs px-2 py-1 rounded-md border border-ink-200 bg-surface font-medium max-w-[220px]"
             >
               <option value="">All labs</option>
               {labOptions.map((l) => (
@@ -203,7 +203,7 @@ export function PhlebosClient({
             <select
               value={filters.source}
               onChange={(e) => setFilters({ ...filters, source: e.target.value as Filters['source'] })}
-              className="text-xs px-2 py-1 rounded-md border border-ink-200 bg-white font-medium"
+              className="text-xs px-2 py-1 rounded-md border border-ink-200 bg-surface font-medium"
             >
               <option value="all">All</option>
               <option value="derived">From orders</option>
@@ -220,7 +220,7 @@ export function PhlebosClient({
               value={filters.minOrders || ''}
               onChange={(e) => setFilters({ ...filters, minOrders: Number(e.target.value) || 0 })}
               placeholder="0"
-              className="w-16 text-xs px-2 py-1 rounded-md border border-ink-200 bg-white tabular-nums"
+              className="w-16 text-xs px-2 py-1 rounded-md border border-ink-200 bg-surface tabular-nums"
             />
           </label>
 
@@ -236,10 +236,10 @@ export function PhlebosClient({
       </div>
 
       {/* Result count — bottom strip of the sticky card */}
-      <div className="px-4 py-2 flex items-center gap-2 bg-slate-50 text-xs text-ink-600">
+      <div className="px-4 py-2 flex items-center gap-2 bg-ink-50 text-xs text-ink-600">
         <span>{pending ? 'Searching…' : `${total.toLocaleString('en-IN')} phlebos`}</span>
         {filters.nearby && isPincodeValid && (
-          <span className="text-brand-700 font-medium">
+          <span className="text-brand-700 dark:text-brand-400 font-medium">
             · within {filters.radiusKm} km of {filters.pincode}
           </span>
         )}
@@ -247,10 +247,10 @@ export function PhlebosClient({
       </div>
 
       {/* Results card */}
-      <div className="rounded-2xl border border-ink-200 bg-white overflow-hidden">
+      <div className="rounded-2xl border border-ink-200 bg-surface overflow-hidden">
       {/* Error */}
       {error && (
-        <div className="px-4 py-3 bg-red-50 border-b border-red-200 text-sm text-red-700">
+        <div className="px-4 py-3 bg-danger-50 border-b border-danger-100 text-sm text-danger-500">
           {error}
         </div>
       )}
@@ -258,7 +258,7 @@ export function PhlebosClient({
       {/* Table */}
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
-          <thead className="bg-white sticky top-0">
+          <thead className="bg-surface sticky top-0">
             <tr className="text-left text-[11px] uppercase tracking-wider text-ink-500 border-b border-ink-200">
               <SortableTh label="Phlebo"   sortKey="name"   filters={filters} onSort={toggleSort} />
               <SortableTh label="Location" sortKey="city"   filters={filters} onSort={toggleSort} />
@@ -287,7 +287,7 @@ export function PhlebosClient({
       </div>
 
       {phlebos.length >= 200 && (
-        <div className="px-4 py-2 text-xs text-ink-500 bg-slate-50 border-t border-ink-200 text-center">
+        <div className="px-4 py-2 text-xs text-ink-500 bg-ink-50 border-t border-ink-200 text-center">
           Showing top 200. Refine filters to see specific phlebos.
         </div>
       )}
@@ -329,7 +329,7 @@ function SortableTh({
 
 function PhleboRow({ p }: { p: Phlebo }) {
   return (
-    <tr className="border-b border-ink-100 hover:bg-slate-50/50 transition">
+    <tr className="border-b border-ink-100 hover:bg-ink-100/40 transition">
       <td className="px-4 py-3">
         <div className="font-semibold text-ink-900 text-[13px]">
           {p.name || '—'}
@@ -343,7 +343,7 @@ function PhleboRow({ p }: { p: Phlebo }) {
         <div className="text-[11px] text-ink-500 tabular-nums mt-0.5 flex items-center gap-1.5">
           {p.pincode || '—'}
           {p.distance_km != null && (
-            <span className="inline-flex items-center px-1.5 py-px rounded text-[10px] font-semibold bg-brand-50 text-brand-700 border border-brand-100 tabular-nums">
+            <span className="inline-flex items-center px-1.5 py-px rounded text-[10px] font-semibold bg-brand-50 text-brand-700 dark:text-brand-400 border border-brand-100 tabular-nums">
               {p.distance_km < 1 ? '<1 km' : `${p.distance_km.toFixed(1)} km`}
             </span>
           )}
@@ -357,19 +357,19 @@ function PhleboRow({ p }: { p: Phlebo }) {
               <span>{formatPhone(p.phone)}</span>
             </div>
             <div
-              className="text-[10px] text-violet-700 font-semibold mt-0.5 flex items-center gap-1"
+              className="text-[10px] text-violet-700 dark:text-violet-400 font-semibold mt-0.5 flex items-center gap-1"
               title={`This phone is shared across ${p.variants_at_phone} phlebos${p.labs && p.labs.length ? ` at ${p.labs[0]}` : ''}. It's the lab's central dispatch/API line, not this phlebo's direct number.`}
             >
               Central lab number
               {p.labs && p.labs.length > 0 && (
-                <span className="text-violet-500 font-medium normal-case">· {p.labs[0]}{p.labs.length > 1 ? ` +${p.labs.length - 1}` : ''}</span>
+                <span className="text-violet-500 dark:text-violet-400/80 font-medium normal-case">· {p.labs[0]}{p.labs.length > 1 ? ` +${p.labs.length - 1}` : ''}</span>
               )}
             </div>
           </div>
         ) : (
           <a
             href={`tel:${p.phone}`}
-            className="inline-flex items-center gap-1 text-[13px] text-brand-700 hover:text-brand-900 hover:underline tabular-nums font-medium"
+            className="inline-flex items-center gap-1 text-[13px] text-brand-700 dark:text-brand-400 hover:text-brand-900 dark:hover:text-brand-200 hover:underline tabular-nums font-medium"
           >
             <Phone className="w-3.5 h-3.5" />
             {formatPhone(p.phone)}
@@ -398,17 +398,17 @@ function PhleboRow({ p }: { p: Phlebo }) {
       </td>
       <td className="px-4 py-3">
         {p.source === 'derived' && (
-          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-slate-100 text-slate-700 border border-slate-200">
+          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-ink-100 text-ink-700 border border-ink-200">
             <Database className="w-3 h-3" /> Orders
           </span>
         )}
         {p.source === 'manual' && (
-          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-50 text-amber-700 border border-amber-200">
+          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-warn-50 text-warn-600 border border-warn-100">
             <Sparkles className="w-3 h-3" /> Uploaded
           </span>
         )}
         {p.source === 'both' && (
-          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
+          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-success-50 text-success-600 border border-success-100">
             <Sparkles className="w-3 h-3" /> Both
           </span>
         )}
