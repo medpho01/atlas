@@ -11,6 +11,14 @@
 -- canonical catalog LabStack ops quote from.
 -- ============================================================================
 
+-- Schema-drift guard: some LabStack environments carry Master.aliases
+-- (denormalized alias array), others don't (aliases live in the MasterAlias
+-- table instead). Ensure the snapshot always has the column so the MVs build
+-- everywhere; where the source lacks it, alias search simply matches nothing
+-- and name search carries the load.
+ALTER TABLE src_local."Master"
+  ADD COLUMN IF NOT EXISTS aliases text[] DEFAULT ARRAY[]::text[];
+
 DROP MATERIALIZED VIEW IF EXISTS analytics.mv_test_rates CASCADE;
 
 CREATE MATERIALIZED VIEW analytics.mv_test_rates AS

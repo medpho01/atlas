@@ -116,6 +116,10 @@ for t in DOS Master Package PackagesOnLab _MasterToPackage; do
   $PG -c "CREATE TABLE IF NOT EXISTS src_local.\"$t\" (LIKE src.\"$t\");" >>"$LOG" 2>&1 \
     || log "  WARN: snapshot table src_local.$t create failed"
 done
+# Schema-drift guard: some environments lack Master.aliases at the source.
+# The pricing MVs reference it, so guarantee it exists on the snapshot
+# (empty array where the source has nothing to copy into it).
+$PG -c "ALTER TABLE src_local.\"Master\" ADD COLUMN IF NOT EXISTS aliases text[] DEFAULT ARRAY[]::text[];" >>"$LOG" 2>&1 || true
 
 # ---- Phase 1: TRUNCATE -----------------------------------------------------
 log "Phase 1/4 · TRUNCATE src_local tables"
@@ -132,9 +136,15 @@ SQL
 # ---- Phase 2a: small tables (full copy, retried) ---------------------------
 log "Phase 2a/4 · copying small tables in full"
 for t in Chain ProviderType Pharmacy Store PincodeToLatLong Lab Provider Profile User Request Master DOS Package PackagesOnLab _MasterToPackage; do
+  # Explicit column list from the FOREIGN table — the snapshot may carry
+  # extra locally-added columns (e.g. Master.aliases on drifted schemas),
+  # which would break a bare INSERT ... SELECT *.
+  cols=$($PG -t -A -c "SELECT string_agg(quote_ident(column_name), ',' ORDER BY ordinal_position)
+                        FROM information_schema.columns
+                        WHERE table_schema='src' AND table_name='$t';")
   ok=0
   for try in 1 2 3; do
-    if $PG -c "INSERT INTO src_local.\"$t\" SELECT * FROM src.\"$t\";" >>"$LOG" 2>&1; then
+    if $PG -c "INSERT INTO src_local.\"$t\" ($cols) SELECT $cols FROM src.\"$t\";" >>"$LOG" 2>&1; then
       n=$($PG -t -A -c "SELECT COUNT(*) FROM src_local.\"$t\";")
       log "  $t → $n rows"
       ok=1
