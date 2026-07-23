@@ -65,6 +65,48 @@ export type TestRate = {
   in_house: boolean;
 };
 
+export type LabPackage = {
+  package_id: number;
+  package_name: string;
+  canonical_name: string;
+  mrp: number | null;
+  b2b: number | null;
+  component_count: number;
+  overlap: number;
+  covered_ids: number[];
+};
+
+/**
+ * Packages available at a lab whose components cover ≥75% of the basket —
+ * the "you could quote this existing package instead" suggestions.
+ */
+export async function getLabPackages(labId: number, masterIds: number[]): Promise<LabPackage[]> {
+  if (!masterIds.length || !Number.isInteger(labId)) return [];
+  const ids = masterIds.filter((n) => Number.isInteger(n)).slice(0, 100);
+  return query<LabPackage>(
+    `
+    SELECT
+      lp.package_id,
+      lp.package_name,
+      lp.canonical_name,
+      lp.mrp,
+      lp.b2b,
+      lp.component_count,
+      (SELECT COUNT(*) FROM unnest(lp.component_master_ids) c WHERE c = ANY($2::int[]))::int AS overlap,
+      ARRAY(SELECT c FROM unnest(lp.component_master_ids) c WHERE c = ANY($2::int[]))        AS covered_ids
+    FROM analytics.mv_lab_packages lp
+    WHERE lp.lab_id = $1
+      AND (SELECT COUNT(*) FROM unnest(lp.component_master_ids) c WHERE c = ANY($2::int[]))::float
+          >= 0.75 * cardinality($2::int[])
+    ORDER BY overlap DESC,
+             (lp.b2b IS NULL OR lp.b2b <= 0) ASC,   -- placeholder prices sink below real ones
+             lp.b2b ASC
+    LIMIT 10
+    `,
+    [labId, ids],
+  );
+}
+
 /**
  * All (test × lab) rates for a basket of master_ids. The client groups by lab,
  * applies the ≥80% coverage rule, and computes discounted totals.

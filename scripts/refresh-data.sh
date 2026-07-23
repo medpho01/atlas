@@ -104,8 +104,8 @@ fi
 # the original FDW migration. Instead of a manual prod migration, the refresh
 # bootstraps them: import the foreign tables if absent, create the src_local
 # snapshots if absent. Idempotent — no-ops once they exist.
-log "Phase 0.5/4 · ensure DOS + Master foreign tables + snapshots exist"
-for t in DOS Master; do
+log "Phase 0.5/4 · ensure pricing-catalog foreign tables + snapshots exist"
+for t in DOS Master Package PackagesOnLab _MasterToPackage; do
   exists=$($PG -t -A -c "SELECT 1 FROM information_schema.foreign_tables
                           WHERE foreign_table_schema='src' AND foreign_table_name='$t';")
   if [ "$exists" != "1" ]; then
@@ -125,12 +125,13 @@ TRUNCATE
   src_local."Provider", src_local."Pharmacy", src_local."Store",
   src_local."PincodeToLatLong", src_local."Profile", src_local."User",
   src_local."Request", src_local."Order", src_local."Appointment",
-  src_local."PharmaOrder", src_local."DOS", src_local."Master";
+  src_local."PharmaOrder", src_local."DOS", src_local."Master",
+  src_local."Package", src_local."PackagesOnLab", src_local."_MasterToPackage";
 SQL
 
 # ---- Phase 2a: small tables (full copy, retried) ---------------------------
 log "Phase 2a/4 · copying small tables in full"
-for t in Chain ProviderType Pharmacy Store PincodeToLatLong Lab Provider Profile User Request Master DOS; do
+for t in Chain ProviderType Pharmacy Store PincodeToLatLong Lab Provider Profile User Request Master DOS Package PackagesOnLab _MasterToPackage; do
   ok=0
   for try in 1 2 3; do
     if $PG -c "INSERT INTO src_local.\"$t\" SELECT * FROM src.\"$t\";" >>"$LOG" 2>&1; then
@@ -253,6 +254,7 @@ REFRESH MATERIALIZED VIEW analytics.mv_phlebos_derived;
 -- Pricing intelligence: per-lab test rates from src_local DOS + Master.
 REFRESH MATERIALIZED VIEW analytics.mv_test_rates;
 REFRESH MATERIALIZED VIEW analytics.mv_test_catalog;
+REFRESH MATERIALIZED VIEW analytics.mv_lab_packages;
 SQL
 
 MV_COUNT=$($PG -t -A -c "SELECT COUNT(*) FROM pg_matviews WHERE schemaname='analytics';")

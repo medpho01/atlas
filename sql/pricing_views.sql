@@ -72,12 +72,42 @@ CREATE INDEX idx_mv_test_catalog_name ON analytics.mv_test_catalog (lower(test_n
 
 ANALYZE analytics.mv_test_catalog;
 
+-- ----------------------------------------------------------------------------
+-- Per-lab packages with composition — powers "nearby packages" suggestions:
+-- packages at the selected lab whose component tests overlap the basket.
+-- ----------------------------------------------------------------------------
+DROP MATERIALIZED VIEW IF EXISTS analytics.mv_lab_packages CASCADE;
+
+CREATE MATERIALIZED VIEW analytics.mv_lab_packages AS
+SELECT
+  pol."labId"                                         AS lab_id,
+  pol."packageId"                                     AS package_id,
+  COALESCE(NULLIF(pol."labPackageName", ''), p."packageName") AS package_name,
+  p."packageName"                                     AS canonical_name,
+  pol."labMrp"                                        AS mrp,
+  pol."labCost"::float8                               AS b2b,
+  ARRAY(
+    SELECT mp."A" FROM src_local."_MasterToPackage" mp
+    WHERE mp."B" = p.id ORDER BY mp."A"
+  )                                                   AS component_master_ids,
+  (SELECT COUNT(*) FROM src_local."_MasterToPackage" mp WHERE mp."B" = p.id)::int
+                                                      AS component_count
+FROM src_local."PackagesOnLab" pol
+JOIN src_local."Package" p ON p.id = pol."packageId"
+WHERE COALESCE(p.active, false) = true;
+
+CREATE INDEX idx_mv_lab_packages_lab ON analytics.mv_lab_packages (lab_id);
+CREATE UNIQUE INDEX idx_mv_lab_packages_key ON analytics.mv_lab_packages (lab_id, package_id);
+
+ANALYZE analytics.mv_lab_packages;
+
 DO $$
-DECLARE n_rates int; n_tests int; n_labs int;
+DECLARE n_rates int; n_tests int; n_labs int; n_pkgs int;
 BEGIN
   SELECT COUNT(*) INTO n_rates FROM analytics.mv_test_rates;
   SELECT COUNT(*) INTO n_tests FROM analytics.mv_test_catalog;
   SELECT COUNT(DISTINCT lab_id) INTO n_labs FROM analytics.mv_test_rates;
-  RAISE NOTICE 'mv_test_rates: % (test × lab) rates · % searchable tests · % labs',
-    n_rates, n_tests, n_labs;
+  SELECT COUNT(*) INTO n_pkgs FROM analytics.mv_lab_packages;
+  RAISE NOTICE 'mv_test_rates: % rates · % tests · % labs · % lab-packages',
+    n_rates, n_tests, n_labs, n_pkgs;
 END $$;
