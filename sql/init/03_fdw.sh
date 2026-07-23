@@ -65,7 +65,7 @@ if [ -n "$ENUM_SQL" ]; then
 fi
 
 # ---- 3. FDW server + 4. IMPORT FOREIGN SCHEMA -----------------------------
-TABLES='"Appointment","Chain","Lab","Order","PharmaOrder","Pharmacy","PincodeToLatLong","Profile","Provider","ProviderType","Request","Store","User"'
+TABLES='"Appointment","Chain","DOS","Lab","Master","Order","PharmaOrder","Pharmacy","PincodeToLatLong","Profile","Provider","ProviderType","Request","Store","User"'
 
 psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<SQL
 CREATE EXTENSION IF NOT EXISTS postgres_fdw;

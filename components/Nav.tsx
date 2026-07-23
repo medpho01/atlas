@@ -14,6 +14,7 @@ import {
   Building2,
   Briefcase,
   Users,
+  IndianRupee,
   type LucideIcon,
 } from 'lucide-react';
 
@@ -35,6 +36,7 @@ const navLinks: NavItem[] = [
   { href: '/heatmap', label: 'Heatmap', icon: Map },
   { href: '/directory', label: 'Directory', icon: BookOpenText, alsoActiveOn: ['/chain'] },
   { href: '/phlebos', label: 'Phlebos', icon: Users },
+  { href: '/pricing', label: 'Pricing', icon: IndianRupee },
   { href: '/quality', label: 'Quality', icon: Activity },
 ];
 
