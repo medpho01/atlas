@@ -195,10 +195,14 @@ function FunnelManager({ funnels, onClose }: { funnels: Funnel[]; onClose: () =>
   const [pending, startTransition] = useTransition();
 
   const submit = () => {
+    if (!name.trim()) { setErr('Funnel name is required'); return; }
+    const filled = stages.filter((s) => s.trim());
+    if (filled.length < 2) { setErr('A funnel needs at least 2 stages'); return; }
+    setErr(null);
     startTransition(async () => {
       const res = await createFunnel({
         name,
-        stages: stages.filter((s) => s.trim()).map((label) => ({ key: '', label })),
+        stages: filled.map((label) => ({ key: '', label })),
       });
       if (!res.ok) { setErr(res.error ?? 'Failed'); return; }
       window.location.reload();
@@ -230,8 +234,11 @@ function FunnelManager({ funnels, onClose }: { funnels: Funnel[]; onClose: () =>
           <div className="text-[12px] font-semibold text-ink-700 mb-2">Create funnel</div>
           <input
             type="text" placeholder="Funnel name — e.g. Hospital onboarding" value={name}
+            autoFocus
             onChange={(e) => setName(e.target.value)}
-            className="w-full h-9 px-3 text-sm rounded-md border border-ink-200 bg-surface mb-2"
+            className={`w-full h-9 px-3 text-sm rounded-md border bg-surface mb-2 ${
+              name.trim() ? 'border-ink-200' : 'border-warn-100 focus:border-brand-500'
+            }`}
           />
           <div className="space-y-1.5 mb-2">
             {stages.map((s, i) => (
@@ -260,8 +267,11 @@ function FunnelManager({ funnels, onClose }: { funnels: Funnel[]; onClose: () =>
             + Add stage
           </button>
           {err && <p className="text-sm text-danger-500 mb-2">{err}</p>}
+          {!name.trim() && (
+            <p className="text-[12px] text-warn-600 mb-2">Give the funnel a name to save it.</p>
+          )}
           <button
-            onClick={submit} disabled={pending || !name.trim()}
+            onClick={submit} disabled={pending}
             className="w-full h-9 text-sm font-semibold rounded-md bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-40 transition"
           >
             {pending ? 'Creating…' : 'Create funnel'}
