@@ -3,9 +3,10 @@
 import { useMemo, useState, useTransition } from 'react';
 import {
   Plus, X, User as UserIcon, FileText, Upload, CheckCircle2, Circle,
-  ArrowRight, StickyNote, Clock, Phone, Mail, MapPin,
+  ArrowRight, StickyNote, Clock, Phone, Mail, MapPin, Upload as UploadIcon, Settings2, Trash2,
 } from 'lucide-react';
-import { createProvider, moveStage, assignProvider, addNote } from '../actions';
+import * as XLSX from 'xlsx';
+import { createProvider, moveStage, assignProvider, addNote, bulkCreateProviders, addChecklistItem, removeChecklistItem } from '../actions';
 import type { Thread, ThreadProvider, ChecklistItem, ProviderDoc, Activity, FunnelStage } from '@/lib/crm';
 
 type Team = { id: number; name: string; role: string }[];
@@ -23,6 +24,8 @@ export function BoardClient({
   const [providers, setProviders] = useState(initialProviders);
   const [openId, setOpenId] = useState<number | null>(null);
   const [showAdd, setShowAdd] = useState(false);
+  const [showImport, setShowImport] = useState(false);
+  const [showChecklist, setShowChecklist] = useState(false);
   const [assigneeFilter, setAssigneeFilter] = useState<number | 'all' | 'mine'>('all');
   const [pending, startTransition] = useTransition();
   const [err, setErr] = useState<string | null>(null);
@@ -68,12 +71,26 @@ export function BoardClient({
       {/* Toolbar */}
       <div className="flex flex-wrap items-center gap-2 mb-3">
         {canWrite && (
-          <button
-            onClick={() => setShowAdd(true)}
-            className="inline-flex items-center gap-1.5 px-3 h-8 text-[13px] font-semibold rounded-md bg-ink-900 text-ink-50 hover:bg-ink-800 transition"
-          >
-            <Plus className="w-3.5 h-3.5" /> Add provider
-          </button>
+          <>
+            <button
+              onClick={() => setShowAdd(true)}
+              className="inline-flex items-center gap-1.5 px-3 h-8 text-[13px] font-semibold rounded-md bg-ink-900 text-ink-50 hover:bg-ink-800 transition"
+            >
+              <Plus className="w-3.5 h-3.5" /> Add provider
+            </button>
+            <button
+              onClick={() => setShowImport(true)}
+              className="inline-flex items-center gap-1.5 px-3 h-8 text-[13px] font-medium rounded-md border border-ink-200 text-ink-700 hover:bg-ink-50 transition"
+            >
+              <UploadIcon className="w-3.5 h-3.5" /> Import Excel
+            </button>
+            <button
+              onClick={() => setShowChecklist(true)}
+              className="inline-flex items-center gap-1.5 px-3 h-8 text-[13px] font-medium rounded-md border border-ink-200 text-ink-700 hover:bg-ink-50 transition"
+            >
+              <Settings2 className="w-3.5 h-3.5" /> Checklist ({checklist.length})
+            </button>
+          </>
         )}
         <select
           value={String(assigneeFilter)}
@@ -164,6 +181,14 @@ export function BoardClient({
           defaultKind={thread.provider_kind ?? 'LAB'}
           onClose={() => setShowAdd(false)}
         />
+      )}
+
+      {showImport && (
+        <ImportModal threadId={thread.id} defaultKind={thread.provider_kind ?? 'LAB'} onClose={() => setShowImport(false)} />
+      )}
+
+      {showChecklist && (
+        <ChecklistModal threadId={thread.id} items={checklist} onClose={() => setShowChecklist(false)} />
       )}
     </div>
   );
@@ -490,6 +515,226 @@ function AddProviderModal({ threadId, defaultKind, onClose }: {
             {pending ? 'Adding…' : 'Add provider'}
           </button>
           <button onClick={onClose} className="px-3 h-9 text-sm rounded-md border border-ink-200 text-ink-700 hover:bg-ink-50">Cancel</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ---------------------------------------------------------------- import modal */
+
+const IMPORT_ALIASES: Record<string, string[]> = {
+  name:          ['name', 'provider', 'provider name', 'lab name', 'lab', 'hospital'],
+  city:          ['city', 'town'],
+  state:         ['state'],
+  pincode:       ['pincode', 'pin code', 'pin', 'zip'],
+  phone:         ['phone', 'mobile', 'contact', 'phone number', 'contact number'],
+  email:         ['email', 'mail', 'email address'],
+  contactPerson: ['contact person', 'contact name', 'owner', 'poc', 'spoc'],
+  notes:         ['notes', 'note', 'remarks', 'comment'],
+  kind:          ['kind', 'type', 'provider type'],
+};
+
+function matchCol(header: string[], target: string): number {
+  const want = IMPORT_ALIASES[target].map((s) => s.toLowerCase().replace(/[_\s]/g, ''));
+  return header.findIndex((h) => want.includes((h ?? '').toString().toLowerCase().replace(/[_\s]/g, '')));
+}
+
+function ImportModal({ threadId, defaultKind, onClose }: {
+  threadId: number; defaultKind: string; onClose: () => void;
+}) {
+  const [rows, setRows] = useState<Record<string, string>[]>([]);
+  const [filename, setFilename] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const [result, setResult] = useState<{ created: number; skipped: number } | null>(null);
+  const [pending, startTransition] = useTransition();
+
+  const handleFile = async (file: File) => {
+    setErr(null); setResult(null); setFilename(file.name);
+    try {
+      const wb = XLSX.read(await file.arrayBuffer(), { type: 'array' });
+      const raw: unknown[][] = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, defval: '' });
+      if (!raw.length) throw new Error('File is empty');
+      const header = raw[0].map((h) => String(h ?? '').trim());
+      const iName = matchCol(header, 'name');
+      if (iName < 0) throw new Error(`Need a "name" column. Found: ${header.join(', ')}`);
+      const idx = {
+        city: matchCol(header, 'city'), state: matchCol(header, 'state'),
+        pincode: matchCol(header, 'pincode'), phone: matchCol(header, 'phone'),
+        email: matchCol(header, 'email'), contactPerson: matchCol(header, 'contactPerson'),
+        notes: matchCol(header, 'notes'), kind: matchCol(header, 'kind'),
+      };
+      const out: Record<string, string>[] = [];
+      for (let r = 1; r < raw.length; r++) {
+        const row = raw[r];
+        if (!row || row.every((c) => c === '' || c == null)) continue;
+        const name = String(row[iName] ?? '').trim();
+        if (!name) continue;
+        const get = (i: number) => (i >= 0 ? String(row[i] ?? '').trim() : '');
+        out.push({
+          name, kind: get(idx.kind) || defaultKind, city: get(idx.city), state: get(idx.state),
+          pincode: get(idx.pincode), phone: get(idx.phone), email: get(idx.email),
+          contactPerson: get(idx.contactPerson), notes: get(idx.notes),
+        });
+      }
+      if (!out.length) throw new Error('No rows with a name found');
+      setRows(out);
+    } catch (e) {
+      setErr((e as Error).message); setRows([]);
+    }
+  };
+
+  const commit = () => {
+    startTransition(async () => {
+      const res = await bulkCreateProviders({ threadId, rows: rows as never });
+      if (!res.ok) { setErr(res.error ?? 'Import failed'); return; }
+      setResult({ created: res.created ?? 0, skipped: res.skipped ?? 0 });
+    });
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4" onClick={onClose}>
+      <div className="w-full max-w-lg rounded-2xl border border-ink-200 bg-surface p-5 max-h-[85vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-[15px] font-bold text-ink-900">Import providers</h3>
+          <button onClick={onClose} className="text-ink-400 hover:text-ink-900"><X className="w-4 h-4" /></button>
+        </div>
+
+        {result ? (
+          <div className="text-center py-6">
+            <CheckCircle2 className="w-8 h-8 text-success-600 mx-auto mb-2" />
+            <p className="text-sm text-ink-800">
+              <b>{result.created}</b> providers added to this thread
+              {result.skipped > 0 && <> · <b>{result.skipped}</b> duplicates skipped</>}
+            </p>
+            <button
+              onClick={() => window.location.reload()}
+              className="mt-4 px-4 h-9 text-sm font-semibold rounded-md bg-brand-600 text-white hover:bg-brand-700 transition"
+            >
+              View board
+            </button>
+          </div>
+        ) : rows.length === 0 ? (
+          <>
+            <label className="flex flex-col items-center justify-center gap-2 p-8 border-2 border-dashed border-ink-300 rounded-xl hover:border-brand-400 transition cursor-pointer">
+              <UploadIcon className="w-7 h-7 text-ink-400" />
+              <span className="text-sm font-semibold text-ink-900">Click to select Excel / CSV</span>
+              <span className="text-xs text-ink-500">Only a “name” column is required</span>
+              <input type="file" accept=".xlsx,.xls,.csv" className="hidden"
+                onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFile(f); }} />
+            </label>
+            <p className="text-[11px] text-ink-500 mt-3">
+              Optional columns: city, state, pincode, phone, email, contact person, notes, kind.
+              Providers already in this thread (same name) are skipped.
+            </p>
+            {err && <p className="text-sm text-danger-500 mt-2">{err}</p>}
+          </>
+        ) : (
+          <>
+            <div className="text-[13px] text-ink-700 mb-2">
+              <b>{rows.length}</b> providers from <span className="font-mono text-[12px]">{filename}</span>
+            </div>
+            <div className="max-h-[300px] overflow-y-auto rounded-lg border border-ink-200 mb-3">
+              <table className="w-full text-[12px]">
+                <thead className="bg-ink-50 sticky top-0">
+                  <tr className="text-left text-[10px] uppercase tracking-wider text-ink-500">
+                    <th className="px-2 py-1.5">Name</th><th className="px-2 py-1.5">City</th><th className="px-2 py-1.5">Phone</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.slice(0, 50).map((r, i) => (
+                    <tr key={i} className="border-t border-ink-100">
+                      <td className="px-2 py-1.5 text-ink-900">{r.name}</td>
+                      <td className="px-2 py-1.5 text-ink-600">{r.city || '—'}</td>
+                      <td className="px-2 py-1.5 text-ink-600 tabular-nums">{r.phone || '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {rows.length > 50 && <div className="px-2 py-1.5 text-[11px] text-ink-500 bg-ink-50 border-t border-ink-200">+{rows.length - 50} more will be imported</div>}
+            </div>
+            {err && <p className="text-sm text-danger-500 mb-2">{err}</p>}
+            <div className="flex gap-2">
+              <button onClick={commit} disabled={pending}
+                className="px-4 h-9 text-sm font-semibold rounded-md bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-40 transition">
+                {pending ? 'Importing…' : `Import ${rows.length} providers`}
+              </button>
+              <button onClick={() => { setRows([]); setFilename(null); }} className="px-3 h-9 text-sm rounded-md border border-ink-200 text-ink-700 hover:bg-ink-50">
+                Choose another file
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ---------------------------------------------------------------- checklist modal */
+
+function ChecklistModal({ threadId, items, onClose }: {
+  threadId: number; items: ChecklistItem[]; onClose: () => void;
+}) {
+  const [label, setLabel] = useState('');
+  const [required, setRequired] = useState(true);
+  const [err, setErr] = useState<string | null>(null);
+  const [pending, startTransition] = useTransition();
+
+  const add = () => {
+    startTransition(async () => {
+      const res = await addChecklistItem({ threadId, label, required });
+      if (!res.ok) { setErr(res.error ?? 'Failed'); return; }
+      window.location.reload();
+    });
+  };
+  const remove = (itemId: number) => {
+    startTransition(async () => {
+      const res = await removeChecklistItem({ threadId, itemId });
+      if (!res.ok) { setErr(res.error ?? 'Failed'); return; }
+      window.location.reload();
+    });
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4" onClick={onClose}>
+      <div className="w-full max-w-md rounded-2xl border border-ink-200 bg-surface p-5 max-h-[85vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-1">
+          <h3 className="text-[15px] font-bold text-ink-900">Document checklist</h3>
+          <button onClick={onClose} className="text-ink-400 hover:text-ink-900"><X className="w-4 h-4" /></button>
+        </div>
+        <p className="text-[11px] text-ink-500 mb-3">
+          Applies to every provider in this thread. Editing here creates a thread-specific
+          checklist — the global default stays untouched for other threads.
+        </p>
+
+        <div className="space-y-1.5 mb-4">
+          {items.map((it) => (
+            <div key={it.id} className="flex items-center gap-2 rounded-lg border border-ink-200 bg-ink-50/60 px-3 py-2">
+              <span className="text-[13px] text-ink-800 flex-1">{it.label}</span>
+              {it.required && <span className="text-[9px] uppercase font-semibold text-danger-500">required</span>}
+              <button onClick={() => remove(it.id)} disabled={pending}
+                className="text-ink-400 hover:text-danger-500 disabled:opacity-30" aria-label="Remove item">
+                <Trash2 className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          ))}
+        </div>
+
+        <div className="border-t border-ink-200 pt-3 space-y-2">
+          <input
+            type="text" placeholder="New document — e.g. Fire safety certificate" value={label}
+            onChange={(e) => setLabel(e.target.value)}
+            className="w-full h-9 px-3 text-sm rounded-md border border-ink-200 bg-surface"
+          />
+          <label className="flex items-center gap-2 text-[12px] text-ink-600">
+            <input type="checkbox" checked={required} onChange={(e) => setRequired(e.target.checked)} className="w-3.5 h-3.5" />
+            Required before a provider can be marked ready
+          </label>
+          {err && <p className="text-sm text-danger-500">{err}</p>}
+          <button onClick={add} disabled={pending || !label.trim()}
+            className="w-full h-9 text-sm font-semibold rounded-md bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-40 transition">
+            {pending ? 'Adding…' : 'Add document'}
+          </button>
         </div>
       </div>
     </div>

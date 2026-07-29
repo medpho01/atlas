@@ -20,7 +20,7 @@ export default async function CrmPage() {
         track their journey stage by stage, and collect the document checklist so console onboarding
         can pick them up the moment they're ready.
       </p>
-      <ThreadsClient threads={threads} funnels={funnels} canWrite={canWriteCrm(me)} />
+      <ThreadsClient threads={threads} funnels={funnels} canWrite={canWriteCrm(me)} isAdmin={me?.role === 'admin'} />
     </main>
   );
 }
