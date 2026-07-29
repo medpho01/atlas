@@ -3,7 +3,7 @@
 import { useState, useTransition } from 'react';
 import Link from 'next/link';
 import { Plus, Target, ChevronRight, Settings2, X } from 'lucide-react';
-import { createThread, createFunnel, updateThread } from './actions';
+import { createThread, createFunnel, updateThread, setFunnelSuccessStage } from './actions';
 import type { Thread, Funnel } from '@/lib/crm';
 
 export function ThreadsClient({ threads, funnels, canWrite, isAdmin }: {
@@ -170,8 +170,21 @@ export function ThreadsClient({ threads, funnels, canWrite, isAdmin }: {
                   {t.region && <span>· {t.region}</span>}
                   {t.provider_kind && <span>· {t.provider_kind}</span>}
                 </div>
-                <div className="h-1.5 rounded-full bg-ink-100 overflow-hidden">
-                  <div className="h-full bg-success-500 transition-all" style={{ width: `${pct}%` }} />
+                <div className="flex h-1.5 rounded-full bg-ink-100 overflow-hidden" title={`${pct}% of target`}>
+                  {t.provider_total > 0 ? t.stages.map((s) => {
+                    const n = t.stage_counts?.[s.key] ?? 0;
+                    if (!n) return null;
+                    const isWin = s.key === t.success_stage_key;
+                    const isLost = !isWin && /stall|drop|lost|reject|dead/i.test(s.key + s.label);
+                    return (
+                      <div
+                        key={s.key}
+                        title={`${s.label}: ${n}`}
+                        style={{ width: `${(n / t.provider_total) * 100}%` }}
+                        className={isWin ? 'bg-success-500' : isLost ? 'bg-danger-500' : 'bg-brand-500'}
+                      />
+                    );
+                  }) : null}
                 </div>
                 <div className="mt-2 text-[11px] text-ink-400 flex items-center justify-between">
                   <span>{t.stages.length}-stage funnel</span>
@@ -191,6 +204,7 @@ export function ThreadsClient({ threads, funnels, canWrite, isAdmin }: {
 function FunnelManager({ funnels, onClose }: { funnels: Funnel[]; onClose: () => void }) {
   const [name, setName] = useState('');
   const [stages, setStages] = useState<string[]>(['Identified', 'Contacted', 'Onboarded']);
+  const [successIndex, setSuccessIndex] = useState<number | null>(2);
   const [err, setErr] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
 
@@ -203,6 +217,7 @@ function FunnelManager({ funnels, onClose }: { funnels: Funnel[]; onClose: () =>
       const res = await createFunnel({
         name,
         stages: filled.map((label) => ({ key: '', label })),
+        successIndex: successIndex ?? undefined,
       });
       if (!res.ok) { setErr(res.error ?? 'Failed'); return; }
       window.location.reload();
@@ -226,6 +241,20 @@ function FunnelManager({ funnels, onClose }: { funnels: Funnel[]; onClose: () =>
               <div className="text-[11px] text-ink-500 mt-0.5">
                 {f.stages.map((s) => s.label).join(' → ')}
               </div>
+              <label className="flex items-center gap-1.5 text-[11px] text-ink-600 mt-1.5">
+                Counts as onboarded:
+                <select
+                  value={f.success_stage_key ?? ''}
+                  onChange={(e) => startTransition(async () => {
+                    const res = await setFunnelSuccessStage({ funnelId: f.id, stageKey: e.target.value });
+                    if (!res.ok) { setErr(res.error ?? 'Failed'); return; }
+                    window.location.reload();
+                  })}
+                  className="text-[11px] px-1.5 py-0.5 rounded border border-success-100 bg-success-50 text-success-600 font-semibold"
+                >
+                  {f.stages.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
+                </select>
+              </label>
             </div>
           ))}
         </div>
@@ -249,8 +278,26 @@ function FunnelManager({ funnels, onClose }: { funnels: Funnel[]; onClose: () =>
                   onChange={(e) => setStages(stages.map((x, j) => (j === i ? e.target.value : x)))}
                   className="flex-1 h-8 px-2 text-[13px] rounded-md border border-ink-200 bg-surface"
                 />
+                <label
+                  title="Mark as the onboarded / success stage"
+                  className={`inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-1 rounded border cursor-pointer transition ${
+                    successIndex === i
+                      ? 'bg-success-50 text-success-600 border-success-100'
+                      : 'bg-surface text-ink-400 border-ink-200 hover:text-ink-700'
+                  }`}
+                >
+                  <input
+                    type="radio" name="successStage" checked={successIndex === i}
+                    onChange={() => setSuccessIndex(i)} className="w-3 h-3"
+                  />
+                  win
+                </label>
                 <button
-                  onClick={() => setStages(stages.filter((_, j) => j !== i))}
+                  onClick={() => {
+                    setStages(stages.filter((_, j) => j !== i));
+                    if (successIndex === i) setSuccessIndex(null);
+                    else if (successIndex != null && successIndex > i) setSuccessIndex(successIndex - 1);
+                  }}
                   disabled={stages.length <= 2}
                   className="text-ink-400 hover:text-danger-500 disabled:opacity-30 p-1"
                   aria-label="Remove stage"
@@ -277,7 +324,8 @@ function FunnelManager({ funnels, onClose }: { funnels: Funnel[]; onClose: () =>
             {pending ? 'Creating…' : 'Create funnel'}
           </button>
           <p className="text-[11px] text-ink-500 mt-2">
-            Existing threads keep their funnel. New threads can pick this one.
+            Mark one stage “win” — reaching it counts a provider as onboarded.
+            It doesn’t have to be the last stage. Existing threads keep their funnel.
           </p>
         </div>
       </div>

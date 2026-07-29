@@ -112,8 +112,8 @@ export function BoardClient({
       <div className="flex gap-3 overflow-x-auto pb-4 items-start">
         {stages.map((s) => {
           const cards = byStage.get(s.key) ?? [];
-          const isTerminalGood = s.key === 'onboarded';
-          const isTerminalBad = s.key === 'dropped';
+          const isTerminalGood = s.key === thread.success_stage_key;
+          const isTerminalBad = !isTerminalGood && /stall|drop|lost|reject|dead/i.test(s.key + s.label);
           return (
             <div key={s.key} className="w-[260px] shrink-0">
               <div className={`px-3 py-2 rounded-t-xl border border-b-0 text-[12px] font-semibold flex items-center justify-between ${

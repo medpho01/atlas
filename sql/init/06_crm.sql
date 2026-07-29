@@ -134,3 +134,24 @@ FROM (VALUES
   ('Lab photos',                    false, 7)
 ) AS x(label, required, sort)
 WHERE NOT EXISTS (SELECT 1 FROM atlas.crm_checklist_items WHERE thread_id IS NULL);
+
+-- ---- Explicit success stage per funnel (added after v1) --------------------
+-- The board's "onboarded" count can't assume a fixed key or the last stage:
+-- real funnels put the win in the middle (… → Onboarded on Labstack → Stalled).
+-- Admins pick the success stage; backfill guesses from the label for existing rows.
+ALTER TABLE atlas.crm_funnels ADD COLUMN IF NOT EXISTS success_stage_key text;
+
+-- Pick the LAST stage matching 'onboard' — funnels often have both
+-- "Ready to onboard" and "Onboarded on X"; the later one is the win.
+UPDATE atlas.crm_funnels f
+SET success_stage_key = COALESCE(
+  (SELECT t.s->>'key' FROM jsonb_array_elements(f.stages) WITH ORDINALITY AS t(s, ord)
+    WHERE t.s->>'key' ILIKE '%onboard%' OR t.s->>'label' ILIKE '%onboard%'
+    ORDER BY t.ord DESC LIMIT 1),
+  (SELECT t.s->>'key' FROM jsonb_array_elements(f.stages) WITH ORDINALITY AS t(s, ord)
+    WHERE t.s->>'key' ILIKE '%closed%' OR t.s->>'label' ILIKE '%closed%'
+    ORDER BY t.ord DESC LIMIT 1),
+  (SELECT t.s->>'key' FROM jsonb_array_elements(f.stages) WITH ORDINALITY AS t(s, ord)
+    ORDER BY t.ord DESC LIMIT 1)
+)
+WHERE f.success_stage_key IS NULL;

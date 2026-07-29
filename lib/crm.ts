@@ -7,7 +7,7 @@ export const CRM_WRITE_ROLES: User['role'][] = ['admin', 'network'];
 export const canWriteCrm = (u: User | null): boolean => !!u && CRM_WRITE_ROLES.includes(u.role);
 
 export type FunnelStage = { key: string; label: string };
-export type Funnel = { id: number; name: string; stages: FunnelStage[]; is_default: boolean };
+export type Funnel = { id: number; name: string; stages: FunnelStage[]; is_default: boolean; success_stage_key: string | null };
 
 export type Thread = {
   id: number;
@@ -22,6 +22,14 @@ export type Thread = {
   provider_total: number;
   onboarded_count: number;
   stages: FunnelStage[];
+  success_stage_key: string | null;
+  stage_counts: Record<string, number>;
+};
+
+export type ThreadStats = {
+  stage_counts: { stage_key: string; n: number }[];
+  /** Movement + wins over rolling windows, for velocity read-out */
+  velocity: { days: number; added: number; moves: number; onboarded: number }[];
 };
 
 export type Provider = {
@@ -70,19 +78,23 @@ export type ProviderDoc = {
 };
 
 export async function listFunnels(): Promise<Funnel[]> {
-  return query<Funnel>(`SELECT id, name, stages, is_default FROM atlas.crm_funnels ORDER BY is_default DESC, name`);
+  return query<Funnel>(`SELECT id, name, stages, is_default, success_stage_key FROM atlas.crm_funnels ORDER BY is_default DESC, name`);
 }
 
 export async function listThreads(): Promise<Thread[]> {
   return query<Thread>(`
     SELECT t.id, t.name, t.description, t.funnel_id, t.target_count, t.provider_kind,
-           t.region, t.status, t.created_at, f.stages,
-           COUNT(tp.id)::int AS provider_total,
-           COUNT(tp.id) FILTER (WHERE tp.stage_key = 'onboarded')::int AS onboarded_count
+           t.region, t.status, t.created_at, f.stages, f.success_stage_key,
+           COALESCE(SUM(tp.n), 0)::int AS provider_total,
+           COALESCE(SUM(tp.n) FILTER (WHERE tp.stage_key = f.success_stage_key), 0)::int AS onboarded_count,
+           COALESCE(jsonb_object_agg(tp.stage_key, tp.n) FILTER (WHERE tp.stage_key IS NOT NULL), '{}'::jsonb) AS stage_counts
     FROM atlas.crm_threads t
     JOIN atlas.crm_funnels f ON f.id = t.funnel_id
-    LEFT JOIN atlas.crm_thread_providers tp ON tp.thread_id = t.id
-    GROUP BY t.id, f.stages
+    LEFT JOIN LATERAL (
+      SELECT stage_key, COUNT(*)::int AS n
+      FROM atlas.crm_thread_providers WHERE thread_id = t.id GROUP BY stage_key
+    ) tp ON true
+    GROUP BY t.id, f.stages, f.success_stage_key
     ORDER BY (t.status = 'active') DESC, t.created_at DESC
   `);
 }
@@ -90,10 +102,11 @@ export async function listThreads(): Promise<Thread[]> {
 export async function getThread(id: number): Promise<Thread | null> {
   return queryOne<Thread>(`
     SELECT t.id, t.name, t.description, t.funnel_id, t.target_count, t.provider_kind,
-           t.region, t.status, t.created_at, f.stages,
+           t.region, t.status, t.created_at, f.stages, f.success_stage_key,
            (SELECT COUNT(*) FROM atlas.crm_thread_providers tp WHERE tp.thread_id = t.id)::int AS provider_total,
            (SELECT COUNT(*) FROM atlas.crm_thread_providers tp
-             WHERE tp.thread_id = t.id AND tp.stage_key = 'onboarded')::int AS onboarded_count
+             WHERE tp.thread_id = t.id AND tp.stage_key = f.success_stage_key)::int AS onboarded_count,
+           '{}'::jsonb AS stage_counts
     FROM atlas.crm_threads t
     JOIN atlas.crm_funnels f ON f.id = t.funnel_id
     WHERE t.id = $1
@@ -144,6 +157,32 @@ export async function getProviderDocs(providerId: number): Promise<ProviderDoc[]
     WHERE d.provider_id = $1
     ORDER BY d.uploaded_at DESC
   `, [providerId]);
+}
+
+export async function getThreadStats(threadId: number): Promise<ThreadStats> {
+  const [stage_counts, velocity] = await Promise.all([
+    query<{ stage_key: string; n: number }>(
+      `SELECT stage_key, COUNT(*)::int AS n
+       FROM atlas.crm_thread_providers WHERE thread_id = $1
+       GROUP BY stage_key`, [threadId]),
+    query<{ days: number; added: number; moves: number; onboarded: number }>(
+      `WITH w(days) AS (VALUES (7), (15), (30)),
+       fx AS (SELECT f.success_stage_key AS sk
+              FROM atlas.crm_threads t JOIN atlas.crm_funnels f ON f.id = t.funnel_id
+              WHERE t.id = $1)
+       SELECT w.days,
+         (SELECT COUNT(*)::int FROM atlas.crm_thread_providers tp
+           WHERE tp.thread_id = $1 AND tp.created_at >= now() - (w.days || ' days')::interval) AS added,
+         (SELECT COUNT(*)::int FROM atlas.crm_activities a
+           WHERE a.thread_id = $1 AND a.type = 'stage_change'
+             AND a.created_at >= now() - (w.days || ' days')::interval) AS moves,
+         (SELECT COUNT(DISTINCT a.provider_id)::int FROM atlas.crm_activities a, fx
+           WHERE a.thread_id = $1 AND a.type = 'stage_change'
+             AND a.meta->>'to' = fx.sk
+             AND a.created_at >= now() - (w.days || ' days')::interval) AS onboarded
+       FROM w ORDER BY w.days`, [threadId]),
+  ]);
+  return { stage_counts, velocity };
 }
 
 export async function listTeam(): Promise<{ id: number; name: string; role: string }[]> {

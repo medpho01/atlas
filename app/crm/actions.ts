@@ -161,7 +161,7 @@ export async function updateProvider(input: {
   return { ok: true };
 }
 
-export async function createFunnel(input: { name: string; stages: { key: string; label: string }[] }): Promise<R> {
+export async function createFunnel(input: { name: string; stages: { key: string; label: string }[]; successIndex?: number }): Promise<R> {
   const me = await getSessionUser();
   if (!me || me.role !== 'admin') return { ok: false, error: 'Funnel management is admin-only' };
   if (!input.name.trim()) return { ok: false, error: 'Funnel name required' };
@@ -175,9 +175,14 @@ export async function createFunnel(input: { name: string; stages: { key: string;
     seen.add(key);
     return { key, label: st.label.trim() };
   });
+  // Success stage: explicit pick, else last stage mentioning "onboard", else last.
+  const idx = input.successIndex;
+  const successKey =
+    (idx != null && idx >= 0 && idx < norm.length) ? norm[idx].key
+    : ([...norm].reverse().find((st) => /onboard/i.test(st.key + st.label))?.key ?? norm[norm.length - 1].key);
   const row = await queryOne<{ id: number }>(
-    `INSERT INTO atlas.crm_funnels (name, stages, created_by) VALUES ($1, $2, $3) RETURNING id`,
-    [input.name.trim(), JSON.stringify(norm), me.id],
+    `INSERT INTO atlas.crm_funnels (name, stages, success_stage_key, created_by) VALUES ($1, $2, $3, $4) RETURNING id`,
+    [input.name.trim(), JSON.stringify(norm), successKey, me.id],
   );
   revalidatePath('/crm');
   return { ok: true, id: row!.id };
@@ -287,5 +292,17 @@ export async function removeChecklistItem(input: { threadId: number; itemId: num
     await query(`DELETE FROM atlas.crm_checklist_items WHERE id = $1 AND thread_id = $2`, [input.itemId, input.threadId]);
   }
   revalidatePath(`/crm/${input.threadId}`);
+  return { ok: true };
+}
+
+export async function setFunnelSuccessStage(input: { funnelId: number; stageKey: string }): Promise<R> {
+  const me = await getSessionUser();
+  if (!me || me.role !== 'admin') return { ok: false, error: 'Funnel management is admin-only' };
+  const f = await queryOne<{ stages: { key: string }[] }>(
+    `SELECT stages FROM atlas.crm_funnels WHERE id = $1`, [input.funnelId]);
+  if (!f) return { ok: false, error: 'Funnel not found' };
+  if (!f.stages.some((s) => s.key === input.stageKey)) return { ok: false, error: 'Stage not in this funnel' };
+  await query(`UPDATE atlas.crm_funnels SET success_stage_key = $1 WHERE id = $2`, [input.stageKey, input.funnelId]);
+  revalidatePath('/crm');
   return { ok: true };
 }

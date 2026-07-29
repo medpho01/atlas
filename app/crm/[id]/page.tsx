@@ -2,8 +2,9 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { ArrowLeft, Target } from 'lucide-react';
 import { getSessionUser } from '@/lib/auth';
-import { getThread, getThreadProviders, getChecklist, listTeam, canWriteCrm } from '@/lib/crm';
+import { getThread, getThreadProviders, getChecklist, listTeam, getThreadStats, canWriteCrm } from '@/lib/crm';
 import { BoardClient } from './BoardClient';
+import { ThreadStats } from './ThreadStats';
 
 export const dynamic = 'force-dynamic';
 
@@ -16,10 +17,11 @@ export default async function ThreadPage({ params }: { params: Promise<{ id: str
   const thread = await getThread(threadId);
   if (!thread) notFound();
 
-  const [providers, checklist, team] = await Promise.all([
+  const [providers, checklist, team, stats] = await Promise.all([
     getThreadProviders(threadId),
     getChecklist(threadId),
     listTeam(),
+    getThreadStats(threadId),
   ]);
 
   return (
@@ -36,6 +38,8 @@ export default async function ThreadPage({ params }: { params: Promise<{ id: str
         {thread.region && <span className="text-[13px] text-ink-500">{thread.region}</span>}
         {thread.description && <span className="text-[13px] text-ink-500">— {thread.description}</span>}
       </div>
+
+      <ThreadStats thread={thread} stats={stats} />
 
       <BoardClient
         thread={thread}
