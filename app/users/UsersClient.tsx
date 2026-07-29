@@ -1,0 +1,214 @@
+'use client';
+
+import { useState, useTransition } from 'react';
+import { Plus, CheckCircle2, AlertCircle, KeyRound } from 'lucide-react';
+import { createUser, updateUser, type UserRow } from './actions';
+
+const ROLE_OPTIONS = [
+  { value: 'admin',      label: 'Admin',      hint: 'Full control — users, threads, funnels, uploads' },
+  { value: 'network',    label: 'Network',    hint: 'CRM threads, providers, phlebos, pricing' },
+  { value: 'operations', label: 'Operations', hint: 'Day-to-day ops — phlebos, pricing, coverage' },
+  { value: 'viewer',     label: 'Viewer',     hint: 'Read-only dashboards' },
+] as const;
+
+const ROLE_BADGE: Record<string, string> = {
+  admin:      'bg-brand-50 text-brand-700 dark:text-brand-400 border-brand-100',
+  network:    'bg-success-50 text-success-600 border-success-100',
+  operations: 'bg-warn-50 text-warn-600 border-warn-100',
+  editor:     'bg-ink-100 text-ink-700 border-ink-200',
+  viewer:     'bg-ink-100 text-ink-700 border-ink-200',
+};
+
+export function UsersClient({ initialUsers, myId }: { initialUsers: UserRow[]; myId: number }) {
+  const [users, setUsers] = useState(initialUsers);
+  const [showCreate, setShowCreate] = useState(false);
+  const [form, setForm] = useState({ email: '', name: '', password: '', role: 'network' as UserRow['role'] });
+  const [msg, setMsg] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
+  const [pending, startTransition] = useTransition();
+  const [pwFor, setPwFor] = useState<number | null>(null);
+  const [pwValue, setPwValue] = useState('');
+
+  const refresh = async () => {
+    // Server actions revalidate; simplest client refresh is a reload of data via location
+    window.location.reload();
+  };
+
+  const submitCreate = () => {
+    startTransition(async () => {
+      const res = await createUser(form);
+      if (!res.ok) { setMsg({ kind: 'err', text: res.error ?? 'Failed' }); return; }
+      setMsg({ kind: 'ok', text: `${form.email} onboarded as ${form.role}` });
+      setShowCreate(false);
+      setForm({ email: '', name: '', password: '', role: 'network' });
+      refresh();
+    });
+  };
+
+  const setRole = (id: number, role: UserRow['role']) => {
+    startTransition(async () => {
+      const res = await updateUser({ id, role });
+      if (!res.ok) { setMsg({ kind: 'err', text: res.error ?? 'Failed' }); return; }
+      setUsers((u) => u.map((x) => (x.id === id ? { ...x, role } : x)));
+    });
+  };
+
+  const setActive = (id: number, active: boolean) => {
+    startTransition(async () => {
+      const res = await updateUser({ id, active });
+      if (!res.ok) { setMsg({ kind: 'err', text: res.error ?? 'Failed' }); return; }
+      setUsers((u) => u.map((x) => (x.id === id ? { ...x, active } : x)));
+    });
+  };
+
+  const submitPassword = (id: number) => {
+    startTransition(async () => {
+      const res = await updateUser({ id, newPassword: pwValue });
+      if (!res.ok) { setMsg({ kind: 'err', text: res.error ?? 'Failed' }); return; }
+      setMsg({ kind: 'ok', text: 'Password reset' });
+      setPwFor(null);
+      setPwValue('');
+    });
+  };
+
+  return (
+    <div className="space-y-4">
+      {msg && (
+        <div className={`px-4 py-2.5 rounded-lg border text-sm flex items-center gap-2 ${
+          msg.kind === 'ok' ? 'bg-success-50 border-success-100 text-success-600'
+                            : 'bg-danger-50 border-danger-100 text-danger-500'
+        }`}>
+          {msg.kind === 'ok' ? <CheckCircle2 className="w-4 h-4" /> : <AlertCircle className="w-4 h-4" />}
+          {msg.text}
+        </div>
+      )}
+
+      {/* Create */}
+      <div className="rounded-2xl border border-ink-200 bg-surface p-4">
+        {!showCreate ? (
+          <button
+            onClick={() => setShowCreate(true)}
+            className="inline-flex items-center gap-1.5 px-3 h-9 text-sm font-semibold rounded-md bg-ink-900 text-ink-50 hover:bg-ink-800 transition"
+          >
+            <Plus className="w-4 h-4" /> Onboard user
+          </button>
+        ) : (
+          <div className="space-y-3">
+            <div className="grid sm:grid-cols-2 gap-2">
+              <input
+                type="text" placeholder="Full name" value={form.name}
+                onChange={(e) => setForm({ ...form, name: e.target.value })}
+                className="h-9 px-3 text-sm rounded-md border border-ink-200 bg-surface"
+              />
+              <input
+                type="email" placeholder="email@labstack.in" value={form.email}
+                onChange={(e) => setForm({ ...form, email: e.target.value })}
+                className="h-9 px-3 text-sm rounded-md border border-ink-200 bg-surface"
+              />
+              <input
+                type="text" placeholder="Temporary password (8+ chars)" value={form.password}
+                onChange={(e) => setForm({ ...form, password: e.target.value })}
+                className="h-9 px-3 text-sm rounded-md border border-ink-200 bg-surface font-mono"
+              />
+              <select
+                value={form.role}
+                onChange={(e) => setForm({ ...form, role: e.target.value as UserRow['role'] })}
+                className="h-9 px-2 text-sm rounded-md border border-ink-200 bg-surface font-medium"
+              >
+                {ROLE_OPTIONS.map((r) => <option key={r.value} value={r.value}>{r.label} — {r.hint}</option>)}
+              </select>
+            </div>
+            <div className="flex gap-2">
+              <button
+                onClick={submitCreate} disabled={pending}
+                className="px-4 h-9 text-sm font-semibold rounded-md bg-brand-600 text-white hover:bg-brand-700 transition disabled:opacity-40"
+              >
+                {pending ? 'Creating…' : 'Create user'}
+              </button>
+              <button onClick={() => setShowCreate(false)} className="px-3 h-9 text-sm rounded-md border border-ink-200 text-ink-700 hover:bg-ink-50">
+                Cancel
+              </button>
+            </div>
+            <p className="text-[11px] text-ink-500">
+              Share the temporary password over a secure channel and ask them to change it after first login.
+            </p>
+          </div>
+        )}
+      </div>
+
+      {/* List */}
+      <div className="rounded-2xl border border-ink-200 bg-surface overflow-hidden">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="text-left text-[11px] uppercase tracking-wider text-ink-500 border-b border-ink-200">
+              <th className="px-4 py-2 font-semibold">User</th>
+              <th className="px-2 py-2 font-semibold">Role</th>
+              <th className="px-2 py-2 font-semibold">Last login</th>
+              <th className="px-2 py-2 font-semibold text-center">Status</th>
+              <th className="px-4 py-2 font-semibold text-right">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {users.map((u) => (
+              <tr key={u.id} className={`border-b border-ink-100 ${!u.active ? 'opacity-50' : ''}`}>
+                <td className="px-4 py-2.5">
+                  <div className="font-medium text-ink-900 text-[13px]">
+                    {u.name} {u.id === myId && <span className="text-[10px] text-ink-500">(you)</span>}
+                  </div>
+                  <div className="text-[11px] text-ink-500">{u.email}</div>
+                </td>
+                <td className="px-2 py-2.5">
+                  <select
+                    value={u.role}
+                    disabled={u.id === myId}
+                    onChange={(e) => setRole(u.id, e.target.value as UserRow['role'])}
+                    className={`text-[11px] font-semibold px-1.5 py-1 rounded-md border ${ROLE_BADGE[u.role] ?? ROLE_BADGE.viewer} disabled:cursor-not-allowed`}
+                  >
+                    {ROLE_OPTIONS.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
+                    {(u.role === 'editor') && <option value="editor">Editor (legacy)</option>}
+                  </select>
+                </td>
+                <td className="px-2 py-2.5 text-[12px] text-ink-600 tabular-nums">
+                  {u.last_login_at ? new Date(u.last_login_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : 'never'}
+                </td>
+                <td className="px-2 py-2.5 text-center">
+                  <button
+                    onClick={() => setActive(u.id, !u.active)}
+                    disabled={u.id === myId}
+                    className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border transition ${
+                      u.active
+                        ? 'bg-success-50 text-success-600 border-success-100 hover:bg-danger-50 hover:text-danger-500 hover:border-danger-100'
+                        : 'bg-ink-100 text-ink-500 border-ink-200 hover:bg-success-50 hover:text-success-600'
+                    } disabled:cursor-not-allowed`}
+                    title={u.active ? 'Click to deactivate' : 'Click to reactivate'}
+                  >
+                    {u.active ? 'Active' : 'Inactive'}
+                  </button>
+                </td>
+                <td className="px-4 py-2.5 text-right">
+                  {pwFor === u.id ? (
+                    <span className="inline-flex items-center gap-1">
+                      <input
+                        type="text" placeholder="New password" value={pwValue} autoFocus
+                        onChange={(e) => setPwValue(e.target.value)}
+                        className="h-7 px-2 text-[12px] rounded-md border border-ink-200 bg-surface font-mono w-36"
+                      />
+                      <button onClick={() => submitPassword(u.id)} disabled={pending} className="text-[11px] font-semibold text-brand-700 dark:text-brand-400 px-1">Set</button>
+                      <button onClick={() => { setPwFor(null); setPwValue(''); }} className="text-[11px] text-ink-500 px-1">✕</button>
+                    </span>
+                  ) : (
+                    <button
+                      onClick={() => setPwFor(u.id)}
+                      className="inline-flex items-center gap-1 text-[11px] text-ink-500 hover:text-ink-900 transition"
+                    >
+                      <KeyRound className="w-3 h-3" /> Reset password
+                    </button>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}

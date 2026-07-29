@@ -3,7 +3,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { LogOut, User as UserIcon } from 'lucide-react';
 
-type User = { id: number; email: string; name: string; role: 'admin' | 'editor' | 'viewer' };
+type User = { id: number; email: string; name: string; role: 'admin' | 'operations' | 'network' | 'editor' | 'viewer' };
 
 export function UserChip({ user }: { user: User }) {
   const [open, setOpen] = useState(false);

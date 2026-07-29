@@ -78,6 +78,10 @@ services:
       # The .env.production file can override APP_DATABASE_URL if you point
       # atlas-web at an externally-managed Postgres instead.
       APP_DATABASE_URL: ${APP_DATABASE_URL:-postgres://atlas:${ATLAS_DB_PASSWORD:-atlas}@atlas-db:5432/atlas}
+      # CRM document uploads (named volume survives rebuilds)
+      UPLOADS_DIR: /app/uploads
+    volumes:
+      - atlas-uploads:/app/uploads
     # host.docker.internal: lets atlas-web reach a Postgres running on the
     # VM's host network (the operational LabStack DB) on Linux.
     extra_hosts:
@@ -125,5 +129,7 @@ services:
 volumes:
   atlas-data:
     name: atlas-data
+  atlas-uploads:
+    name: atlas-uploads
   atlas-refresh-logs:
     name: atlas-refresh-logs

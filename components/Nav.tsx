@@ -15,6 +15,9 @@ import {
   Briefcase,
   Users,
   IndianRupee,
+  KanbanSquare,
+  FileSearch,
+  UserCog,
   type LucideIcon,
 } from 'lucide-react';
 
@@ -37,6 +40,9 @@ const navLinks: NavItem[] = [
   { href: '/directory', label: 'Directory', icon: BookOpenText, alsoActiveOn: ['/chain'] },
   { href: '/phlebos', label: 'Phlebos', icon: Users },
   { href: '/pricing', label: 'Pricing', icon: IndianRupee },
+  { href: '/crm', label: 'CRM', icon: KanbanSquare },
+  { href: '/coverage', label: 'Coverage', icon: FileSearch },
+  { href: '/users', label: 'Users', icon: UserCog },
   { href: '/quality', label: 'Quality', icon: Activity },
 ];
 

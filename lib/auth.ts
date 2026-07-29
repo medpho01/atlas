@@ -22,7 +22,7 @@ export type User = {
   id: number;
   email: string;
   name: string;
-  role: 'admin' | 'editor' | 'viewer';
+  role: 'admin' | 'operations' | 'network' | 'editor' | 'viewer';
 };
 
 // ---- Password ----------------------------------------------------------------
