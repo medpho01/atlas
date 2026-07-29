@@ -121,6 +121,47 @@ done
 # (empty array where the source has nothing to copy into it).
 $PG -c "ALTER TABLE src_local.\"Master\" ADD COLUMN IF NOT EXISTS aliases text[] DEFAULT ARRAY[]::text[];" >>"$LOG" 2>&1 || true
 
+# ---- Phase 0.6: foreign-table drift self-heal --------------------------------
+# When the SOURCE drops or renames a column, the imported foreign table keeps
+# referencing it and every read fails deterministically ("column X does not
+# exist" — this exact failure silently emptied Store for days). Probe each
+# foreign table with a full-width read; on failure, re-import it and align the
+# snapshot by adding any columns the fresh definition carries that the
+# snapshot lacks (stale extra snapshot columns are harmless — they stay NULL;
+# Phase 2a inserts by explicit column list from the foreign table).
+log "Phase 0.6/4 · probing foreign tables for schema drift"
+for t in Chain ProviderType Pharmacy Store PincodeToLatLong Lab Provider Profile User Request Order Appointment PharmaOrder Master DOS Package PackagesOnLab _MasterToPackage; do
+  if ! $PG -c "SELECT * FROM src.\"$t\" LIMIT 1;" >/dev/null 2>&1; then
+    log "  src.\"$t\" is stale (probe failed) — re-importing"
+    $PG -c "DROP FOREIGN TABLE IF EXISTS src.\"$t\";
+            IMPORT FOREIGN SCHEMA public LIMIT TO (\"$t\") FROM SERVER labstack_src INTO src;" >>"$LOG" 2>&1 \
+      || { log "  WARN: re-import of $t failed"; continue; }
+    $PG >>"$LOG" 2>&1 <<ALIGN || log "  WARN: column align for $t failed"
+DO \$\$
+DECLARE r record;
+BEGIN
+  FOR r IN
+    SELECT a.attname, format_type(a.atttypid, a.atttypmod) AS ftype
+    FROM pg_attribute a
+    JOIN pg_class c ON c.oid = a.attrelid
+    JOIN pg_namespace n ON n.oid = c.relnamespace
+    WHERE n.nspname = 'src' AND c.relname = '$t'
+      AND a.attnum > 0 AND NOT a.attisdropped
+      AND NOT EXISTS (
+        SELECT 1 FROM pg_attribute a2
+        JOIN pg_class c2 ON c2.oid = a2.attrelid
+        JOIN pg_namespace n2 ON n2.oid = c2.relnamespace
+        WHERE n2.nspname = 'src_local' AND c2.relname = '$t'
+          AND a2.attname = a.attname AND a2.attnum > 0 AND NOT a2.attisdropped)
+  LOOP
+    EXECUTE format('ALTER TABLE src_local.%I ADD COLUMN %I %s', '$t', r.attname, r.ftype);
+  END LOOP;
+END \$\$;
+ALIGN
+    log "  src.\"$t\" re-imported + snapshot aligned"
+  fi
+done
+
 # ---- Phase 1: TRUNCATE -----------------------------------------------------
 log "Phase 1/4 · TRUNCATE src_local tables"
 $PG <<'SQL' || fail "Truncate failed"
@@ -154,6 +195,16 @@ for t in Chain ProviderType Pharmacy Store PincodeToLatLong Lab Provider Profile
     sleep 5
   done
   [ "$ok" -eq 0 ] && log "  WARN: $t copy failed after 3 attempts (MVs will be partially stale)"
+done
+
+# Loud alert for any snapshot that ended the phase empty while its source
+# has rows — a silent version of this emptied /accounts for days.
+for t in Chain ProviderType Pharmacy Store PincodeToLatLong Lab Provider Profile User Request Master DOS Package PackagesOnLab _MasterToPackage; do
+  local_n=$($PG -t -A -c "SELECT COUNT(*) FROM src_local.\"$t\";" 2>/dev/null || echo 0)
+  if [ "${local_n:-0}" = "0" ]; then
+    src_n=$($PG -t -A -c "SELECT COUNT(*) FROM (SELECT 1 FROM src.\"$t\" LIMIT 1) x;" 2>/dev/null || echo 0)
+    [ "${src_n:-0}" != "0" ] && log "  ALERT: src_local.$t is EMPTY but source has data — dependent MVs will refresh to zero rows"
+  fi
 done
 
 # ---- Phase 2b: big tables (chunked by id, with retry per chunk) ------------
