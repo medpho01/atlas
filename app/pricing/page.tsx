@@ -1,10 +1,20 @@
 import { IndianRupee } from 'lucide-react';
+import { redirect } from 'next/navigation';
 import { PricingClient } from './PricingClient';
 import { queryOne } from '@/lib/db';
+import { getSessionUser } from '@/lib/auth';
+import { canAccess } from '@/lib/access';
+import { RoleBlocked } from '@/components/RoleBlocked';
 
 export const dynamic = 'force-dynamic';
 
 export default async function PricingPage() {
+  const me = await getSessionUser();
+  if (!me) redirect('/login?next=/pricing');
+  if (!canAccess(me, 'pricing')) {
+    return <RoleBlocked area="Pricing Intelligence" detail="the network and admin teams" />;
+  }
+
   const stats = await queryOne<{ tests: number; labs: number; rates: number }>(`
     SELECT
       (SELECT COUNT(*) FROM analytics.mv_test_catalog)::int                AS tests,

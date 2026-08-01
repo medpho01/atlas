@@ -14,7 +14,8 @@ export async function GET(req: NextRequest) {
     pincode:   sp.get('pincode') ?? '',
     city:      sp.get('city') ?? '',
     state:     sp.get('state') ?? '',
-    lab:       sp.get('lab') ?? '',
+    // Repeated ?lab= params — multi-select. None = all labs.
+    labs:      sp.getAll('lab').filter(Boolean),
     source:    (sp.get('source') || 'all') as 'derived' | 'manual' | 'both' | 'all',
     nearby:    sp.get('nearby') === '1',
     radiusKm:  Number(sp.get('radius')) || PHLEBO_REACH_RADIUS_KM,

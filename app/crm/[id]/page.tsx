@@ -1,7 +1,9 @@
 import Link from 'next/link';
-import { notFound } from 'next/navigation';
+import { notFound, redirect } from 'next/navigation';
 import { ArrowLeft, Target } from 'lucide-react';
 import { getSessionUser } from '@/lib/auth';
+import { canAccess } from '@/lib/access';
+import { RoleBlocked } from '@/components/RoleBlocked';
 import { getThread, getThreadProviders, getChecklist, listTeam, getThreadStats, canWriteCrm } from '@/lib/crm';
 import { BoardClient } from './BoardClient';
 import { ThreadStats } from './ThreadStats';
@@ -14,6 +16,11 @@ export default async function ThreadPage({ params }: { params: Promise<{ id: str
   if (!Number.isInteger(threadId)) notFound();
 
   const me = await getSessionUser();
+  if (!me) redirect(`/login?next=/crm/${threadId}`);
+  if (!canAccess(me, 'crm')) {
+    return <RoleBlocked area="The network CRM" detail="the network and admin teams" />;
+  }
+
   const thread = await getThread(threadId);
   if (!thread) notFound();
 

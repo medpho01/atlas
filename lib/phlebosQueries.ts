@@ -38,7 +38,7 @@ export type PhleboFilters = {
   pincode?: string;               // exact pincode (6 digits)
   city?: string;
   state?: string;
-  lab?: string;                   // exact lab name — matches phlebos whose labs[] contains it
+  labs?: string[];                // exact lab names — matches phlebos serving ANY of them (empty/undefined = all)
   source?: 'derived' | 'manual' | 'both' | 'all';
   nearby?: boolean;               // if true + pincode set, radius search
   radiusKm?: number;
@@ -60,6 +60,16 @@ const SORT_EXPRS: Record<SortKey, string> = {
   source:   'p.source',
   distance: 'distance_km',
 };
+
+/**
+ * Normalised lab selection, or null when no lab filter should apply.
+ * An empty selection means "no lab filter" (i.e. all labs) — same convention as
+ * the other filters, so clearing the checkboxes widens rather than empties.
+ */
+function selectedLabs(filters: PhleboFilters): string[] | null {
+  const labs = (filters.labs ?? []).map((l) => l.trim()).filter(Boolean);
+  return labs.length > 0 ? labs : null;
+}
 
 function orderClause(filters: PhleboFilters, isNearby: boolean): string {
   const key: SortKey = filters.sortBy && SORT_EXPRS[filters.sortBy] ? filters.sortBy : (isNearby ? 'distance' : 'orders');
@@ -131,9 +141,8 @@ export async function listPhlebos(
   if (filters.source && filters.source !== 'all') {
     conds.push(`p.source = ${push(filters.source)}`);
   }
-  if (filters.lab && filters.lab.trim()) {
-    conds.push(`${push(filters.lab.trim())} = ANY(p.labs)`);
-  }
+  const labSel = selectedLabs(filters);
+  if (labSel) conds.push(`p.labs && ${push(labSel)}::text[]`);
   if (filters.minOrders && filters.minOrders > 0) {
     conds.push(`p.orders_served >= ${push(filters.minOrders)}`);
   }
@@ -221,7 +230,8 @@ export async function countPhlebos(filters: PhleboFilters): Promise<number> {
   if (filters.city && filters.city.trim()) conds.push(`lower(p.city) = ${push(filters.city.trim().toLowerCase())}`);
   if (filters.state && filters.state.trim()) conds.push(`lower(p.state) = ${push(filters.state.trim().toLowerCase())}`);
   if (filters.source && filters.source !== 'all') conds.push(`p.source = ${push(filters.source)}`);
-  if (filters.lab && filters.lab.trim()) conds.push(`${push(filters.lab.trim())} = ANY(p.labs)`);
+  const labSel = selectedLabs(filters);
+  if (labSel) conds.push(`p.labs && ${push(labSel)}::text[]`);
   if (filters.minOrders && filters.minOrders > 0) conds.push(`p.orders_served >= ${push(filters.minOrders)}`);
 
   if (isNearby) {

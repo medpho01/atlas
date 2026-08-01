@@ -1,5 +1,8 @@
 import { KanbanSquare } from 'lucide-react';
+import { redirect } from 'next/navigation';
 import { getSessionUser } from '@/lib/auth';
+import { canAccess } from '@/lib/access';
+import { RoleBlocked } from '@/components/RoleBlocked';
 import { listThreads, listFunnels, canWriteCrm } from '@/lib/crm';
 import { ThreadsClient } from './ThreadsClient';
 
@@ -7,6 +10,11 @@ export const dynamic = 'force-dynamic';
 
 export default async function CrmPage() {
   const me = await getSessionUser();
+  if (!me) redirect('/login?next=/crm');
+  if (!canAccess(me, 'crm')) {
+    return <RoleBlocked area="The network CRM" detail="the network and admin teams" />;
+  }
+
   const [threads, funnels] = await Promise.all([listThreads(), listFunnels()]);
 
   return (

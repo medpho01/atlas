@@ -44,8 +44,8 @@ export default async function RootLayout({ children }: { children: React.ReactNo
         {me && (
           <header className="sticky top-0 z-40 bg-surface/90 backdrop-blur-md border-b border-ink-150">
             <div className="px-6 h-14 flex items-center justify-between gap-6">
-              <div className="flex items-center gap-1">
-                <Link href="/" className="flex items-center gap-2 mr-4 group" title="Atlas — map every pincode, find every gap">
+              <div className="flex items-center gap-1 min-w-0 flex-1">
+                <Link href="/" className="flex items-center gap-2 mr-4 shrink-0 group" title="Atlas — map every pincode, find every gap">
                   <span className="inline-flex w-7 h-7 bg-brand-600 rounded-md items-center justify-center shadow-sm transition-shadow group-hover:shadow-md">
                     <svg viewBox="0 0 32 32" className="w-4 h-4" fill="none" aria-hidden>
                       <path d="M 10.5 10.5 L 21.5 10.5 L 16 22 Z" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
@@ -55,12 +55,12 @@ export default async function RootLayout({ children }: { children: React.ReactNo
                     </svg>
                   </span>
                   <span className="font-semibold text-ink-900 text-[15px] tracking-tight">Atlas</span>
-                  <span className="text-ink-300 text-sm font-medium">·</span>
-                  <span className="text-ink-500 text-sm font-medium">LabStack</span>
+                  <span className="hidden lg:inline text-ink-300 text-sm font-medium">·</span>
+                  <span className="hidden lg:inline text-ink-500 text-sm font-medium">LabStack</span>
                 </Link>
-                <Nav />
+                <Nav role={me.role} />
               </div>
-              <div className="flex items-center gap-3 text-sm">
+              <div className="flex items-center gap-3 text-sm shrink-0">
                 <LensChip />
                 <ThemeToggle />
                 <UserChip user={me} />

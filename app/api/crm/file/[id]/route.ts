@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { readFile } from 'fs/promises';
 import path from 'path';
 import { getSessionUser } from '@/lib/auth';
+import { canAccess } from '@/lib/access';
 import { queryOne } from '@/lib/db';
 
 export const dynamic = 'force-dynamic';
@@ -11,6 +12,7 @@ const UPLOADS_DIR = process.env.UPLOADS_DIR || '/app/uploads';
 export async function GET(_req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const user = await getSessionUser();
   if (!user) return NextResponse.json({ error: 'unauthenticated' }, { status: 401 });
+  if (!canAccess(user, 'crm')) return NextResponse.json({ error: 'forbidden' }, { status: 403 });
 
   const { id } = await ctx.params;
   const docId = parseInt(id, 10);

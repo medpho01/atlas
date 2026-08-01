@@ -15,6 +15,7 @@ import { cookies, headers } from 'next/headers';
 import crypto from 'node:crypto';
 import { appQuery, appQueryOne } from './db';
 import { SESSION_COOKIE, SESSION_TTL_DAYS } from './authConstants';
+import type { Role } from './access';
 
 export { SESSION_COOKIE, SESSION_TTL_DAYS };
 
@@ -22,7 +23,8 @@ export type User = {
   id: number;
   email: string;
   name: string;
-  role: 'admin' | 'operations' | 'network' | 'editor' | 'viewer';
+  // Single source of truth — lib/access.ts also drives who can reach which area.
+  role: Role;
 };
 
 // ---- Password ----------------------------------------------------------------

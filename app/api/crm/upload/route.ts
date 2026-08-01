@@ -3,6 +3,7 @@ import { mkdir, writeFile } from 'fs/promises';
 import path from 'path';
 import crypto from 'crypto';
 import { getSessionUser } from '@/lib/auth';
+import { canAccess } from '@/lib/access';
 import { canWriteCrm, logActivity } from '@/lib/crm';
 import { query, queryOne } from '@/lib/db';
 
@@ -15,7 +16,9 @@ const BLOCKED_EXT = new Set(['exe', 'sh', 'bat', 'cmd', 'js', 'html', 'svg']);
 export async function POST(req: NextRequest) {
   const user = await getSessionUser();
   if (!user) return NextResponse.json({ error: 'unauthenticated' }, { status: 401 });
-  if (!canWriteCrm(user)) return NextResponse.json({ error: 'forbidden' }, { status: 403 });
+  if (!canAccess(user, 'crm') || !canWriteCrm(user)) {
+    return NextResponse.json({ error: 'forbidden' }, { status: 403 });
+  }
 
   const form = await req.formData().catch(() => null);
   if (!form) return NextResponse.json({ error: 'bad form' }, { status: 400 });

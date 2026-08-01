@@ -1,4 +1,8 @@
 import Link from 'next/link';
+import { redirect } from 'next/navigation';
+import { getSessionUser } from '@/lib/auth';
+import { canAccess } from '@/lib/access';
+import { RoleBlocked } from '@/components/RoleBlocked';
 import { Briefcase, AlertTriangle, TrendingUp, TrendingDown, Sparkles } from 'lucide-react';
 import { Card, CardHeader, CardBody } from '@/components/ui/Card';
 import { PageHeader } from '@/components/ui/PageHeader';
@@ -49,10 +53,21 @@ const STATUS_LABEL: Record<Account['account_status'], string> = {
 };
 
 export default async function AccountsPage({ searchParams }: { searchParams: { status?: string } }) {
+  const me = await getSessionUser();
+  if (!me) redirect('/login?next=/accounts');
+  if (!canAccess(me, 'accounts')) {
+    return <RoleBlocked area="Accounts" detail="the network, admin, editor and viewer roles" />;
+  }
+
   const status = searchParams.status;
-  const filter = status && status !== 'all' ? `WHERE account_status = '${status.toUpperCase()}'` : '';
-  const accounts: Account[] = await query(`
-    SELECT * FROM mv_store_health ${filter}
+  // Only a known account_status value filters; anything else is treated as 'all'.
+  const statusUpper = status?.toUpperCase();
+  const statusFilter =
+    statusUpper && statusUpper in STATUS_LABEL ? (statusUpper as Account['account_status']) : null;
+  const accounts: Account[] = await query(
+    `
+    SELECT * FROM mv_store_health
+    ${statusFilter ? 'WHERE account_status = $1' : ''}
     ORDER BY
       CASE account_status
         WHEN 'AT_RISK' THEN 1
@@ -64,7 +79,9 @@ export default async function AccountsPage({ searchParams }: { searchParams: { s
         ELSE 7 END,
       orders_total DESC NULLS LAST
     LIMIT 200
-  `);
+  `,
+    statusFilter ? [statusFilter] : undefined,
+  );
 
   const totals = accounts.reduce(
     (acc, a) => {
