@@ -46,7 +46,7 @@ export type Feature =
   | 'coverage'          // pincodes, gaps, imbalance, momentum, heatmap, serviceability
   | 'directory'         // labs & chains, phlebos, nurses, quality
   | 'accountHealth'     // Growth › Account health
-  | 'catalogue'         // Growth › Tests & rates
+  | 'catalogue'         // Growth › Packages & Pricing
   | 'providerPipeline'  // Growth › Provider onboarding
   | 'admin';            // users & roles
 
@@ -125,7 +125,7 @@ export const FEATURE_LABEL: Record<Feature, string> = {
   coverage: 'Coverage',
   directory: 'Directory',
   accountHealth: 'Account health',
-  catalogue: 'Tests & rates',
+  catalogue: 'Packages & Pricing',
   providerPipeline: 'Provider onboarding',
   admin: 'Users & roles',
 };
