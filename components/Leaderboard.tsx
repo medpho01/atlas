@@ -40,6 +40,16 @@ function buildHref(mode: 'ORDERS' | 'COVERAGE', lens: string) {
   return `?${params.toString()}#leaderboard`;
 }
 
+/**
+ * Same target without the fragment. router.push() to a URL carrying a hash is
+ * treated as an in-page jump and skips the RSC round-trip, so the lens never
+ * reaches the server-rendered map and gap tiles. The anchor is only useful on
+ * the mode links, which are real <Link>s.
+ */
+function buildPushHref(mode: 'ORDERS' | 'COVERAGE', lens: string) {
+  return buildHref(mode, lens).replace('#leaderboard', '');
+}
+
 export function Leaderboard({ initialMode, initialLens, rows: initialRows, platformTotal: initialPlatformTotal }: Props) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -109,21 +119,25 @@ export function Leaderboard({ initialMode, initialLens, rows: initialRows, platf
               const next = e.target.value;
               setLens(next);                                   // instant local feedback
               setFetching(true);
-              // Fire client fetch for fresh data + concurrently update URL (no page reload).
-              const fetchUrl = `/api/leaderboard?mode=${mode}&lens=${encodeURIComponent(next)}`;
+
+              // Navigate FIRST, and only through the router. A previous version
+              // called history.replaceState() to the target URL before pushing,
+              // which left the address bar already matching — so router.push()
+              // was a no-op and the server-rendered map and gap tiles never
+              // re-read the lens. The leaderboard updated, nothing else did.
+              startTransition(() => router.push(buildPushHref(mode, next)));
+
+              // Client fetch purely so this card shows fresh rows immediately
+              // rather than waiting on the RSC round-trip.
               try {
-                const [data] = await Promise.all([
-                  fetch(fetchUrl).then((r) => r.json()),
-                  Promise.resolve(window.history.replaceState(null, '', buildHref(mode, next))),
-                ]);
+                const data = await fetch(
+                  `/api/leaderboard?mode=${mode}&lens=${encodeURIComponent(next)}`,
+                ).then((r) => r.json());
                 setRows(data.rows ?? []);
                 setPlatformTotal(data.platformTotal ?? 0);
               } finally {
                 setFetching(false);
               }
-              // Soft router refresh in the background so other widgets (map, gaps) also update
-              // when the URL changes — but the leaderboard is already showing fresh data.
-              startTransition(() => router.push(buildHref(mode, next)));
             }}
             className={`w-full px-2.5 py-1.5 text-xs rounded-lg border border-ink-200 bg-surface font-medium text-ink-700 focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-500 transition ${fetching || pending ? 'opacity-60' : ''}`}
           >

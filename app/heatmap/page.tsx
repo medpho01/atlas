@@ -39,12 +39,12 @@ export default async function HeatmapPage({ searchParams }: { searchParams: { mo
   return (
     <div className="px-6 lg:px-8 py-6 max-w-[1600px] mx-auto">
       <PageHeader
-        title="Order Origin Heatmap"
+        title="Order Heatmap"
         subtitle="Where orders come from, and where you're weak. Toggle Supply/Demand/Gap to see the network from different lenses."
         actions={
           <div className="flex items-center gap-2">
             <InfoTip
-              title="Order Origin Heatmap"
+              title="Order Heatmap"
               shows="A geographic view of every pincode you've touched. Three lenses — Demand (where orders come from), Supply (where providers exist), Gap (demand ÷ supply ratio)."
               computed={
                 <>

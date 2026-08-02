@@ -1,6 +1,7 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { Crosshair } from 'lucide-react';
 import { MapContainer, TileLayer, CircleMarker, Tooltip, useMap } from 'react-leaflet';
 import L from 'leaflet';
 
@@ -52,14 +53,77 @@ function colorFor(p: Point, mode: 'supply' | 'demand' | 'gap'): string {
   return '#94a3b8';
 }
 
-function FitBounds({ points }: { points: Point[] }) {
+function boundsOf(points: Point[]) {
+  return L.latLngBounds(points.map((p) => [p.latitude, p.longitude] as [number, number]));
+}
+
+const FIT_OPTS = { padding: [40, 40] as [number, number], maxZoom: 11 };
+
+/**
+ * Fits to the points and offers a way back.
+ *
+ * Zooming and panning is easy to get lost in — especially once a lens narrows
+ * the map to a few dozen scattered points — and Leaflet gives you no route home
+ * but manual panning. The button appears once the view differs from the fitted
+ * one, compared on zoom and centre rather than bounds containment: zooming in
+ * keeps the centre inside the fitted bounds, so a containment test never fires
+ * for the case users actually hit.
+ */
+function FitAndRecenter({ points }: { points: Point[] }) {
   const map = useMap();
+  const [drifted, setDrifted] = useState(false);
+  const fitted = useRef<{ zoom: number; center: L.LatLng } | null>(null);
+  // Read points through a ref so `fit` is stable and the auto-fit effect below
+  // can key off the data rather than the array identity.
+  const pointsRef = useRef(points);
+  pointsRef.current = points;
+
+  const fit = useCallback(() => {
+    const pts = pointsRef.current;
+    if (pts.length === 0) return;
+    map.fitBounds(boundsOf(pts), FIT_OPTS);
+    // Record where fitBounds actually landed, after Leaflet clamps the zoom.
+    requestAnimationFrame(() => {
+      fitted.current = { zoom: map.getZoom(), center: map.getCenter() };
+      setDrifted(false);
+    });
+  }, [map]);
+
+  // Re-fit only when the point set genuinely changes — e.g. the lens narrows
+  // the map. Depending on the array itself re-fits on every render, which
+  // clears `drifted` immediately and means the button can never appear.
+  const signature = points.length
+    ? `${points.length}:${points[0].pincode}:${points[points.length - 1].pincode}`
+    : '0';
+  useEffect(() => { fit(); }, [fit, signature]);
+
   useEffect(() => {
-    if (points.length === 0) return;
-    const bounds = L.latLngBounds(points.map((p) => [p.latitude, p.longitude] as [number, number]));
-    map.fitBounds(bounds, { padding: [40, 40], maxZoom: 11 });
-  }, [points, map]);
-  return null;
+    const check = () => {
+      const f = fitted.current;
+      if (!f) return;
+      const zoomed = Math.abs(map.getZoom() - f.zoom) >= 0.75;
+      // Panned more than a third of the visible span away from the fitted centre.
+      const span = map.getBounds().getNorthEast().distanceTo(map.getBounds().getSouthWest());
+      const panned = map.getCenter().distanceTo(f.center) > span / 3;
+      setDrifted(zoomed || panned);
+    };
+    map.on('moveend zoomend', check);
+    return () => { map.off('moveend zoomend', check); };
+  }, [map]);
+
+  if (points.length === 0 || !drifted) return null;
+
+  return (
+    <button
+      onClick={fit}
+      className="absolute top-2.5 right-2.5 z-[1000] inline-flex items-center gap-1.5 px-2.5 h-8
+                 text-xs font-semibold rounded-md bg-surface/95 backdrop-blur border border-ink-200
+                 text-ink-800 shadow-sm hover:bg-ink-50 transition"
+      title="Fit the map back to the plotted pincodes"
+    >
+      <Crosshair className="w-3.5 h-3.5" /> Recenter
+    </button>
+  );
 }
 
 export default function PincodeMap({
@@ -89,7 +153,7 @@ export default function PincodeMap({
     : '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>';
 
   return (
-    <div style={{ height }} className="rounded-lg overflow-hidden border border-ink-150">
+    <div style={{ height }} className="relative rounded-lg overflow-hidden border border-ink-150">
       <MapContainer
         center={center}
         zoom={zoom}
@@ -135,7 +199,7 @@ export default function PincodeMap({
             </CircleMarker>
           );
         })}
-        <FitBounds points={points} />
+        <FitAndRecenter points={points} />
       </MapContainer>
     </div>
   );

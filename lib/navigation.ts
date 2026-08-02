@@ -40,7 +40,7 @@ export const NAV: NavGroup[] = [
       { href: '/gaps', label: 'Gaps', feature: 'coverage' },
       { href: '/imbalance', label: 'Imbalance', feature: 'coverage' },
       { href: '/momentum', label: 'Momentum', feature: 'coverage' },
-      { href: '/heatmap', label: 'Heatmap', feature: 'coverage' },
+      { href: '/heatmap', label: 'Order Heatmap', feature: 'coverage' },
       { href: '/coverage', label: 'Serviceability check', feature: 'coverage' },
     ],
   },
