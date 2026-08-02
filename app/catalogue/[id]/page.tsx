@@ -29,7 +29,6 @@ export default async function PackageDetailPage({ params }: { params: { id: stri
   ]);
   if (!pkg) notFound();
 
-  const unpriced = pkg.test_count - pkg.tests_priced;
 
   return (
     <main className="mx-auto max-w-7xl px-6 py-8">
@@ -61,45 +60,40 @@ export default async function PackageDetailPage({ params }: { params: { id: stri
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
         <KpiTile
-          label="Package cost"
-          value={inr(pkg.pkg_cost)}
-          sub={pkg.best_lab_name
-            ? `at ${pkg.best_lab_name}${pkg.labs_quoting_credibly > 1 ? ` · ${pkg.labs_quoting_credibly - 1} other option${pkg.labs_quoting_credibly > 2 ? 's' : ''}` : ''}`
-            : 'no lab quotes this package'}
-        />
-        <KpiTile
-          label="À-la-carte list"
-          value={inr(pkg.alacarte_low)}
-          sub={pkg.test_count > 0 ? 'these tests bought separately' : 'no composition to price'}
-        />
-        <KpiTile
-          label="Headroom"
-          value={pkg.headroom_pct == null ? '—' : `${pkg.headroom_pct}%`}
-          sub={pkg.headroom_pct == null ? 'needs both figures' : 'list less cost — room to discount'}
+          label="People taken"
+          value={pkg.patients > 0 ? pkg.patients.toLocaleString('en-IN') : 'Not yet'}
+          sub={pkg.patients > 0
+            ? `${pkg.orders.toLocaleString('en-IN')} orders${pkg.last_ordered ? ` · last ${pkg.last_ordered}` : ''}`
+            : 'no recorded orders'}
         />
         <KpiTile
           label="Tests"
           value={pkg.test_count > 0 ? String(pkg.test_count) : '—'}
           sub={pkg.test_count === 0
             ? 'sold as a unit, not a test list'
-            : unpriced > 0 ? `${unpriced} unpriced` : 'all priced'}
+            : `${pkg.department_count} department${pkg.department_count === 1 ? '' : 's'}${pkg.sample_type_count === 1 ? ' · single sample' : ''}`}
+        />
+        <KpiTile
+          label="Report in"
+          value={pkg.tat_hours ? `${pkg.tat_hours}h` : '—'}
+          sub={(pkg.order_types ?? []).map((m) => MODALITY_LABEL[m] ?? m).join(' · ') || 'modality not set'}
+        />
+        <KpiTile
+          label="Price"
+          value={inr(pkg.pkg_cost)}
+          sub={pkg.best_lab_name
+            ? `at ${pkg.best_lab_name}${pkg.labs_quoting > 1 ? ` · ${pkg.labs_quoting - 1} other option${pkg.labs_quoting > 2 ? 's' : ''}` : ''}`
+            : 'no lab quotes this package'}
         />
       </div>
 
-      {unpriced > 0 && (
-        <div className="mb-6 rounded-md border border-warn-500/30 bg-warn-500/5 px-3 py-2 text-xs text-ink-700">
-          <span className="font-medium text-ink-900">{unpriced} of {pkg.test_count} tests carry no lab rate.</span>{' '}
-          The à-la-carte figure covers only the {pkg.tests_priced} that do, so it understates the
-          list value. Package cost is unaffected — it is the lab’s own quote for the whole thing.
-        </div>
-      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <div className="lg:col-span-2">
           <Card>
             <CardHeader
               title="What's in it"
-              subtitle="Priciest first — where the value sits, and what to cut when a client pushes back. Per-test figures are the lowest across labs, for reference; the package price above is what it actually costs."
+              subtitle="Most-taken first. Per-test prices are the lowest any lab charges, for reference only — the package price above is what it costs."
               icon={<Beaker className="w-4 h-4" strokeWidth={2.25} />}
             />
             <CardBody className="pt-0">
@@ -109,6 +103,7 @@ export default async function PackageDetailPage({ params }: { params: { id: stri
                     <tr className="text-[11px] uppercase tracking-wide text-ink-400 border-b border-ink-200">
                       <th className="text-left font-medium px-5 py-2">Test</th>
                       <th className="text-left font-medium px-2 py-2">Department</th>
+                      <th className="text-right font-medium px-2 py-2">People taken</th>
                       <th className="text-right font-medium px-2 py-2">MRP from</th>
                       <th className="text-right font-medium px-2 py-2">Cost from</th>
                       <th className="text-right font-medium px-5 py-2">Labs w/ test</th>
@@ -126,6 +121,9 @@ export default async function PackageDetailPage({ params }: { params: { id: stri
                         <td className="px-2 py-1.5 text-xs text-ink-500">
                           {c.department ? c.department.toLowerCase() : '—'}
                         </td>
+                        <td className="px-2 py-1.5 num text-ink-700">
+                          {c.patients > 0 ? c.patients.toLocaleString('en-IN') : <span className="text-ink-300">—</span>}
+                        </td>
                         <td className="px-2 py-1.5 num">{inr(c.mrp_min)}</td>
                         <td className="px-2 py-1.5 num text-ink-600">{inr(c.b2b_min)}</td>
                         <td className="px-5 py-1.5 num text-ink-600">
@@ -135,7 +133,7 @@ export default async function PackageDetailPage({ params }: { params: { id: stri
                     ))}
                     {!components.length && (
                       <tr>
-                        <td colSpan={5} className="px-5 py-6 text-sm text-ink-500">
+                        <td colSpan={6} className="px-5 py-6 text-sm text-ink-500">
                           No test-level composition in LabStack — this package is priced by the
                           lab as a unit rather than assembled from catalogue tests. Common for kit
                           and imaging packages.

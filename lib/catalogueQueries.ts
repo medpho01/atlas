@@ -10,10 +10,11 @@ import { query, queryOne } from './db';
  *
  * Two things shape every query here.
  *
- * A package is bought from one lab, so cost is that lab's quoted price for the
- * package as a unit, at the cheapest lab quoting it — see
- * analytics.v_package_economics. À-la-carte value is a selling reference only:
- * what a client would pay buying the same tests individually at list.
+ * Every figure is a property of the package, or one named lab's price for it.
+ * There are no cross-lab rollups. Prices are per-lab and don't add up across
+ * labs, so an à-la-carte total or a blended cost — and any headroom computed
+ * between them — described nothing anyone could buy. What replaced them is
+ * adoption: how many people have actually been through the package.
  *
  * Commercial categories live in atlas.*, written by scripts/enrich-catalogue.ts.
  * Every join to them is a LEFT JOIN: the catalogue is fully browsable before
@@ -57,16 +58,18 @@ export type PackageRow = {
   order_types: string[] | null;
   tat_hours: number | null;
   test_count: number;
-  tests_priced: number;
-  /** What the same tests would list at individually — a selling reference. */
-  alacarte_low: string | null;
-  /** What the package costs, at the cheapest lab that quotes it. */
+  department_count: number;
+  sample_type_count: number;
+  /** What the package costs at the cheapest lab quoting it — one lab, one price. */
   pkg_cost: string | null;
   best_lab_name: string | null;
   best_lab_city: string | null;
-  headroom_pct: number | null;
-  /** Labs quoting a credible price — sourcing alternatives, not a cost input. */
-  labs_quoting_credibly: number;
+  labs_quoting: number;
+  /** Adoption. A zero here is a real signal, not missing data. */
+  orders: number;
+  patients: number;
+  orders_l90d: number;
+  last_ordered: string | null;
   categories: string[] | null;
   intent: string | null;
   positioning: string | null;
@@ -77,8 +80,11 @@ export type PackageFilters = {
   category?: string;
   modality?: string;
   minTests?: number;
-  valueMin?: number;
-  valueMax?: number;
+  /** Price band, against the cheapest lab's quote for the package. */
+  priceMin?: number;
+  priceMax?: number;
+  /** Only packages someone has actually ordered. */
+  provenOnly?: boolean;
   limit?: number;
 };
 
@@ -102,14 +108,15 @@ export async function browsePackages(f: PackageFilters = {}): Promise<PackageRow
     params.push(f.minTests);
     where.push(`e.test_count >= $${params.length}`);
   }
-  if (f.valueMin != null) {
-    params.push(f.valueMin);
-    where.push(`e.alacarte_low >= $${params.length}`);
+  if (f.priceMin != null) {
+    params.push(f.priceMin);
+    where.push(`e.pkg_cost >= $${params.length}`);
   }
-  if (f.valueMax != null) {
-    params.push(f.valueMax);
-    where.push(`e.alacarte_low <= $${params.length}`);
+  if (f.priceMax != null) {
+    params.push(f.priceMax);
+    where.push(`e.pkg_cost <= $${params.length}`);
   }
+  if (f.provenOnly) where.push('e.orders > 0');
   // The whole package set is a few hundred rows, so it is served entire
   // rather than capped — a truncated list headed "300 packages" reads as a
   // total, and quietly hides the rest of the catalogue from the person
@@ -118,28 +125,27 @@ export async function browsePackages(f: PackageFilters = {}): Promise<PackageRow
 
   return query<PackageRow>(`
     SELECT e.package_id, e.package_name, e.is_custom, e.order_types, e.tat_hours,
-           e.test_count, e.tests_priced, e.alacarte_low::text, e.pkg_cost::text,
-           e.best_lab_name, e.best_lab_city, e.headroom_pct, e.labs_quoting_credibly,
+           e.test_count, e.department_count, e.sample_type_count, e.pkg_cost::text,
+           e.best_lab_name, e.best_lab_city, e.labs_quoting,
+           e.orders, e.patients, e.orders_l90d, e.last_ordered::text,
            pe.categories, pe.intent, pe.positioning
     FROM analytics.v_package_economics e
     LEFT JOIN atlas.package_enrichment pe ON pe.package_id = e.package_id
     ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
-    ORDER BY COALESCE(e.alacarte_low, e.pkg_cost) DESC NULLS LAST, e.test_count DESC
+    ORDER BY e.patients DESC, e.test_count DESC, e.package_name
     LIMIT $${params.length}
   `, params);
 }
 
 export type PackageDetail = PackageRow & {
   description: string | null;
-  alacarte_high: string | null;
-  labs_quoting: number;
   confidence: string | null;
   enrichment_source: string | null;
 };
 
 export async function getPackageDetail(id: number): Promise<PackageDetail | null> {
   return queryOne<PackageDetail>(`
-    SELECT e.*, e.alacarte_low::text, e.alacarte_high::text, e.pkg_cost::text,
+    SELECT e.*, e.pkg_cost::text, e.last_ordered::text,
            pe.categories, pe.intent, pe.positioning,
            pe.confidence::text, pe.source AS enrichment_source
     FROM analytics.v_package_economics e
@@ -157,21 +163,24 @@ export type ComponentRow = {
   b2b_min: string | null;
   categories: string[] | null;
   why_it_matters: string | null;
+  patients: number;
 };
 
-/** What's actually in the package, priced. Unpriced rows are kept and shown. */
+/** What's actually in the package, with how often each test is taken. */
 export async function getPackageComponents(id: number): Promise<ComponentRow[]> {
   return query<ComponentRow>(`
     SELECT m.id AS master_id, m.name AS test_name, d.department,
            tc.labs_count, tc.mrp_min::text, tc.b2b_min::text,
-           te.categories, te.why_it_matters
+           te.categories, te.why_it_matters,
+           COALESCE(dm.patients, 0) AS patients
     FROM src."_MasterToPackage" mp
     JOIN src."Master" m ON m.id = mp."A"
     LEFT JOIN src."LabDepartment" d ON d.id = m."labDepartment_id"
     LEFT JOIN analytics.mv_test_catalog tc ON tc.master_id = m.id
     LEFT JOIN atlas.test_enrichment te ON te.master_id = m.id
+    LEFT JOIN analytics.mv_catalogue_demand dm ON dm.kind='TEST' AND dm.entity_id = m.id
     WHERE mp."B" = $1
-    ORDER BY tc.mrp_min DESC NULLS LAST, m.name
+    ORDER BY COALESCE(dm.patients,0) DESC, tc.mrp_min DESC NULLS LAST, m.name
   `, [id]);
 }
 

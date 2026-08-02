@@ -103,30 +103,61 @@ CREATE TABLE IF NOT EXISTS atlas.enrichment_run (
   note           text
 );
 
--- Package economics.
+-- What people actually take.
 --
--- A package is bought from ONE lab. That single fact decides everything here.
+-- Order carries no package or test foreign key, but standardizedValues.testValues
+-- does: every result row holds a testId matching Master.lsId and, for packaged
+-- orders, a packageId matching Package.id. That is 2.5M result rows across
+-- 29,662 orders, so it is materialized rather than unnested per request.
 --
--- An earlier version of this view summed the cheapest rate per constituent
--- test across the whole network. That number is not purchasable: on a real
--- package the per-test minima came from 24 different labs, and it understated
--- true cost by 21%-371%, which in turn inflated headroom from ~30% to ~72%.
--- Anyone quoting off it would have given away margin they did not have.
+-- This is deliberately the only demand signal here. Rolled-up money figures --
+-- à-la-carte totals, blended lab costs, the headroom between them -- were
+-- removed: prices are per-lab and don't add up across labs, so summing them
+-- produced numbers nobody could act on. Adoption is a fact about the package.
+CREATE MATERIALIZED VIEW IF NOT EXISTS analytics.mv_catalogue_demand AS
+WITH tv AS (
+  SELECT o.id AS order_id, o."userId", o."createdAt",
+         jsonb_array_elements(o."standardizedValues" -> 'testValues') AS t
+  FROM src."Order" o
+  WHERE jsonb_typeof(o."standardizedValues" -> 'testValues') = 'array'
+),
+rows AS (
+  SELECT DISTINCT
+    order_id, "userId", "createdAt",
+    t ->> 'testId'  AS ls_id,
+    CASE WHEN t ->> 'packageId' ~ '^[0-9]+$' THEN (t ->> 'packageId')::int END AS package_id
+  FROM tv
+)
+SELECT
+  'PACKAGE'::text                                  AS kind,
+  package_id                                       AS entity_id,
+  COUNT(DISTINCT order_id)::int                    AS orders,
+  COUNT(DISTINCT "userId")::int                    AS patients,
+  MAX("createdAt")::date                           AS last_ordered,
+  COUNT(DISTINCT order_id) FILTER (
+    WHERE "createdAt" >= now() - INTERVAL '90 days')::int AS orders_l90d
+FROM rows WHERE package_id IS NOT NULL
+GROUP BY package_id
+UNION ALL
+SELECT
+  'TEST'::text,
+  m.id,
+  COUNT(DISTINCT r.order_id)::int,
+  COUNT(DISTINCT r."userId")::int,
+  MAX(r."createdAt")::date,
+  COUNT(DISTINCT r.order_id) FILTER (
+    WHERE r."createdAt" >= now() - INTERVAL '90 days')::int
+FROM rows r JOIN src."Master" m ON m."lsId" = r.ls_id
+GROUP BY m.id;
+
+CREATE UNIQUE INDEX IF NOT EXISTS mv_catalogue_demand_key
+  ON analytics.mv_catalogue_demand (kind, entity_id);
+
+-- Package facts.
 --
--- So cost is the lab's own quoted price for the package as a unit
--- (mv_lab_packages.b2b), taken at the cheapest lab that quotes it. That is
--- what buying the package actually costs. It also happens to be the only
--- workable answer for the large panels — no single lab carries rates for all
--- 69 tests in ZOCO Nutritionists Choice, yet labs quote the package happily.
---
--- Quotes at or below Rs.10 are placeholders, not prices (11 of 265 packages),
--- and are excluded rather than shown as a bargain.
---
--- alacarte_low stays, but only as the SELLING reference: what a client would
--- pay buying the same tests individually at list. Headroom is that list value
--- less what the package costs us — the room available to discount.
--- Dropped rather than replaced: the column set changed, and CREATE OR REPLACE
--- cannot rename a view column.
+-- Everything here is a property of the package or of one named lab. There are
+-- no cross-lab totals: a package is bought from a single lab, so a figure
+-- assembled from several is not a price anyone can pay.
 DROP VIEW IF EXISTS analytics.v_package_economics;
 CREATE VIEW analytics.v_package_economics AS
 WITH comp AS (
@@ -134,17 +165,15 @@ WITH comp AS (
   FROM src."_MasterToPackage" mp
 ),
 built AS (
-  SELECT
-    c.package_id,
-    COUNT(*)::int            AS test_count,
-    COUNT(tc.master_id)::int AS tests_priced,
-    SUM(tc.mrp_min)::numeric AS alacarte_low,
-    SUM(tc.mrp_max)::numeric AS alacarte_high
-  FROM comp c
-  LEFT JOIN analytics.mv_test_catalog tc ON tc.master_id = c.master_id
+  SELECT c.package_id,
+         COUNT(*)::int                            AS test_count,
+         COUNT(DISTINCT m."labDepartment_id")::int AS department_count,
+         COUNT(DISTINCT m."sampleType_id")::int    AS sample_type_count
+  FROM comp c LEFT JOIN src."Master" m ON m.id = c.master_id
   GROUP BY c.package_id
 ),
--- The cheapest lab that actually quotes this package, and its price.
+-- The cheapest lab that quotes this package, and its price. Quotes at or below
+-- Rs.10 are placeholders rather than prices and are ignored.
 best_quote AS (
   SELECT DISTINCT ON (lp.package_id)
     lp.package_id, lp.lab_id AS best_lab_id, lp.b2b::numeric AS pkg_cost
@@ -153,11 +182,8 @@ best_quote AS (
   ORDER BY lp.package_id, lp.b2b
 ),
 reach AS (
-  SELECT package_id,
-         COUNT(*)::int                              AS labs_quoting,
-         COUNT(*) FILTER (WHERE b2b > 10)::int      AS labs_quoting_credibly
-  FROM analytics.mv_lab_packages
-  GROUP BY package_id
+  SELECT package_id, COUNT(*) FILTER (WHERE b2b > 10)::int AS labs_quoting
+  FROM analytics.mv_lab_packages GROUP BY package_id
 )
 SELECT
   p.id                                        AS package_id,
@@ -167,23 +193,21 @@ SELECT
   p."orderTypes"::text[]                      AS order_types,
   p."defaultTat"                              AS tat_hours,
   COALESCE(b.test_count, 0)                   AS test_count,
-  COALESCE(b.tests_priced, 0)                 AS tests_priced,
-  b.alacarte_low,
-  b.alacarte_high,
-  -- What the package costs, at one lab.
+  COALESCE(b.department_count, 0)             AS department_count,
+  COALESCE(b.sample_type_count, 0)            AS sample_type_count,
   q.pkg_cost,
-  q.best_lab_id,
   l."labName"                                 AS best_lab_name,
   l.city                                      AS best_lab_city,
-  -- Room between the list value of the tests and what the package costs us.
-  CASE WHEN b.alacarte_low > 0 AND q.pkg_cost IS NOT NULL
-       THEN ROUND(100.0 * (b.alacarte_low - q.pkg_cost) / b.alacarte_low)
-  END                                         AS headroom_pct,
   COALESCE(r.labs_quoting, 0)                 AS labs_quoting,
-  COALESCE(r.labs_quoting_credibly, 0)        AS labs_quoting_credibly
+  COALESCE(d.orders, 0)                       AS orders,
+  COALESCE(d.patients, 0)                     AS patients,
+  COALESCE(d.orders_l90d, 0)                  AS orders_l90d,
+  d.last_ordered
 FROM src."Package" p
 LEFT JOIN built      b ON b.package_id = p.id
 LEFT JOIN best_quote q ON q.package_id = p.id
 LEFT JOIN src."Lab"  l ON l.id = q.best_lab_id
 LEFT JOIN reach      r ON r.package_id = p.id
+LEFT JOIN analytics.mv_catalogue_demand d
+       ON d.kind = 'PACKAGE' AND d.entity_id = p.id
 WHERE p.active;

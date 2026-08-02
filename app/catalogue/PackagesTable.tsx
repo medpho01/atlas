@@ -10,12 +10,13 @@ type PackageRow = {
   is_custom: boolean;
   order_types: string[] | null;
   test_count: number;
-  tests_priced: number;
-  alacarte_low: string | null;
+  department_count: number;
+  tat_hours: number | null;
   pkg_cost: string | null;
   best_lab_name: string | null;
-  headroom_pct: number | null;
-  labs_quoting_credibly: number;
+  labs_quoting: number;
+  orders: number;
+  patients: number;
   categories: string[] | null;
   intent: string | null;
 };
@@ -33,11 +34,11 @@ const inr = (v: string | null) =>
 
 const columns: SortableColumn<PackageRow>[] = [
   { key: 'package_name', label: 'Package' },
+  { key: 'patients', label: 'People taken', align: 'right' },
   { key: 'test_count', label: 'Tests', align: 'right' },
-  { key: 'alacarte_low', label: 'À-la-carte list', align: 'right', sortValue: (p) => num(p.alacarte_low) },
-  { key: 'pkg_cost', label: 'Package cost', align: 'right', sortValue: (p) => num(p.pkg_cost) },
-  { key: 'headroom_pct', label: 'Headroom', align: 'right', sortValue: (p) => p.headroom_pct },
-  { key: 'best_lab_name', label: 'Cheapest at' },
+  { key: 'tat_hours', label: 'Report in', align: 'right', sortValue: (p) => p.tat_hours },
+  { key: 'pkg_cost', label: 'Price', align: 'right', sortValue: (p) => num(p.pkg_cost) },
+  { key: 'best_lab_name', label: 'From' },
   { key: 'order_types', label: 'Modality', sortValue: (p) => (p.order_types ?? []).join(',') },
 ];
 
@@ -54,7 +55,7 @@ export function PackagesTable({ packages }: { packages: PackageRow[] }) {
     <SortableTable<PackageRow>
       rows={packages}
       columns={columns}
-      initialSortKey="alacarte_low"
+      initialSortKey="patients"
       initialSortDir="desc"
       rowKey={(p) => p.package_id}
     >
@@ -68,43 +69,29 @@ export function PackagesTable({ packages }: { packages: PackageRow[] }) {
               {p.package_name}
             </Link>
             {p.is_custom && <span className="ml-2 text-[10px] text-ink-400">custom</span>}
-            {/* The one-line read on who it's for, when the catalogue has been classified. */}
             {p.intent && <div className="text-[11px] text-ink-500 font-normal mt-0.5">{p.intent}</div>}
+          </td>
+          <td className="num">
+            {p.patients > 0 ? (
+              <span className="font-medium text-success-700">{p.patients.toLocaleString('en-IN')}</span>
+            ) : (
+              // Never ordered is a fact worth stating, not a blank.
+              <span className="text-ink-300" title="No recorded orders for this package">not yet</span>
+            )}
           </td>
           <td className="num text-ink-700">
             {p.test_count || <span className="text-ink-300">—</span>}
-            {/* Flag partial pricing rather than silently understating the value. */}
-            {p.test_count > 0 && p.tests_priced < p.test_count && (
-              <span className="ml-1 text-[10px] text-warn-500" title={`${p.test_count - p.tests_priced} unpriced`}>
-                *
-              </span>
+            {p.department_count > 1 && (
+              <span className="text-[10px] text-ink-400 ml-1">/{p.department_count} depts</span>
             )}
           </td>
-          <td className="num font-medium">{inr(p.alacarte_low)}</td>
+          <td className="num text-ink-600">
+            {p.tat_hours ? `${p.tat_hours}h` : <span className="text-ink-300">—</span>}
+          </td>
           <td className="num font-medium">{inr(p.pkg_cost)}</td>
-          <td className="num">
-            {p.headroom_pct == null ? (
-              <span className="text-ink-300">—</span>
-            ) : (
-              <span
-                className={
-                  p.headroom_pct >= 60
-                    ? 'text-success-700 font-semibold'
-                    : p.headroom_pct >= 35
-                      ? 'text-success-700'
-                      : 'text-warn-500'
-                }
-              >
-                {p.headroom_pct}%
-              </span>
-            )}
-          </td>
-          <td className="text-xs text-ink-600 max-w-[12rem] truncate">
+          <td className="text-xs text-ink-600 max-w-[11rem] truncate">
             {p.best_lab_name ?? <span className="text-ink-300">no quote</span>}
-            {/* Alternatives matter for negotiating, not for the price itself. */}
-            {p.labs_quoting_credibly > 1 && (
-              <span className="text-ink-400"> +{p.labs_quoting_credibly - 1}</span>
-            )}
+            {p.labs_quoting > 1 && <span className="text-ink-400"> +{p.labs_quoting - 1}</span>}
           </td>
           <td className="text-xs text-ink-500">
             {(p.order_types ?? []).map((m) => MODALITY_SHORT[m] ?? m).join(' · ') || '—'}

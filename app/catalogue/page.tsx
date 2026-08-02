@@ -15,18 +15,18 @@ export const dynamic = 'force-dynamic';
 const inr = (v: string | null) =>
   v == null ? null : `₹${Math.round(Number(v)).toLocaleString('en-IN')}`;
 
-/** Value bands, in à-la-carte rupees. The bands a quote conversation uses. */
+/** Price bands, against what the cheapest lab quotes for the package. */
 const BANDS = [
-  { key: 'under2k', label: 'Under ₹2k', min: undefined, max: 2000 },
-  { key: '2k-5k', label: '₹2k–5k', min: 2000, max: 5000 },
-  { key: '5k-15k', label: '₹5k–15k', min: 5000, max: 15000 },
-  { key: 'over15k', label: 'Over ₹15k', min: 15000, max: undefined },
+  { key: 'under1k', label: 'Under ₹1k', min: undefined, max: 1000 },
+  { key: '1k-3k', label: '₹1k–3k', min: 1000, max: 3000 },
+  { key: '3k-8k', label: '₹3k–8k', min: 3000, max: 8000 },
+  { key: 'over8k', label: 'Over ₹8k', min: 8000, max: undefined },
 ] as const;
 
 export default async function PackagesPage({
   searchParams,
 }: {
-  searchParams: { q?: string; category?: string; modality?: string; band?: string; minTests?: string };
+  searchParams: { q?: string; category?: string; modality?: string; band?: string; minTests?: string; proven?: string };
 }) {
   const { blocked } = await requireView('catalogue', '/catalogue');
   if (blocked) return <RoleBlocked area="The catalogue" detail="the network, accounts and admin teams" />;
@@ -38,15 +38,17 @@ export default async function PackagesPage({
       category: searchParams.category,
       modality: searchParams.modality,
       minTests: searchParams.minTests ? Number(searchParams.minTests) : undefined,
-      valueMin: band?.min,
-      valueMax: band?.max,
+      priceMin: band?.min,
+      priceMax: band?.max,
+      provenOnly: searchParams.proven === '1',
     }),
     getCategories(),
     getEnrichmentState(),
   ]);
 
   const withCategories = categories.filter((c) => c.packages > 0);
-  const totalValue = packages.reduce((s, p) => s + Number(p.alacarte_low ?? 0), 0);
+  const proven = packages.filter((p) => p.orders > 0).length;
+  const peopleServed = packages.reduce((s, p) => s + p.patients, 0);
 
   // Preserve the other filters when toggling one.
   const href = (patch: Record<string, string | undefined>) => {
@@ -66,9 +68,8 @@ export default async function PackagesPage({
         </div>
         <p className="text-sm text-ink-600 max-w-3xl">
           Everything already built and sellable, so a new client can be shown what exists
-          instead of designing from scratch. Value is the à-la-carte total of a package&rsquo;s
-          tests against what the labs charge us — the basis for a quote, not a quoted price.
-          To model an actual quote, use Packages &amp; Pricing.
+          instead of designing from scratch — sorted by how many people have actually been
+          through each one. To model an actual quote, use Packages &amp; Pricing.
         </p>
       </div>
 
@@ -90,7 +91,7 @@ export default async function PackagesPage({
       </form>
 
       <div className="flex flex-wrap items-center gap-1.5 mb-2">
-        <span className="text-[11px] uppercase tracking-wide text-ink-400 mr-1">Value</span>
+        <span className="text-[11px] uppercase tracking-wide text-ink-400 mr-1">Price</span>
         <ChipButton href={href({ band: undefined })} active={!searchParams.band}>Any</ChipButton>
         {BANDS.map((b) => (
           <ChipButton key={b.key} href={href({ band: b.key })} active={searchParams.band === b.key}>
@@ -104,6 +105,12 @@ export default async function PackagesPage({
             {MODALITY_LABEL[m]}
           </ChipButton>
         ))}
+        <ChipButton
+          href={href({ proven: searchParams.proven === '1' ? undefined : '1' })}
+          active={searchParams.proven === '1'}
+        >
+          ✓ Ordered before
+        </ChipButton>
       </div>
 
       {withCategories.length > 0 ? (
@@ -133,9 +140,9 @@ export default async function PackagesPage({
         <CardHeader
           title={`${packages.length} package${packages.length === 1 ? '' : 's'}`}
           subtitle={
-            totalValue > 0
-              ? `${inr(String(totalValue))} of à-la-carte value on this list. Click any column to sort.`
-              : 'Click any column to sort.'
+            proven > 0
+              ? `${proven} of them have been ordered before, by ${peopleServed.toLocaleString('en-IN')} people. Click any column to sort.`
+              : 'None of these have recorded orders yet. Click any column to sort.'
           }
           icon={<PackageIcon className="w-4 h-4" strokeWidth={2.25} />}
         />
@@ -151,14 +158,14 @@ export default async function PackagesPage({
           <Pill tone="neutral">Custom</Pill> built for a specific client — reusable as a starting point.
         </span>
         <span>
-          <span className="font-medium text-ink-700">Package cost</span> is what the cheapest lab
-          quotes for the whole package — a package is fulfilled at one lab, so that is the price.
-          <span className="font-medium text-ink-700"> À-la-carte list</span> is what the same tests
-          would cost bought separately, and headroom is the gap: the room you have to discount.
+          <span className="font-medium text-ink-700">People taken</span> is how many patients have
+          been through the package — the strongest thing you can put in front of a client. A
+          package showing <span className="italic">not yet</span> has simply never been ordered.
         </span>
         <span>
-          Kit and imaging packages have no test list, so they show a cost but no à-la-carte
-          comparison — there is nothing to add up.
+          <span className="font-medium text-ink-700">Price</span> is one lab&rsquo;s quote for the
+          whole package, at the cheapest lab that quotes it. A package is fulfilled at a single
+          lab, so prices from different labs are alternatives, never something to add together.
         </span>
         {enrichment.last_run && (
           <span>Catalogue last classified {new Date(enrichment.last_run).toLocaleDateString('en-IN')}.</span>
