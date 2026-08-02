@@ -1,4 +1,6 @@
 import Link from 'next/link';
+import { requireView } from '@/lib/guard';
+import { RoleBlocked } from '@/components/RoleBlocked';
 import { Activity, Building2, AlertTriangle } from 'lucide-react';
 import { Card, CardHeader, CardBody } from '@/components/ui/Card';
 import { PageHeader } from '@/components/ui/PageHeader';
@@ -10,6 +12,9 @@ import { getQualityList, getChainList } from '@/lib/queries';
 export const dynamic = 'force-dynamic';
 
 export default async function QualityPage({ searchParams }: { searchParams: { tab?: string; health?: string } }) {
+  const gate = await requireView('directory', '/quality');
+  if (gate.blocked) return <RoleBlocked area="The provider directory" detail="every signed-in role" />;
+
   const tab = searchParams.tab ?? 'labs';
   const health = (searchParams.health as 'red' | 'amber' | 'green' | 'all') ?? 'all';
 

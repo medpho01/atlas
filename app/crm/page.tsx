@@ -11,7 +11,7 @@ export const dynamic = 'force-dynamic';
 export default async function CrmPage() {
   const me = await getSessionUser();
   if (!me) redirect('/login?next=/crm');
-  if (!canAccess(me, 'crm')) {
+  if (!canAccess(me, 'providerPipeline')) {
     return <RoleBlocked area="The network CRM" detail="the network and admin teams" />;
   }
 

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSessionUser } from '@/lib/auth';
+import { canAccess } from '@/lib/access';
 import { listPhlebos, countPhlebos, PHLEBO_REACH_RADIUS_KM, type SortKey } from '@/lib/phlebosQueries';
 
 export const dynamic = 'force-dynamic';
@@ -7,6 +8,7 @@ export const dynamic = 'force-dynamic';
 export async function GET(req: NextRequest) {
   const user = await getSessionUser();
   if (!user) return NextResponse.json({ error: 'unauthenticated' }, { status: 401 });
+  if (!canAccess(user, 'directory')) return NextResponse.json({ error: 'forbidden' }, { status: 403 });
 
   const sp = req.nextUrl.searchParams;
   const filters = {

@@ -1,4 +1,6 @@
 import Link from 'next/link';
+import { requireView } from '@/lib/guard';
+import { RoleBlocked } from '@/components/RoleBlocked';
 import { MapPin, Building2, BarChart3, MapPinned, AlertTriangle, Globe2 } from 'lucide-react';
 import { query, queryOne } from '@/lib/db';
 import { enrichRowsWithCity } from '@/lib/pincodeDirectory';
@@ -147,6 +149,9 @@ function buildHref(current: Search, next: Partial<Search>) {
 }
 
 export default async function PincodesPage({ searchParams }: { searchParams: Search }) {
+  const gate = await requireView('coverage', '/pincodes');
+  if (gate.blocked) return <RoleBlocked area="Coverage" detail="every signed-in role" />;
+
   const s = searchParams;
   const bucketKey = s.bucket ?? 'all';
   const [rows, dist, topCities, topStates] = await Promise.all([

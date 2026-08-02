@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSessionUser } from '@/lib/auth';
+import { canAccess } from '@/lib/access';
 import { query } from '@/lib/db';
 
 export const dynamic = 'force-dynamic';
@@ -18,6 +19,7 @@ export type CoverageRow = {
 export async function POST(req: NextRequest) {
   const user = await getSessionUser();
   if (!user) return NextResponse.json({ error: 'unauthenticated' }, { status: 401 });
+  if (!canAccess(user, 'coverage')) return NextResponse.json({ error: 'forbidden' }, { status: 403 });
 
   const body = await req.json().catch(() => null);
   const pincodes: string[] = Array.isArray(body?.pincodes)

@@ -1,4 +1,6 @@
 import { Scale, AlertTriangle } from 'lucide-react';
+import { requireView } from '@/lib/guard';
+import { RoleBlocked } from '@/components/RoleBlocked';
 import { Card, CardHeader, CardBody } from '@/components/ui/Card';
 import { PageHeader } from '@/components/ui/PageHeader';
 import { InfoTip } from '@/components/ui/InfoTip';
@@ -8,6 +10,9 @@ import { getDemandSupplyImbalances } from '@/lib/demandQueries';
 export const dynamic = 'force-dynamic';
 
 export default async function ImbalancePage() {
+  const gate = await requireView('coverage', '/imbalance');
+  if (gate.blocked) return <RoleBlocked area="Coverage" detail="every signed-in role" />;
+
   const rows = await getDemandSupplyImbalances({ minEvents: 3, limit: 80 });
 
   return (

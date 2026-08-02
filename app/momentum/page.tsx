@@ -1,4 +1,6 @@
 import Link from 'next/link';
+import { requireView } from '@/lib/guard';
+import { RoleBlocked } from '@/components/RoleBlocked';
 import { TrendingUp, TrendingDown, AlertTriangle, Sparkles, CalendarDays } from 'lucide-react';
 import { Card, CardHeader, CardBody } from '@/components/ui/Card';
 import { PageHeader } from '@/components/ui/PageHeader';
@@ -11,6 +13,9 @@ import { WINDOW_OPTIONS, ASOF_OPTIONS, parseWindow, parseAsof, shortWindowLabel,
 export const dynamic = 'force-dynamic';
 
 export default async function MomentumPage({ searchParams }: { searchParams: { window?: string; asof?: string } }) {
+  const gate = await requireView('coverage', '/momentum');
+  if (gate.blocked) return <RoleBlocked area="Coverage" detail="every signed-in role" />;
+
   const windowSel = parseWindow(searchParams.window);
   const asofSel = parseAsof(searchParams.asof);
   const scope = { asofDays: asofSel.days, windowDays: windowSel.days };

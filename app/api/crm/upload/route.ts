@@ -16,7 +16,7 @@ const BLOCKED_EXT = new Set(['exe', 'sh', 'bat', 'cmd', 'js', 'html', 'svg']);
 export async function POST(req: NextRequest) {
   const user = await getSessionUser();
   if (!user) return NextResponse.json({ error: 'unauthenticated' }, { status: 401 });
-  if (!canAccess(user, 'crm') || !canWriteCrm(user)) {
+  if (!canAccess(user, 'providerPipeline') || !canWriteCrm(user)) {
     return NextResponse.json({ error: 'forbidden' }, { status: 403 });
   }
 

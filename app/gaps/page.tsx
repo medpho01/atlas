@@ -1,4 +1,6 @@
 import Link from 'next/link';
+import { requireView } from '@/lib/guard';
+import { RoleBlocked } from '@/components/RoleBlocked';
 import { Crosshair } from 'lucide-react';
 import { Card, CardHeader, CardBody } from '@/components/ui/Card';
 import { PageHeader } from '@/components/ui/PageHeader';
@@ -11,6 +13,9 @@ import { LENS_OPTIONS, parseLens } from '@/lib/coverage';
 export const dynamic = 'force-dynamic';
 
 export default async function GapsPage({ searchParams }: { searchParams: { lens?: string; city?: string } }) {
+  const gate = await requireView('coverage', '/gaps');
+  if (gate.blocked) return <RoleBlocked area="Coverage" detail="every signed-in role" />;
+
   const lensKey = searchParams.lens ?? 'ANY';
   const { kinds, modality } = parseLens(lensKey);
   const rows = await getGapTriples({ kinds, modality, city: searchParams.city, limit: 80 });

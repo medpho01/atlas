@@ -55,7 +55,7 @@ const STATUS_LABEL: Record<Account['account_status'], string> = {
 export default async function AccountsPage({ searchParams }: { searchParams: { status?: string } }) {
   const me = await getSessionUser();
   if (!me) redirect('/login?next=/accounts');
-  if (!canAccess(me, 'accounts')) {
+  if (!canAccess(me, 'accountHealth')) {
     return <RoleBlocked area="Accounts" detail="the network, admin, editor and viewer roles" />;
   }
 

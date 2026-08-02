@@ -1,4 +1,6 @@
 import Link from 'next/link';
+import { requireView } from '@/lib/guard';
+import { RoleBlocked } from '@/components/RoleBlocked';
 import { BookOpenText, AlertTriangle } from 'lucide-react';
 import { listLabs, listProviders, getDataQualityNudges } from '@/lib/queries';
 import { Card, CardHeader, CardBody } from '@/components/ui/Card';
@@ -20,6 +22,9 @@ const LAB_SUB_TABS: { key: string; label: string; centerType?: string }[] = [
 ];
 
 export default async function DirectoryPage({ searchParams }: { searchParams: Search }) {
+  const gate = await requireView('directory', '/directory');
+  if (gate.blocked) return <RoleBlocked area="The provider directory" detail="every signed-in role" />;
+
   const tab = searchParams.tab ?? 'labs';
   const sub = searchParams.sub ?? 'all';
   const nudges = await getDataQualityNudges();

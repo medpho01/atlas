@@ -17,7 +17,7 @@ export default async function ThreadPage({ params }: { params: Promise<{ id: str
 
   const me = await getSessionUser();
   if (!me) redirect(`/login?next=/crm/${threadId}`);
-  if (!canAccess(me, 'crm')) {
+  if (!canAccess(me, 'providerPipeline')) {
     return <RoleBlocked area="The network CRM" detail="the network and admin teams" />;
   }
 

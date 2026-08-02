@@ -1,7 +1,6 @@
-import Link from 'next/link';
-import { redirect } from 'next/navigation';
-import { getSessionUser } from '@/lib/auth';
 import { query } from '@/lib/db';
+import { requireView } from '@/lib/guard';
+import { RoleBlocked } from '@/components/RoleBlocked';
 import { UsersClient } from './UsersClient';
 import { UserCog } from 'lucide-react';
 import type { UserRow } from './actions';
@@ -9,17 +8,9 @@ import type { UserRow } from './actions';
 export const dynamic = 'force-dynamic';
 
 export default async function UsersPage() {
-  const me = await getSessionUser();
-  if (!me) redirect('/login?next=/users');
-  if (me.role !== 'admin') {
-    return (
-      <main className="mx-auto max-w-2xl px-6 py-16 text-center">
-        <h1 className="text-xl font-bold text-ink-900 mb-2">Admin only</h1>
-        <p className="text-sm text-ink-600 mb-6">User management requires an admin account.</p>
-        <Link href="/" className="text-sm text-brand-700 dark:text-brand-400 hover:underline">← Back to overview</Link>
-      </main>
-    );
-  }
+  const gate = await requireView('admin', '/users');
+  if (gate.blocked) return <RoleBlocked area="User management" detail="admins" />;
+  const me = gate.user;
 
   const users = await query<UserRow>(
     `SELECT id, email, name, role, active, created_at, last_login_at

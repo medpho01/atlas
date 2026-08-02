@@ -8,7 +8,7 @@ export const dynamic = 'force-dynamic';
 export async function GET(req: NextRequest) {
   const user = await getSessionUser();
   if (!user) return NextResponse.json({ error: 'unauthenticated' }, { status: 401 });
-  if (!canAccess(user, 'pricing')) return NextResponse.json({ error: 'forbidden' }, { status: 403 });
+  if (!canAccess(user, 'catalogue')) return NextResponse.json({ error: 'forbidden' }, { status: 403 });
 
   const q = req.nextUrl.searchParams.get('q') ?? '';
   const tests = await searchTests(q);

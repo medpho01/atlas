@@ -3,7 +3,10 @@
 import { useState, useRef, useEffect } from 'react';
 import { LogOut, User as UserIcon } from 'lucide-react';
 
-type User = { id: number; email: string; name: string; role: 'admin' | 'operations' | 'network' | 'editor' | 'viewer' };
+import type { Role } from '@/lib/access';
+import { ROLE_LABEL } from '@/lib/access';
+
+type User = { id: number; email: string; name: string; role: Role };
 
 export function UserChip({ user }: { user: User }) {
   const [open, setOpen] = useState(false);
@@ -42,7 +45,7 @@ export function UserChip({ user }: { user: User }) {
           <div className="px-2.5 py-1.5">
             <div className="text-sm font-semibold text-ink-900 leading-tight">{user.name}</div>
             <div className="text-[11px] text-ink-500 mt-0.5">{user.email}</div>
-            <div className="text-[10px] uppercase tracking-wider text-ink-400 mt-1.5">{user.role}</div>
+            <div className="text-[10px] uppercase tracking-wider text-ink-400 mt-1.5">{ROLE_LABEL[user.role] ?? user.role}</div>
           </div>
           <hr className="border-ink-150 my-1.5" />
           <a

@@ -1,6 +1,7 @@
 'use server';
 
 import { getSessionUser } from '@/lib/auth';
+import { canManage } from '@/lib/access';
 import { bulkUpsertNurses, UploadedNurse, UploadResult } from '@/lib/nursesQueries';
 import { revalidatePath } from 'next/cache';
 
@@ -17,7 +18,7 @@ export async function commitUpload(input: CommitInput): Promise<
 > {
   const user = await getSessionUser();
   if (!user) return { ok: false, error: 'unauthenticated' };
-  if (user.role !== 'admin') return { ok: false, error: 'admin_only' };
+  if (!canManage(user, 'directory')) return { ok: false, error: 'forbidden' };
 
   if (!input.rows?.length) return { ok: false, error: 'no_rows' };
   if (input.rows.length > 100_000) return { ok: false, error: 'too_many_rows_max_100000' };

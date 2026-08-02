@@ -49,14 +49,14 @@ export function NursesClient({
   initialFilters,
   aggregatorOptions,
   defaultRadius,
-  isAdmin,
+  canEdit,
 }: {
   initialNurses: Nurse[];
   initialTotal: number;
   initialFilters: Filters;
   aggregatorOptions: { aggregator: string; n: number }[];
   defaultRadius: number;
-  isAdmin: boolean;
+  canEdit: boolean;
 }) {
   const [filters, setFilters] = useState<Filters>(initialFilters);
   const [nurses, setNurses] = useState<Nurse[]>(initialNurses);
@@ -258,7 +258,7 @@ export function NursesClient({
                 <tr>
                   <td colSpan={6} className="px-4 py-12 text-center text-sm text-ink-500">
                     No nurses match these filters.
-                    {isAdmin && !hasFilters && ' Upload a list to start building the repository.'}
+                    {canEdit && !hasFilters && ' Upload a list to start building the repository.'}
                   </td>
                 </tr>
               ) : (

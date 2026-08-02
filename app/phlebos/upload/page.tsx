@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { getSessionUser } from '@/lib/auth';
+import { canManage } from '@/lib/access';
 import { UploadClient } from './UploadClient';
 import { ArrowLeft } from 'lucide-react';
 
@@ -9,13 +10,13 @@ export const dynamic = 'force-dynamic';
 export default async function PhleboUploadPage() {
   const user = await getSessionUser();
   if (!user) redirect('/login?next=/phlebos/upload');
-  if (user.role !== 'admin') {
+  if (!canManage(user, 'directory')) {
     // Non-admin viewers get a friendly rejection instead of a 404
     return (
       <main className="mx-auto max-w-2xl px-6 py-16 text-center">
-        <h1 className="text-xl font-bold text-ink-900 mb-2">Admin only</h1>
+        <h1 className="text-xl font-bold text-ink-900 mb-2">Not available for your role</h1>
         <p className="text-sm text-ink-600 mb-6">
-          Uploading phlebos requires an admin account. Contact your Atlas admin if you need access.
+          Adding to the provider directory is limited to the network and admin teams.
         </p>
         <Link href="/phlebos" className="text-sm text-brand-700 hover:underline">
           ← Back to the phlebo repository

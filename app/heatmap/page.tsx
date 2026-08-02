@@ -1,4 +1,6 @@
 import Link from 'next/link';
+import { requireView } from '@/lib/guard';
+import { RoleBlocked } from '@/components/RoleBlocked';
 import { Map } from 'lucide-react';
 import MapClient from '@/components/MapClient';
 import { Card, CardHeader, CardBody } from '@/components/ui/Card';
@@ -15,6 +17,9 @@ import { query } from '@/lib/db';
 export const dynamic = 'force-dynamic';
 
 export default async function HeatmapPage({ searchParams }: { searchParams: { mode?: string; lens?: string } }) {
+  const gate = await requireView('coverage', '/heatmap');
+  if (gate.blocked) return <RoleBlocked area="Coverage" detail="every signed-in role" />;
+
   const mode = (searchParams.mode as 'supply' | 'demand' | 'gap') ?? 'demand';
   const lensKey = searchParams.lens ?? 'ANY';
   const { kinds, modality } = parseLens(lensKey);

@@ -1,5 +1,8 @@
 import { getPhleboRepoStats, listPhlebos, countPhlebos, listPhleboLabs, PHLEBO_REACH_RADIUS_KM } from '@/lib/phlebosQueries';
 import { getSessionUser } from '@/lib/auth';
+import { requireView } from '@/lib/guard';
+import { canManage } from '@/lib/access';
+import { RoleBlocked } from '@/components/RoleBlocked';
 import { PhlebosClient } from './PhlebosClient';
 import Link from 'next/link';
 import { Upload, Users, MapPin, TrendingUp, Sparkles } from 'lucide-react';
@@ -11,7 +14,9 @@ const s = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v) ??
 
 export default async function PhlebosPage({ searchParams }: { searchParams: Promise<SP> }) {
   const sp = await searchParams;
-  const user = await getSessionUser();
+  const gate = await requireView('directory', '/phlebos');
+  if (gate.blocked) return <RoleBlocked area="The provider directory" detail="every signed-in role" />;
+  const user = gate.user;
 
   const filters = {
     q:         s(sp.q),
@@ -32,7 +37,7 @@ export default async function PhlebosPage({ searchParams }: { searchParams: Prom
     listPhleboLabs(),
   ]);
 
-  const isAdmin = user?.role === 'admin';
+  const canEdit = canManage(user, 'directory');
 
   return (
     <main className="mx-auto max-w-7xl px-6 py-8">
@@ -48,7 +53,7 @@ export default async function PhlebosPage({ searchParams }: { searchParams: Prom
             Search by city, pincode, or name to find who to call for a sample pickup.
           </p>
         </div>
-        {isAdmin && (
+        {canEdit && (
           <Link
             href="/phlebos/upload"
             className="inline-flex items-center gap-1.5 px-3 h-9 text-sm font-semibold rounded-md bg-ink-900 text-ink-50 hover:bg-ink-800 transition shrink-0"
@@ -101,7 +106,7 @@ export default async function PhlebosPage({ searchParams }: { searchParams: Prom
         }}
         labOptions={labs}
         defaultRadius={PHLEBO_REACH_RADIUS_KM}
-        isAdmin={isAdmin}
+        canEdit={canEdit}
       />
     </main>
   );

@@ -4,16 +4,24 @@ import { useState, useTransition } from 'react';
 import { Plus, CheckCircle2, AlertCircle, KeyRound } from 'lucide-react';
 import { createUser, updateUser, type UserRow } from './actions';
 
+// The four profiles. editor/viewer still exist on old accounts and stay
+// selectable only for users already on them — see the legacy option below.
 const ROLE_OPTIONS = [
-  { value: 'admin',      label: 'Admin',      hint: 'Full control — users, threads, funnels, uploads' },
-  { value: 'network',    label: 'Network',    hint: 'CRM threads, providers, phlebos, pricing' },
-  { value: 'operations', label: 'Operations', hint: 'Day-to-day ops — phlebos, pricing, coverage' },
-  { value: 'viewer',     label: 'Viewer',     hint: 'Read-only dashboards' },
+  { value: 'admin',      label: 'Admin',      hint: 'Everything, plus provisioning people and roles' },
+  { value: 'network',    label: 'Network',    hint: 'Grows supply — edits the directory, rates and onboarding' },
+  { value: 'accounts',   label: 'Accounts',   hint: 'Grows demand — owns account health, reads the network side' },
+  { value: 'operations', label: 'Operations', hint: 'Fulfils orders — reads coverage and the directory' },
 ] as const;
+
+const LEGACY_LABEL: Record<string, string> = {
+  editor: 'Editor (legacy)',
+  viewer: 'Viewer (legacy)',
+};
 
 const ROLE_BADGE: Record<string, string> = {
   admin:      'bg-brand-50 text-brand-700 dark:text-brand-400 border-brand-100',
   network:    'bg-success-50 text-success-600 border-success-100',
+  accounts:   'bg-violet-50 text-violet-600 dark:text-violet-400 border-violet-100 dark:border-violet-500/30',
   operations: 'bg-warn-50 text-warn-600 border-warn-100',
   editor:     'bg-ink-100 text-ink-700 border-ink-200',
   viewer:     'bg-ink-100 text-ink-700 border-ink-200',
@@ -164,7 +172,9 @@ export function UsersClient({ initialUsers, myId }: { initialUsers: UserRow[]; m
                     className={`text-[11px] font-semibold px-1.5 py-1 rounded-md border ${ROLE_BADGE[u.role] ?? ROLE_BADGE.viewer} disabled:cursor-not-allowed`}
                   >
                     {ROLE_OPTIONS.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
-                    {(u.role === 'editor') && <option value="editor">Editor (legacy)</option>}
+                    {/* Keep a legacy role selectable only while someone is on it,
+                        so the dropdown doesn't silently reassign them on save. */}
+                    {LEGACY_LABEL[u.role] && <option value={u.role}>{LEGACY_LABEL[u.role]}</option>}
                   </select>
                 </td>
                 <td className="px-2 py-2.5 text-[12px] text-ink-600 tabular-nums">

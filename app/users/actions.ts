@@ -4,7 +4,7 @@ import { revalidatePath } from 'next/cache';
 import { getSessionUser, hashPassword, type User } from '@/lib/auth';
 import { query, queryOne } from '@/lib/db';
 
-const ROLES: User['role'][] = ['admin', 'operations', 'network', 'editor', 'viewer'];
+const ROLES: User['role'][] = ['admin', 'network', 'accounts', 'operations', 'editor', 'viewer'];
 
 async function requireAdmin() {
   const me = await getSessionUser();

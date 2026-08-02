@@ -45,14 +45,14 @@ export function PhlebosClient({
   initialFilters,
   labOptions,
   defaultRadius,
-  isAdmin,
+  canEdit,
 }: {
   initialPhlebos: Phlebo[];
   initialTotal: number;
   initialFilters: Filters;
   labOptions: { lab: string; n: number }[];
   defaultRadius: number;
-  isAdmin: boolean;
+  canEdit: boolean;
 }) {
   const [filters, setFilters] = useState<Filters>(initialFilters);
   const [phlebos, setPhlebos] = useState<Phlebo[]>(initialPhlebos);
@@ -272,7 +272,7 @@ export function PhlebosClient({
                 <td colSpan={6} className="px-4 py-12 text-center">
                   <Users className="w-8 h-8 text-ink-300 mx-auto mb-2" />
                   <p className="text-sm text-ink-500">No phlebos match your filters.</p>
-                  {isAdmin && !hasFilters && (
+                  {canEdit && !hasFilters && (
                     <p className="text-xs text-ink-400 mt-1">Once orders start flowing, phlebos will appear automatically.</p>
                   )}
                 </td>
