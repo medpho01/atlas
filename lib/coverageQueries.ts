@@ -522,13 +522,18 @@ export async function getGapTriples(opts: {
 }): Promise<GapTripleRow[]> {
   const params: any[] = [];
   const conds: string[] = ['(s.orders_l90d > 0 OR s.unserviceable_requests > 0)'];
+
+  // Filter the (kind × modality) set BEFORE the cross join, not after. Applied
+  // in the outer WHERE it still built every pincode × every pair first — eight
+  // times the rows needed for a single-slice lens.
+  const capConds: string[] = [];
   if (opts.kinds && opts.kinds !== 'ANY' && opts.kinds.length > 0) {
     params.push(opts.kinds);
-    conds.push(`caps.kind = ANY($${params.length}::text[])`);
+    capConds.push(`kind = ANY($${params.length}::text[])`);
   }
   if (opts.modality && opts.modality !== 'ANY') {
     params.push(opts.modality);
-    conds.push(`caps.modality = $${params.length}`);
+    capConds.push(`modality = $${params.length}`);
   }
   if (opts.city) {
     params.push(opts.city);
@@ -545,6 +550,22 @@ export async function getGapTriples(opts: {
     ),
     caps AS (
       SELECT DISTINCT kind, modality FROM mv_pincode_coverage
+      ${capConds.length ? `WHERE ${capConds.join(' AND ')}` : ''}
+    ),
+    -- (kind, modality) → service_line as data. Expressed as an OR-chain in the
+    -- momentum join this was unhashable, forcing a nested loop over the
+    -- momentum MV for every triple: 6.2s for the Phlebo lens alone.
+    kind_service(kind, modality, service_line) AS (
+      VALUES
+        ('LAB',      'HOME_SAMPLE',  'LAB_HOME_SAMPLE'),
+        ('HOSPITAL', 'HOME_SAMPLE',  'LAB_HOME_SAMPLE'),
+        ('LAB',      'CENTER_VISIT', 'LAB_CENTER_VISIT'),
+        ('HOSPITAL', 'CENTER_VISIT', 'LAB_CENTER_VISIT'),
+        ('DOCTOR',   'CENTER_VISIT', 'DOCTOR_CONSULT_CENTER'),
+        ('DOCTOR',   'HOME_VISIT',   'DOCTOR_CONSULT_HOME'),
+        ('NURSE',    'HOME_VISIT',   'NURSING_HOME_VISIT'),
+        ('PHLEBO',   'HOME_SAMPLE',  'LAB_HOME_SAMPLE'),
+        ('PHARMACY', 'DELIVERY',     'PHARMACY_DELIVERY')
     ),
     triples AS (
       SELECT
@@ -565,16 +586,11 @@ export async function getGapTriples(opts: {
         COALESCE(SUM(m.events) FILTER (WHERE m.week_start >= a.ref_date - INTERVAL '30 days'), 0)::int AS events_l30d,
         COALESCE(SUM(m.events) FILTER (WHERE m.week_start >= a.ref_date - INTERVAL '60 days'
                                          AND m.week_start < a.ref_date - INTERVAL '30 days'), 0)::int AS events_l30d_prior
-      FROM triples t CROSS JOIN anchor a
-      LEFT JOIN mv_service_line_momentum m ON m.pincode = t.pincode AND (
-        (t.kind IN ('LAB','HOSPITAL') AND t.modality = 'HOME_SAMPLE' AND m.service_line = 'LAB_HOME_SAMPLE')
-        OR (t.kind IN ('LAB','HOSPITAL') AND t.modality = 'CENTER_VISIT' AND m.service_line = 'LAB_CENTER_VISIT')
-        OR (t.kind = 'DOCTOR' AND t.modality = 'CENTER_VISIT' AND m.service_line = 'DOCTOR_CONSULT_CENTER')
-        OR (t.kind = 'DOCTOR' AND t.modality = 'HOME_VISIT' AND m.service_line = 'DOCTOR_CONSULT_HOME')
-        OR (t.kind = 'NURSE' AND t.modality = 'HOME_VISIT' AND m.service_line = 'NURSING_HOME_VISIT')
-        OR (t.kind = 'PHLEBO' AND m.service_line = 'LAB_HOME_SAMPLE')
-        OR (t.kind = 'PHARMACY' AND t.modality = 'DELIVERY' AND m.service_line = 'PHARMACY_DELIVERY')
-      )
+      FROM triples t
+      CROSS JOIN anchor a
+      LEFT JOIN kind_service ks ON ks.kind = t.kind AND ks.modality = t.modality
+      LEFT JOIN mv_service_line_momentum m
+        ON m.pincode = t.pincode AND m.service_line = ks.service_line
       GROUP BY t.pincode, t.kind, t.modality, a.ref_date
     )
     SELECT
