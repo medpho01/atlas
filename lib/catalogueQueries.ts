@@ -65,9 +65,8 @@ export type PackageRow = {
   best_lab_name: string | null;
   best_lab_city: string | null;
   labs_quoting: number;
-  /** Adoption. A zero here is a real signal, not missing data. */
+  /** How many times the package has been booked. Zero is a real signal. */
   orders: number;
-  patients: number;
   orders_l90d: number;
   last_ordered: string | null;
   categories: string[] | null;
@@ -127,12 +126,12 @@ export async function browsePackages(f: PackageFilters = {}): Promise<PackageRow
     SELECT e.package_id, e.package_name, e.is_custom, e.order_types, e.tat_hours,
            e.test_count, e.department_count, e.sample_type_count, e.pkg_cost::text,
            e.best_lab_name, e.best_lab_city, e.labs_quoting,
-           e.orders, e.patients, e.orders_l90d, e.last_ordered::text,
+           e.orders, e.orders_l90d, e.last_ordered::text,
            pe.categories, pe.intent, pe.positioning
     FROM analytics.v_package_economics e
     LEFT JOIN atlas.package_enrichment pe ON pe.package_id = e.package_id
     ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
-    ORDER BY e.patients DESC, e.test_count DESC, e.package_name
+    ORDER BY e.orders DESC, e.test_count DESC, e.package_name
     LIMIT $${params.length}
   `, params);
 }
@@ -163,7 +162,7 @@ export type ComponentRow = {
   b2b_min: string | null;
   categories: string[] | null;
   why_it_matters: string | null;
-  patients: number;
+  orders: number;
 };
 
 /** What's actually in the package, with how often each test is taken. */
@@ -172,7 +171,7 @@ export async function getPackageComponents(id: number): Promise<ComponentRow[]> 
     SELECT m.id AS master_id, m.name AS test_name, d.department,
            tc.labs_count, tc.mrp_min::text, tc.b2b_min::text,
            te.categories, te.why_it_matters,
-           COALESCE(dm.patients, 0) AS patients
+           COALESCE(dm.orders, 0) AS orders
     FROM src."_MasterToPackage" mp
     JOIN src."Master" m ON m.id = mp."A"
     LEFT JOIN src."LabDepartment" d ON d.id = m."labDepartment_id"
@@ -180,7 +179,7 @@ export async function getPackageComponents(id: number): Promise<ComponentRow[]> 
     LEFT JOIN atlas.test_enrichment te ON te.master_id = m.id
     LEFT JOIN analytics.mv_catalogue_demand dm ON dm.kind='TEST' AND dm.entity_id = m.id
     WHERE mp."B" = $1
-    ORDER BY COALESCE(dm.patients,0) DESC, tc.mrp_min DESC NULLS LAST, m.name
+    ORDER BY COALESCE(dm.orders,0) DESC, tc.mrp_min DESC NULLS LAST, m.name
   `, [id]);
 }
 

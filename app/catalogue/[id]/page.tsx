@@ -60,11 +60,11 @@ export default async function PackageDetailPage({ params }: { params: { id: stri
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
         <KpiTile
-          label="People taken"
-          value={pkg.patients > 0 ? pkg.patients.toLocaleString('en-IN') : 'Not yet'}
-          sub={pkg.patients > 0
-            ? `${pkg.orders.toLocaleString('en-IN')} orders${pkg.last_ordered ? ` · last ${pkg.last_ordered}` : ''}`
-            : 'no recorded orders'}
+          label="Orders booked"
+          value={pkg.orders > 0 ? pkg.orders.toLocaleString('en-IN') : 'Not yet'}
+          sub={pkg.orders > 0
+            ? `${pkg.orders_l90d} in the last 90 days${pkg.last_ordered ? ` · last ${pkg.last_ordered}` : ''}`
+            : 'never booked'}
         />
         <KpiTile
           label="Tests"
@@ -93,7 +93,7 @@ export default async function PackageDetailPage({ params }: { params: { id: stri
           <Card>
             <CardHeader
               title="What's in it"
-              subtitle="Most-taken first. Per-test prices are the lowest any lab charges, for reference only — the package price above is what it costs."
+              subtitle="Most-ordered first. Per-test prices are the lowest any lab charges, for reference only — the package price above is what it costs."
               icon={<Beaker className="w-4 h-4" strokeWidth={2.25} />}
             />
             <CardBody className="pt-0">
@@ -103,7 +103,7 @@ export default async function PackageDetailPage({ params }: { params: { id: stri
                     <tr className="text-[11px] uppercase tracking-wide text-ink-400 border-b border-ink-200">
                       <th className="text-left font-medium px-5 py-2">Test</th>
                       <th className="text-left font-medium px-2 py-2">Department</th>
-                      <th className="text-right font-medium px-2 py-2">People taken</th>
+                      <th className="text-right font-medium px-2 py-2">Orders</th>
                       <th className="text-right font-medium px-2 py-2">MRP from</th>
                       <th className="text-right font-medium px-2 py-2">Cost from</th>
                       <th className="text-right font-medium px-5 py-2">Labs w/ test</th>
@@ -122,7 +122,7 @@ export default async function PackageDetailPage({ params }: { params: { id: stri
                           {c.department ? c.department.toLowerCase() : '—'}
                         </td>
                         <td className="px-2 py-1.5 num text-ink-700">
-                          {c.patients > 0 ? c.patients.toLocaleString('en-IN') : <span className="text-ink-300">—</span>}
+                          {c.orders > 0 ? c.orders.toLocaleString('en-IN') : <span className="text-ink-300">—</span>}
                         </td>
                         <td className="px-2 py-1.5 num">{inr(c.mrp_min)}</td>
                         <td className="px-2 py-1.5 num text-ink-600">{inr(c.b2b_min)}</td>

@@ -48,7 +48,7 @@ export default async function PackagesPage({
 
   const withCategories = categories.filter((c) => c.packages > 0);
   const proven = packages.filter((p) => p.orders > 0).length;
-  const peopleServed = packages.reduce((s, p) => s + p.patients, 0);
+  const ordersBooked = packages.reduce((s, p) => s + p.orders, 0);
 
   // Preserve the other filters when toggling one.
   const href = (patch: Record<string, string | undefined>) => {
@@ -68,8 +68,8 @@ export default async function PackagesPage({
         </div>
         <p className="text-sm text-ink-600 max-w-3xl">
           Everything already built and sellable, so a new client can be shown what exists
-          instead of designing from scratch — sorted by how many people have actually been
-          through each one. To model an actual quote, use Packages &amp; Pricing.
+          instead of designing from scratch — sorted by how often each one is actually booked.
+          To model an actual quote, use Packages &amp; Pricing.
         </p>
       </div>
 
@@ -141,7 +141,7 @@ export default async function PackagesPage({
           title={`${packages.length} package${packages.length === 1 ? '' : 's'}`}
           subtitle={
             proven > 0
-              ? `${proven} of them have been ordered before, by ${peopleServed.toLocaleString('en-IN')} people. Click any column to sort.`
+              ? `${proven} have been booked before — ${ordersBooked.toLocaleString('en-IN')} orders between them. Click any column to sort.`
               : 'None of these have recorded orders yet. Click any column to sort.'
           }
           icon={<PackageIcon className="w-4 h-4" strokeWidth={2.25} />}
@@ -158,9 +158,10 @@ export default async function PackagesPage({
           <Pill tone="neutral">Custom</Pill> built for a specific client — reusable as a starting point.
         </span>
         <span>
-          <span className="font-medium text-ink-700">People taken</span> is how many patients have
-          been through the package — the strongest thing you can put in front of a client. A
-          package showing <span className="italic">not yet</span> has simply never been ordered.
+          <span className="font-medium text-ink-700">Orders</span> is how many times the package
+          has actually been booked, with the last 90 days shown alongside — the strongest thing
+          you can put in front of a client, and the column to sort by. A package showing{' '}
+          <span className="italic">not yet</span> has never been booked.
         </span>
         <span>
           <span className="font-medium text-ink-700">Price</span> is one lab&rsquo;s quote for the

@@ -16,7 +16,7 @@ type PackageRow = {
   best_lab_name: string | null;
   labs_quoting: number;
   orders: number;
-  patients: number;
+  orders_l90d: number;
   categories: string[] | null;
   intent: string | null;
 };
@@ -34,7 +34,7 @@ const inr = (v: string | null) =>
 
 const columns: SortableColumn<PackageRow>[] = [
   { key: 'package_name', label: 'Package' },
-  { key: 'patients', label: 'People taken', align: 'right' },
+  { key: 'orders', label: 'Orders', align: 'right' },
   { key: 'test_count', label: 'Tests', align: 'right' },
   { key: 'tat_hours', label: 'Report in', align: 'right', sortValue: (p) => p.tat_hours },
   { key: 'pkg_cost', label: 'Price', align: 'right', sortValue: (p) => num(p.pkg_cost) },
@@ -55,7 +55,7 @@ export function PackagesTable({ packages }: { packages: PackageRow[] }) {
     <SortableTable<PackageRow>
       rows={packages}
       columns={columns}
-      initialSortKey="patients"
+      initialSortKey="orders"
       initialSortDir="desc"
       rowKey={(p) => p.package_id}
     >
@@ -72,11 +72,18 @@ export function PackagesTable({ packages }: { packages: PackageRow[] }) {
             {p.intent && <div className="text-[11px] text-ink-500 font-normal mt-0.5">{p.intent}</div>}
           </td>
           <td className="num">
-            {p.patients > 0 ? (
-              <span className="font-medium text-success-700">{p.patients.toLocaleString('en-IN')}</span>
+            {p.orders > 0 ? (
+              <>
+                <span className="font-medium text-success-700">{p.orders.toLocaleString('en-IN')}</span>
+                {/* Recent activity separates a package selling now from one that
+                    sold well once and stopped. */}
+                {p.orders_l90d > 0 && (
+                  <span className="text-[10px] text-ink-400 ml-1">{p.orders_l90d} in 90d</span>
+                )}
+              </>
             ) : (
-              // Never ordered is a fact worth stating, not a blank.
-              <span className="text-ink-300" title="No recorded orders for this package">not yet</span>
+              // Never booked is a fact worth stating, not a blank.
+              <span className="text-ink-300" title="This package has never been booked">not yet</span>
             )}
           </td>
           <td className="num text-ink-700">
