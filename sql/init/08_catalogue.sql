@@ -103,18 +103,32 @@ CREATE TABLE IF NOT EXISTS atlas.enrichment_run (
   note           text
 );
 
--- Package economics, built bottom-up from composition.
+-- Package economics.
 --
--- Packages carry almost no MRP of their own — 15 of 4,870 lab-package rows —
--- but every test in mv_test_catalog carries both MRP and lab cost, and
--- composition is structural via "_MasterToPackage". So the sellable value of a
--- package is computable even though it isn't stored: what its tests would list
--- at individually, against what the labs charge us for them.
+-- A package is bought from ONE lab. That single fact decides everything here.
 --
--- A view, not a materialized view: it is 270 rows over MVs that the nightly
--- refresh already rebuilds, so materializing it would only add a way for it to
--- go stale.
-CREATE OR REPLACE VIEW analytics.v_package_economics AS
+-- An earlier version of this view summed the cheapest rate per constituent
+-- test across the whole network. That number is not purchasable: on a real
+-- package the per-test minima came from 24 different labs, and it understated
+-- true cost by 21%-371%, which in turn inflated headroom from ~30% to ~72%.
+-- Anyone quoting off it would have given away margin they did not have.
+--
+-- So cost is the lab's own quoted price for the package as a unit
+-- (mv_lab_packages.b2b), taken at the cheapest lab that quotes it. That is
+-- what buying the package actually costs. It also happens to be the only
+-- workable answer for the large panels — no single lab carries rates for all
+-- 69 tests in ZOCO Nutritionists Choice, yet labs quote the package happily.
+--
+-- Quotes at or below Rs.10 are placeholders, not prices (11 of 265 packages),
+-- and are excluded rather than shown as a bargain.
+--
+-- alacarte_low stays, but only as the SELLING reference: what a client would
+-- pay buying the same tests individually at list. Headroom is that list value
+-- less what the package costs us — the room available to discount.
+-- Dropped rather than replaced: the column set changed, and CREATE OR REPLACE
+-- cannot rename a view column.
+DROP VIEW IF EXISTS analytics.v_package_economics;
+CREATE VIEW analytics.v_package_economics AS
 WITH comp AS (
   SELECT mp."B" AS package_id, mp."A" AS master_id
   FROM src."_MasterToPackage" mp
@@ -122,21 +136,26 @@ WITH comp AS (
 built AS (
   SELECT
     c.package_id,
-    COUNT(*)::int                                   AS test_count,
-    COUNT(tc.master_id)::int                        AS tests_priced,
-    SUM(tc.mrp_min)::numeric                        AS alacarte_low,
-    SUM(tc.mrp_max)::numeric                        AS alacarte_high,
-    SUM(tc.b2b_min)::numeric                        AS cost_low,
-    SUM(tc.b2b_max)::numeric                        AS cost_high
+    COUNT(*)::int            AS test_count,
+    COUNT(tc.master_id)::int AS tests_priced,
+    SUM(tc.mrp_min)::numeric AS alacarte_low,
+    SUM(tc.mrp_max)::numeric AS alacarte_high
   FROM comp c
   LEFT JOIN analytics.mv_test_catalog tc ON tc.master_id = c.master_id
   GROUP BY c.package_id
 ),
+-- The cheapest lab that actually quotes this package, and its price.
+best_quote AS (
+  SELECT DISTINCT ON (lp.package_id)
+    lp.package_id, lp.lab_id AS best_lab_id, lp.b2b::numeric AS pkg_cost
+  FROM analytics.mv_lab_packages lp
+  WHERE lp.b2b > 10
+  ORDER BY lp.package_id, lp.b2b
+),
 reach AS (
   SELECT package_id,
-         COUNT(DISTINCT lab_id)::int AS labs_offering,
-         MIN(b2b)::numeric           AS lab_quote_low,
-         MAX(b2b)::numeric           AS lab_quote_high
+         COUNT(*)::int                              AS labs_quoting,
+         COUNT(*) FILTER (WHERE b2b > 10)::int      AS labs_quoting_credibly
   FROM analytics.mv_lab_packages
   GROUP BY package_id
 )
@@ -151,17 +170,20 @@ SELECT
   COALESCE(b.tests_priced, 0)                 AS tests_priced,
   b.alacarte_low,
   b.alacarte_high,
-  b.cost_low,
-  b.cost_high,
-  -- Headroom between what the tests list at individually and what they cost
-  -- us. Not a quoted margin — the basis for setting one.
-  CASE WHEN b.alacarte_low > 0
-       THEN ROUND(100.0 * (b.alacarte_low - b.cost_low) / b.alacarte_low)
+  -- What the package costs, at one lab.
+  q.pkg_cost,
+  q.best_lab_id,
+  l."labName"                                 AS best_lab_name,
+  l.city                                      AS best_lab_city,
+  -- Room between the list value of the tests and what the package costs us.
+  CASE WHEN b.alacarte_low > 0 AND q.pkg_cost IS NOT NULL
+       THEN ROUND(100.0 * (b.alacarte_low - q.pkg_cost) / b.alacarte_low)
   END                                         AS headroom_pct,
-  COALESCE(r.labs_offering, 0)                AS labs_offering,
-  r.lab_quote_low,
-  r.lab_quote_high
+  COALESCE(r.labs_quoting, 0)                 AS labs_quoting,
+  COALESCE(r.labs_quoting_credibly, 0)        AS labs_quoting_credibly
 FROM src."Package" p
-LEFT JOIN built b ON b.package_id = p.id
-LEFT JOIN reach r ON r.package_id = p.id
+LEFT JOIN built      b ON b.package_id = p.id
+LEFT JOIN best_quote q ON q.package_id = p.id
+LEFT JOIN src."Lab"  l ON l.id = q.best_lab_id
+LEFT JOIN reach      r ON r.package_id = p.id
 WHERE p.active;

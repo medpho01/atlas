@@ -10,11 +10,10 @@ import { query, queryOne } from './db';
  *
  * Two things shape every query here.
  *
- * Packages carry almost no MRP of their own (15 of 4,870 lab-package rows), so
- * package value is computed bottom-up from composition in
- * analytics.v_package_economics. What the UI shows is the à-la-carte value of
- * the constituent tests against what the labs charge us — the basis for
- * setting a quote, never a quoted price.
+ * A package is bought from one lab, so cost is that lab's quoted price for the
+ * package as a unit, at the cheapest lab quoting it — see
+ * analytics.v_package_economics. À-la-carte value is a selling reference only:
+ * what a client would pay buying the same tests individually at list.
  *
  * Commercial categories live in atlas.*, written by scripts/enrich-catalogue.ts.
  * Every join to them is a LEFT JOIN: the catalogue is fully browsable before
@@ -59,16 +58,15 @@ export type PackageRow = {
   tat_hours: number | null;
   test_count: number;
   tests_priced: number;
+  /** What the same tests would list at individually — a selling reference. */
   alacarte_low: string | null;
-  cost_low: string | null;
+  /** What the package costs, at the cheapest lab that quotes it. */
+  pkg_cost: string | null;
+  best_lab_name: string | null;
+  best_lab_city: string | null;
   headroom_pct: number | null;
-  labs_offering: number;
-  /**
-   * What a lab charges for the package as a unit. Distinct from cost_low,
-   * which is summed from the constituent tests — kit and imaging packages
-   * have no test-level composition, so this is the only price they carry.
-   */
-  lab_quote_low: string | null;
+  /** Labs quoting a credible price — sourcing alternatives, not a cost input. */
+  labs_quoting_credibly: number;
   categories: string[] | null;
   intent: string | null;
   positioning: string | null;
@@ -120,13 +118,13 @@ export async function browsePackages(f: PackageFilters = {}): Promise<PackageRow
 
   return query<PackageRow>(`
     SELECT e.package_id, e.package_name, e.is_custom, e.order_types, e.tat_hours,
-           e.test_count, e.tests_priced, e.alacarte_low::text, e.cost_low::text,
-           e.headroom_pct, e.labs_offering, e.lab_quote_low::text,
+           e.test_count, e.tests_priced, e.alacarte_low::text, e.pkg_cost::text,
+           e.best_lab_name, e.best_lab_city, e.headroom_pct, e.labs_quoting_credibly,
            pe.categories, pe.intent, pe.positioning
     FROM analytics.v_package_economics e
     LEFT JOIN atlas.package_enrichment pe ON pe.package_id = e.package_id
     ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
-    ORDER BY COALESCE(e.alacarte_low, e.lab_quote_low) DESC NULLS LAST, e.test_count DESC
+    ORDER BY COALESCE(e.alacarte_low, e.pkg_cost) DESC NULLS LAST, e.test_count DESC
     LIMIT $${params.length}
   `, params);
 }
@@ -134,18 +132,14 @@ export async function browsePackages(f: PackageFilters = {}): Promise<PackageRow
 export type PackageDetail = PackageRow & {
   description: string | null;
   alacarte_high: string | null;
-  cost_high: string | null;
-  lab_quote_low: string | null;
-  lab_quote_high: string | null;
+  labs_quoting: number;
   confidence: string | null;
   enrichment_source: string | null;
 };
 
 export async function getPackageDetail(id: number): Promise<PackageDetail | null> {
   return queryOne<PackageDetail>(`
-    SELECT e.*, e.alacarte_low::text, e.alacarte_high::text,
-           e.cost_low::text, e.cost_high::text,
-           e.lab_quote_low::text, e.lab_quote_high::text,
+    SELECT e.*, e.alacarte_low::text, e.alacarte_high::text, e.pkg_cost::text,
            pe.categories, pe.intent, pe.positioning,
            pe.confidence::text, pe.source AS enrichment_source
     FROM analytics.v_package_economics e

@@ -151,13 +151,14 @@ export default async function PackagesPage({
           <Pill tone="neutral">Custom</Pill> built for a specific client — reusable as a starting point.
         </span>
         <span>
-          Headroom is à-la-carte value less lab cost, as a percentage. It sets the discount you can
-          offer, and is not a booked margin.
+          <span className="font-medium text-ink-700">Package cost</span> is what the cheapest lab
+          quotes for the whole package — a package is fulfilled at one lab, so that is the price.
+          <span className="font-medium text-ink-700"> À-la-carte list</span> is what the same tests
+          would cost bought separately, and headroom is the gap: the room you have to discount.
         </span>
         <span>
-          <span className="text-ink-400">†</span> priced by the lab as a unit. Kit and imaging
-          packages have no test-level composition, so there is nothing to sum a value or headroom
-          from — the quoted price is all they carry.
+          Kit and imaging packages have no test list, so they show a cost but no à-la-carte
+          comparison — there is nothing to add up.
         </span>
         {enrichment.last_run && (
           <span>Catalogue last classified {new Date(enrichment.last_run).toLocaleDateString('en-IN')}.</span>

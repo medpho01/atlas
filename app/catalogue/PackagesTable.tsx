@@ -12,10 +12,10 @@ type PackageRow = {
   test_count: number;
   tests_priced: number;
   alacarte_low: string | null;
-  cost_low: string | null;
+  pkg_cost: string | null;
+  best_lab_name: string | null;
   headroom_pct: number | null;
-  labs_offering: number;
-  lab_quote_low: string | null;
+  labs_quoting_credibly: number;
   categories: string[] | null;
   intent: string | null;
 };
@@ -34,10 +34,10 @@ const inr = (v: string | null) =>
 const columns: SortableColumn<PackageRow>[] = [
   { key: 'package_name', label: 'Package' },
   { key: 'test_count', label: 'Tests', align: 'right' },
-  { key: 'alacarte_low', label: 'À-la-carte value', align: 'right', sortValue: (p) => num(p.alacarte_low) },
-  { key: 'cost_low', label: 'Lab cost', align: 'right', sortValue: (p) => num(p.cost_low) ?? num(p.lab_quote_low) },
+  { key: 'alacarte_low', label: 'À-la-carte list', align: 'right', sortValue: (p) => num(p.alacarte_low) },
+  { key: 'pkg_cost', label: 'Package cost', align: 'right', sortValue: (p) => num(p.pkg_cost) },
   { key: 'headroom_pct', label: 'Headroom', align: 'right', sortValue: (p) => p.headroom_pct },
-  { key: 'labs_offering', label: 'Labs', align: 'right' },
+  { key: 'best_lab_name', label: 'Cheapest at' },
   { key: 'order_types', label: 'Modality', sortValue: (p) => (p.order_types ?? []).join(',') },
 ];
 
@@ -81,19 +81,7 @@ export function PackagesTable({ packages }: { packages: PackageRow[] }) {
             )}
           </td>
           <td className="num font-medium">{inr(p.alacarte_low)}</td>
-          <td className="num text-ink-600">
-            {p.cost_low != null ? (
-              inr(p.cost_low)
-            ) : p.lab_quote_low != null ? (
-              // Priced as a unit by the lab rather than summed from tests —
-              // marked so it isn't read as the same kind of number.
-              <span title="Lab's quoted price for the package as a unit — this package has no test-level composition to price from">
-                {inr(p.lab_quote_low)}<span className="text-ink-400">†</span>
-              </span>
-            ) : (
-              <span className="text-ink-300">—</span>
-            )}
-          </td>
+          <td className="num font-medium">{inr(p.pkg_cost)}</td>
           <td className="num">
             {p.headroom_pct == null ? (
               <span className="text-ink-300">—</span>
@@ -111,7 +99,13 @@ export function PackagesTable({ packages }: { packages: PackageRow[] }) {
               </span>
             )}
           </td>
-          <td className="num text-ink-600">{p.labs_offering || <span className="text-ink-300">—</span>}</td>
+          <td className="text-xs text-ink-600 max-w-[12rem] truncate">
+            {p.best_lab_name ?? <span className="text-ink-300">no quote</span>}
+            {/* Alternatives matter for negotiating, not for the price itself. */}
+            {p.labs_quoting_credibly > 1 && (
+              <span className="text-ink-400"> +{p.labs_quoting_credibly - 1}</span>
+            )}
+          </td>
           <td className="text-xs text-ink-500">
             {(p.order_types ?? []).map((m) => MODALITY_SHORT[m] ?? m).join(' · ') || '—'}
           </td>
