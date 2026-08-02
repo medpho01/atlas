@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Crosshair } from 'lucide-react';
 import { MapContainer, TileLayer, CircleMarker, Tooltip, useMap } from 'react-leaflet';
 import L from 'leaflet';
+import { tileUrlFor, TILE_ATTRIBUTION } from '@/lib/mapTiles';
 
 type Point = {
   pincode: string;
@@ -145,12 +146,7 @@ export default function PincodeMap({
     return () => obs.disconnect();
   }, []);
 
-  const tileUrl = isDark
-    ? 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png'
-    : 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png';
-  const tileAttribution = isDark
-    ? '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>'
-    : '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>';
+  const tileUrl = tileUrlFor(isDark);
 
   return (
     <div style={{ height }} className="relative rounded-lg overflow-hidden border border-ink-150">
@@ -161,7 +157,7 @@ export default function PincodeMap({
         scrollWheelZoom
         preferCanvas={true}
       >
-        <TileLayer attribution={tileAttribution} url={tileUrl} />
+        <TileLayer attribution={TILE_ATTRIBUTION} url={tileUrl} />
         {points.map((p) => {
           const isHighlight = highlightPincode === p.pincode;
           const isInferred = p.geo_source === 'prefix3' || p.geo_source === 'prefix2';

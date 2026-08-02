@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo } from 'react';
 import { MapContainer, TileLayer, CircleMarker, Tooltip, ZoomControl, useMap } from 'react-leaflet';
+import { TILE_ATTRIBUTION, TILE_URL_LIGHT } from '@/lib/mapTiles';
 import L from 'leaflet';
 
 export type NetworkPoint = {
@@ -89,8 +90,8 @@ export function PublicNetworkMap({
             Vercel marketing pages. Labels in Latin script; muted tones let the
             data markers be the focus. */}
         <TileLayer
-          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> &copy; <a href="https://carto.com/attributions">CARTO</a>'
-          url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
+          attribution={TILE_ATTRIBUTION}
+          url={TILE_URL_LIGHT}
           subdomains="abcd"
         />
         {visible.map((p) => {
