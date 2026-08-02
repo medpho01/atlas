@@ -61,7 +61,9 @@ SELECT
   a."appointmentStatus"::text AS status,
   (a."appointmentStatus" = 'COMPLETED') AS is_fulfilled,
   (a."appointmentStatus" = 'CANCELED') AS is_canceled,
-  NULL::int AS store_id,
+  -- Appointment carries no storeId; the only route is through its order.
+  -- NULL until Appointment.order_id is populated, but correct when it is.
+  ao."storeId" AS store_id,
   a."providerGroup_id" AS partner_id,
   CASE pt."typeName"
     WHEN 'Doctor' THEN 'DOCTOR'
@@ -72,6 +74,7 @@ SELECT
   a.user_id,
   p.pincode
 FROM "Appointment" a
+LEFT JOIN "Order" ao ON ao.id = a.order_id
 LEFT JOIN "ProviderType" pt ON pt.id = a."providerType_id"
 JOIN "User" u ON u.id = a.user_id
 JOIN "Profile" p ON p."profileUserId" = u.id

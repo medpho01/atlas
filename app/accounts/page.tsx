@@ -52,7 +52,7 @@ const STATUS_LABEL: Record<Account['account_status'], string> = {
   INACTIVE: 'Inactive',
 };
 
-export default async function AccountsPage({ searchParams }: { searchParams: { status?: string } }) {
+export default async function AccountsPage({ searchParams }: { searchParams: { status?: string; q?: string } }) {
   const me = await getSessionUser();
   if (!me) redirect('/login?next=/accounts');
   if (!canAccess(me, 'accountHealth')) {
@@ -64,10 +64,16 @@ export default async function AccountsPage({ searchParams }: { searchParams: { s
   const statusUpper = status?.toUpperCase();
   const statusFilter =
     statusUpper && statusUpper in STATUS_LABEL ? (statusUpper as Account['account_status']) : null;
+  const q = (searchParams.q ?? '').trim();
+  const params: unknown[] = [];
+  const where: string[] = [];
+  if (statusFilter) { params.push(statusFilter); where.push(`account_status = $${params.length}`); }
+  if (q) { params.push(`%${q.toLowerCase()}%`); where.push(`(lower(store_name) LIKE $${params.length} OR lower(city) LIKE $${params.length})`); }
+
   const accounts: Account[] = await query(
     `
     SELECT * FROM mv_store_health
-    ${statusFilter ? 'WHERE account_status = $1' : ''}
+    ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
     ORDER BY
       CASE account_status
         WHEN 'AT_RISK' THEN 1
@@ -80,7 +86,7 @@ export default async function AccountsPage({ searchParams }: { searchParams: { s
       orders_total DESC NULLS LAST
     LIMIT 200
   `,
-    statusFilter ? [statusFilter] : undefined,
+    params.length ? params : undefined,
   );
 
   const totals = accounts.reduce(
@@ -167,6 +173,20 @@ export default async function AccountsPage({ searchParams }: { searchParams: { s
         <ChipButton href="/accounts?status=growing" active={status === 'growing'}>↑ Growing</ChipButton>
         <ChipButton href="/accounts?status=stable" active={status === 'stable'}>Stable</ChipButton>
         <ChipButton href="/accounts?status=churned" active={status === 'churned'}>Churned</ChipButton>
+
+        <form className="ml-auto flex items-center gap-1.5" action="/accounts">
+          {statusFilter && <input type="hidden" name="status" value={status} />}
+          <input
+            name="q"
+            defaultValue={q}
+            placeholder="Search account or city"
+            className="w-56 px-2.5 h-8 text-xs rounded-md border border-ink-200 bg-surface focus:outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500"
+          />
+          {q && (
+            <Link href={statusFilter ? `/accounts?status=${status}` : '/accounts'}
+                  className="text-[11px] text-ink-500 hover:text-ink-900">clear</Link>
+          )}
+        </form>
       </div>
 
       <Card>

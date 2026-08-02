@@ -1,5 +1,7 @@
 'use client';
 
+import Link from 'next/link';
+
 import { Pill } from '@/components/ui/Toggle';
 import { SortableTable, SortableColumn } from '@/components/ui/SortableTable';
 
@@ -92,7 +94,9 @@ export function AccountsTable({ accounts }: { accounts: Account[] }) {
         return (
           <tr>
             <td className="font-medium text-ink-900">
-              {a.store_name}
+              <Link href={`/accounts/${a.store_id}`} className="hover:text-brand-700 dark:hover:text-brand-400 hover:underline">
+                {a.store_name}
+              </Link>
               {!a.active && <span className="ml-2 text-[10px] text-ink-400">(inactive)</span>}
             </td>
             <td className="text-ink-700">{a.city ?? '—'}</td>
