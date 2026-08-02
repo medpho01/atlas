@@ -11,10 +11,13 @@ import { ChipButton } from '@/components/ui/Toggle';
 import { InfoTip } from '@/components/ui/InfoTip';
 import { KpiTile } from '@/components/KpiTile';
 import { PincodesTable } from './PincodesTable';
+import { ServiceabilityPanel } from './ServiceabilityPanel';
+import { PincodeTabs } from './PincodeTabs';
+import { ALL_SERVICES, DEFAULT_SERVICES, serviceLabel } from '@/lib/serviceabilityQueries';
 
 export const dynamic = 'force-dynamic';
 
-type Search = { q?: string; city?: string; state?: string; bucket?: string };
+type Search = { q?: string; city?: string; state?: string; bucket?: string; tab?: string };
 
 const BUCKET_FILTERS: { key: string; label: string; sql: string }[] = [
   { key: 'all', label: 'All', sql: '' },
@@ -153,6 +156,26 @@ export default async function PincodesPage({ searchParams }: { searchParams: Sea
   if (gate.blocked) return <RoleBlocked area="Coverage" detail="every signed-in role" />;
 
   const s = searchParams;
+
+  // Serviceability is a tab here rather than its own page — same object
+  // (a pincode), two questions: what does our footprint look like, and can we
+  // serve this specific list. /coverage redirects in for old links.
+  if (s.tab === 'serviceability') {
+    return (
+      <div className="px-6 lg:px-8 py-6 max-w-[1600px] mx-auto">
+        <PageHeader
+          title="Pincodes"
+          subtitle="Check which of your services reach a pincode — one at a time, or a whole client list."
+        />
+        <PincodeTabs active="serviceability" />
+        <ServiceabilityPanel
+          allServices={ALL_SERVICES.map((k) => ({ key: k, label: serviceLabel(k) }))}
+          defaultServices={DEFAULT_SERVICES}
+        />
+      </div>
+    );
+  }
+
   const bucketKey = s.bucket ?? 'all';
   const [rows, dist, topCities, topStates] = await Promise.all([
     searchPincodes(s),
@@ -188,6 +211,8 @@ export default async function PincodesPage({ searchParams }: { searchParams: Sea
           />
         }
       />
+
+      <PincodeTabs active="distribution" />
 
       {/* KPI strip */}
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 mb-5">
