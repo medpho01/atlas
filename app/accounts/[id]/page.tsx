@@ -154,7 +154,10 @@ export default async function AccountPage({ params }: { params: Promise<{ id: st
           <div className="p-4">
             <div className="flex items-end gap-1 h-28">
               {months.map(([m, v]) => (
-                <div key={m} className="flex-1 flex flex-col justify-end items-center group" title={`${m}: ${v.toLocaleString('en-IN')}`}>
+                // h-full matters: items-end sizes each column to its content, so
+                // without a definite height here the bar's percentage has nothing
+                // to resolve against and collapses to nothing.
+                <div key={m} className="flex-1 h-full flex flex-col justify-end items-center group" title={`${m}: ${v.toLocaleString('en-IN')}`}>
                   <div className="w-full rounded-t bg-brand-500/70 group-hover:bg-brand-500 transition-colors"
                        style={{ height: `${Math.max(2, (v / peak) * 100)}%` }} />
                 </div>
