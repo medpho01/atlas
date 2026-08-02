@@ -62,7 +62,11 @@ export default async function PackageDetailPage({ params }: { params: { id: stri
       <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-6">
         <KpiTile label="Tests" value={String(pkg.test_count)} sub={unpriced > 0 ? `${unpriced} unpriced` : 'all priced'} />
         <KpiTile label="À-la-carte value" value={inr(pkg.alacarte_low)} sub="if bought separately" />
-        <KpiTile label="Lab cost" value={inr(pkg.cost_low)} sub="lowest across labs" />
+        <KpiTile
+          label="Lab cost"
+          value={pkg.cost_low != null ? inr(pkg.cost_low) : inr(pkg.lab_quote_low)}
+          sub={pkg.cost_low != null ? 'summed from tests, lowest across labs' : 'lab’s quoted price for the package'}
+        />
         <KpiTile
           label="Headroom"
           value={pkg.headroom_pct == null ? '—' : `${pkg.headroom_pct}%`}
@@ -120,7 +124,9 @@ export default async function PackageDetailPage({ params }: { params: { id: stri
                     {!components.length && (
                       <tr>
                         <td colSpan={5} className="px-5 py-6 text-sm text-ink-500">
-                          No test composition recorded for this package in LabStack.
+                          No test-level composition in LabStack — this package is priced by the
+                          lab as a unit rather than assembled from catalogue tests. Common for kit
+                          and imaging packages.
                         </td>
                       </tr>
                     )}

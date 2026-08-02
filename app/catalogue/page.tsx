@@ -154,6 +154,11 @@ export default async function PackagesPage({
           Headroom is à-la-carte value less lab cost, as a percentage. It sets the discount you can
           offer, and is not a booked margin.
         </span>
+        <span>
+          <span className="text-ink-400">†</span> priced by the lab as a unit. Kit and imaging
+          packages have no test-level composition, so there is nothing to sum a value or headroom
+          from — the quoted price is all they carry.
+        </span>
         {enrichment.last_run && (
           <span>Catalogue last classified {new Date(enrichment.last_run).toLocaleDateString('en-IN')}.</span>
         )}

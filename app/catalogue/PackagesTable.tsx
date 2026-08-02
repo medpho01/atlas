@@ -15,6 +15,7 @@ type PackageRow = {
   cost_low: string | null;
   headroom_pct: number | null;
   labs_offering: number;
+  lab_quote_low: string | null;
   categories: string[] | null;
   intent: string | null;
 };
@@ -23,6 +24,7 @@ const MODALITY_SHORT: Record<string, string> = {
   HOME_SAMPLE: 'Home',
   CENTER_VISIT: 'Center',
   CAMP: 'Camp',
+  KIT_BASED: 'Kit',
 };
 
 const num = (v: string | null) => (v == null ? null : Number(v));
@@ -33,7 +35,7 @@ const columns: SortableColumn<PackageRow>[] = [
   { key: 'package_name', label: 'Package' },
   { key: 'test_count', label: 'Tests', align: 'right' },
   { key: 'alacarte_low', label: 'À-la-carte value', align: 'right', sortValue: (p) => num(p.alacarte_low) },
-  { key: 'cost_low', label: 'Lab cost', align: 'right', sortValue: (p) => num(p.cost_low) },
+  { key: 'cost_low', label: 'Lab cost', align: 'right', sortValue: (p) => num(p.cost_low) ?? num(p.lab_quote_low) },
   { key: 'headroom_pct', label: 'Headroom', align: 'right', sortValue: (p) => p.headroom_pct },
   { key: 'labs_offering', label: 'Labs', align: 'right' },
   { key: 'order_types', label: 'Modality', sortValue: (p) => (p.order_types ?? []).join(',') },
@@ -79,7 +81,19 @@ export function PackagesTable({ packages }: { packages: PackageRow[] }) {
             )}
           </td>
           <td className="num font-medium">{inr(p.alacarte_low)}</td>
-          <td className="num text-ink-600">{inr(p.cost_low)}</td>
+          <td className="num text-ink-600">
+            {p.cost_low != null ? (
+              inr(p.cost_low)
+            ) : p.lab_quote_low != null ? (
+              // Priced as a unit by the lab rather than summed from tests —
+              // marked so it isn't read as the same kind of number.
+              <span title="Lab's quoted price for the package as a unit — this package has no test-level composition to price from">
+                {inr(p.lab_quote_low)}<span className="text-ink-400">†</span>
+              </span>
+            ) : (
+              <span className="text-ink-300">—</span>
+            )}
+          </td>
           <td className="num">
             {p.headroom_pct == null ? (
               <span className="text-ink-300">—</span>

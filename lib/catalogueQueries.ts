@@ -63,6 +63,12 @@ export type PackageRow = {
   cost_low: string | null;
   headroom_pct: number | null;
   labs_offering: number;
+  /**
+   * What a lab charges for the package as a unit. Distinct from cost_low,
+   * which is summed from the constituent tests — kit and imaging packages
+   * have no test-level composition, so this is the only price they carry.
+   */
+  lab_quote_low: string | null;
   categories: string[] | null;
   intent: string | null;
   positioning: string | null;
@@ -115,12 +121,12 @@ export async function browsePackages(f: PackageFilters = {}): Promise<PackageRow
   return query<PackageRow>(`
     SELECT e.package_id, e.package_name, e.is_custom, e.order_types, e.tat_hours,
            e.test_count, e.tests_priced, e.alacarte_low::text, e.cost_low::text,
-           e.headroom_pct, e.labs_offering,
+           e.headroom_pct, e.labs_offering, e.lab_quote_low::text,
            pe.categories, pe.intent, pe.positioning
     FROM analytics.v_package_economics e
     LEFT JOIN atlas.package_enrichment pe ON pe.package_id = e.package_id
     ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
-    ORDER BY e.alacarte_low DESC NULLS LAST, e.test_count DESC
+    ORDER BY COALESCE(e.alacarte_low, e.lab_quote_low) DESC NULLS LAST, e.test_count DESC
     LIMIT $${params.length}
   `, params);
 }
@@ -264,10 +270,11 @@ export async function getDepartments(): Promise<{ department: string; tests: num
   `);
 }
 
-export const MODALITIES = ['HOME_SAMPLE', 'CENTER_VISIT', 'CAMP'] as const;
+export const MODALITIES = ['HOME_SAMPLE', 'CENTER_VISIT', 'CAMP', 'KIT_BASED'] as const;
 
 export const MODALITY_LABEL: Record<string, string> = {
   HOME_SAMPLE: 'Home sample',
   CENTER_VISIT: 'Center visit',
   CAMP: 'Camp',
+  KIT_BASED: 'Kit',
 };
