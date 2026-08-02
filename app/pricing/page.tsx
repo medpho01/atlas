@@ -11,7 +11,7 @@ export const dynamic = 'force-dynamic';
 export default async function PricingPage() {
   const me = await getSessionUser();
   if (!me) redirect('/login?next=/pricing');
-  if (!canAccess(me, 'catalogue')) {
+  if (!canAccess(me, 'pricing')) {
     return <RoleBlocked area="Pricing Intelligence" detail="the network and admin teams" />;
   }
 

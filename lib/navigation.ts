@@ -58,7 +58,8 @@ export const NAV: NavGroup[] = [
     noun: 'accounts & deals',
     items: [
       { href: '/accounts', label: 'Account health', feature: 'accountHealth' },
-      { href: '/pricing/packages', label: 'Packages & Pricing', feature: 'catalogue' },
+      { href: '/catalogue', label: 'Catalogue', feature: 'catalogue' },
+      { href: '/pricing', label: 'Packages & Pricing', feature: 'pricing' },
       { href: '/crm', label: 'Provider onboarding', feature: 'providerPipeline' },
     ],
   },

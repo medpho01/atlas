@@ -60,7 +60,7 @@ export function PackagesTable({ packages }: { packages: PackageRow[] }) {
         <tr>
           <td className="font-medium text-ink-900 max-w-md">
             <Link
-              href={`/pricing/packages/${p.package_id}`}
+              href={`/catalogue/${p.package_id}`}
               className="hover:text-brand-700 dark:hover:text-brand-400 hover:underline"
             >
               {p.package_name}

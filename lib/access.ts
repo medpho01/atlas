@@ -46,7 +46,8 @@ export type Feature =
   | 'coverage'          // pincodes, gaps, imbalance, momentum, heatmap, serviceability
   | 'directory'         // labs & chains, phlebos, nurses, quality
   | 'accountHealth'     // Growth › Account health
-  | 'catalogue'         // Growth › Packages & Pricing
+  | 'catalogue'         // Growth › Catalogue (browse what we sell)
+  | 'pricing'           // Growth › Packages & Pricing (rates and quotes)
   | 'providerPipeline'  // Growth › Provider onboarding
   | 'admin';            // users & roles
 
@@ -62,6 +63,7 @@ const RANK: Record<Capability, number> = { none: 0, view: 1, manage: 2 };
 const REQUIRES: Partial<Record<Feature, Feature>> = {
   providerPipeline: 'directory',
   catalogue: 'directory',
+  pricing: 'directory',
   accountHealth: 'coverage',
 };
 
@@ -71,6 +73,7 @@ const MATRIX: Record<Feature, Record<Role, Capability>> = {
   directory:        { admin: 'manage', network: 'manage', accounts: 'view',   operations: 'view',   editor: 'manage', viewer: 'view' },
   accountHealth:    { admin: 'manage', network: 'view',   accounts: 'manage', operations: 'none',   editor: 'view',   viewer: 'view' },
   catalogue:        { admin: 'manage', network: 'manage', accounts: 'view',   operations: 'none',   editor: 'manage', viewer: 'view' },
+  pricing:          { admin: 'manage', network: 'manage', accounts: 'view',   operations: 'none',   editor: 'manage', viewer: 'view' },
   providerPipeline: { admin: 'manage', network: 'manage', accounts: 'view',   operations: 'none',   editor: 'manage', viewer: 'view' },
   admin:            { admin: 'manage', network: 'none',   accounts: 'none',   operations: 'none',   editor: 'none',   viewer: 'none' },
 };
@@ -125,7 +128,8 @@ export const FEATURE_LABEL: Record<Feature, string> = {
   coverage: 'Coverage',
   directory: 'Directory',
   accountHealth: 'Account health',
-  catalogue: 'Packages & Pricing',
+  catalogue: 'Catalogue',
+  pricing: 'Packages & Pricing',
   providerPipeline: 'Provider onboarding',
   admin: 'Users & roles',
 };

@@ -2,7 +2,7 @@ import { Package as PackageIcon, Sparkles } from 'lucide-react';
 import Link from 'next/link';
 import { requireView } from '@/lib/guard';
 import { RoleBlocked } from '@/components/RoleBlocked';
-import { CatalogueTabs } from '../CatalogueTabs';
+import { CatalogueTabs } from './CatalogueTabs';
 import { Card, CardBody, CardHeader } from '@/components/ui/Card';
 import { ChipButton, Pill } from '@/components/ui/Toggle';
 import { PackagesTable } from './PackagesTable';
@@ -28,8 +28,8 @@ export default async function PackagesPage({
 }: {
   searchParams: { q?: string; category?: string; modality?: string; band?: string; minTests?: string };
 }) {
-  const { blocked } = await requireView('catalogue', '/pricing/packages');
-  if (blocked) return <RoleBlocked area="Packages & Pricing" detail="the network and admin teams" />;
+  const { blocked } = await requireView('catalogue', '/catalogue');
+  if (blocked) return <RoleBlocked area="The catalogue" detail="the network, accounts and admin teams" />;
 
   const band = BANDS.find((b) => b.key === searchParams.band);
   const [packages, categories, enrichment] = await Promise.all([
@@ -54,7 +54,7 @@ export default async function PackagesPage({
     const merged = { ...searchParams, ...patch };
     for (const [k, v] of Object.entries(merged)) if (v) next.set(k, v);
     const qs = next.toString();
-    return `/pricing/packages${qs ? `?${qs}` : ''}`;
+    return `/catalogue${qs ? `?${qs}` : ''}`;
   };
 
   return (
@@ -62,18 +62,19 @@ export default async function PackagesPage({
       <div className="mb-5">
         <div className="flex items-center gap-2 mb-1">
           <PackageIcon className="w-5 h-5 text-brand-600" strokeWidth={2.25} />
-          <h1 className="text-2xl font-bold text-ink-900">Packages &amp; Pricing</h1>
+          <h1 className="text-2xl font-bold text-ink-900">Catalogue</h1>
         </div>
         <p className="text-sm text-ink-600 max-w-3xl">
-          Everything already built and sellable, so a new client can be shown the catalogue
+          Everything already built and sellable, so a new client can be shown what exists
           instead of designing from scratch. Value is the à-la-carte total of a package&rsquo;s
           tests against what the labs charge us — the basis for a quote, not a quoted price.
+          To model an actual quote, use Packages &amp; Pricing.
         </p>
       </div>
 
-      <CatalogueTabs active="/pricing/packages" />
+      <CatalogueTabs active="/catalogue" />
 
-      <form className="flex flex-wrap items-center gap-2 mb-3" action="/pricing/packages">
+      <form className="flex flex-wrap items-center gap-2 mb-3" action="/catalogue">
         {searchParams.category && <input type="hidden" name="category" value={searchParams.category} />}
         {searchParams.modality && <input type="hidden" name="modality" value={searchParams.modality} />}
         {searchParams.band && <input type="hidden" name="band" value={searchParams.band} />}

@@ -16,8 +16,8 @@ const inr = (v: string | null | undefined) =>
   v == null ? '—' : `₹${Math.round(Number(v)).toLocaleString('en-IN')}`;
 
 export default async function PackageDetailPage({ params }: { params: { id: string } }) {
-  const { blocked } = await requireView('catalogue', `/pricing/packages/${params.id}`);
-  if (blocked) return <RoleBlocked area="Packages & Pricing" detail="the network and admin teams" />;
+  const { blocked } = await requireView('catalogue', `/catalogue/${params.id}`);
+  if (blocked) return <RoleBlocked area="The catalogue" detail="the network, accounts and admin teams" />;
 
   const id = Number(params.id);
   if (!Number.isFinite(id)) notFound();
@@ -34,7 +34,7 @@ export default async function PackageDetailPage({ params }: { params: { id: stri
   return (
     <main className="mx-auto max-w-7xl px-6 py-8">
       <Link
-        href="/pricing/packages"
+        href="/catalogue"
         className="inline-flex items-center gap-1 text-xs text-ink-500 hover:text-ink-900 mb-3"
       >
         <ArrowLeft className="w-3.5 h-3.5" /> All packages

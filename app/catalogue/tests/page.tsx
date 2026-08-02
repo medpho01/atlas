@@ -24,8 +24,8 @@ export default async function TestsPage({
 }: {
   searchParams: { q?: string; category?: string; department?: string; band?: string };
 }) {
-  const { blocked } = await requireView('catalogue', '/pricing/tests');
-  if (blocked) return <RoleBlocked area="Packages & Pricing" detail="the network and admin teams" />;
+  const { blocked } = await requireView('catalogue', '/catalogue/tests');
+  if (blocked) return <RoleBlocked area="The catalogue" detail="the network, accounts and admin teams" />;
 
   const band = BANDS.find((b) => b.key === searchParams.band);
   const [tests, categories, departments] = await Promise.all([
@@ -46,7 +46,7 @@ export default async function TestsPage({
     const next = new URLSearchParams();
     for (const [k, v] of Object.entries({ ...searchParams, ...patch })) if (v) next.set(k, v);
     const qs = next.toString();
-    return `/pricing/tests${qs ? `?${qs}` : ''}`;
+    return `/catalogue/tests${qs ? `?${qs}` : ''}`;
   };
 
   return (
@@ -54,18 +54,18 @@ export default async function TestsPage({
       <div className="mb-5">
         <div className="flex items-center gap-2 mb-1">
           <Beaker className="w-5 h-5 text-brand-600" strokeWidth={2.25} />
-          <h1 className="text-2xl font-bold text-ink-900">Packages &amp; Pricing</h1>
+          <h1 className="text-2xl font-bold text-ink-900">Catalogue</h1>
         </div>
         <p className="text-sm text-ink-600 max-w-3xl">
-          Search the sellable catalogue — every test with at least one lab rate. Search matches
+          Every test with at least one lab rate — what we can actually quote. Search matches
           official names and aliases, so a request phrased the client&rsquo;s way still finds the
           test we file under something else.
         </p>
       </div>
 
-      <CatalogueTabs active="/pricing/tests" />
+      <CatalogueTabs active="/catalogue/tests" />
 
-      <form className="flex flex-wrap items-center gap-2 mb-3" action="/pricing/tests">
+      <form className="flex flex-wrap items-center gap-2 mb-3" action="/catalogue/tests">
         {searchParams.category && <input type="hidden" name="category" value={searchParams.category} />}
         {searchParams.department && <input type="hidden" name="department" value={searchParams.department} />}
         {searchParams.band && <input type="hidden" name="band" value={searchParams.band} />}
