@@ -312,6 +312,9 @@ REFRESH MATERIALIZED VIEW analytics.mv_pincode_cv_reach;
 -- Phlebo repository: derived from src_local."Order" so must refresh AFTER
 -- the snapshot is loaded (Phase 2). Merged view atlas.phlebos_all reads this.
 REFRESH MATERIALIZED VIEW analytics.mv_phlebos_derived;
+-- Nurse repository: from src_local."Provider" ⋈ "ProviderType". Must refresh
+-- AFTER mv_pincode_city, which it joins to canonicalise city/state.
+REFRESH MATERIALIZED VIEW analytics.mv_nurses_derived;
 -- Pricing intelligence: per-lab test rates from src_local DOS + Master.
 REFRESH MATERIALIZED VIEW analytics.mv_test_rates;
 REFRESH MATERIALIZED VIEW analytics.mv_test_catalog;
