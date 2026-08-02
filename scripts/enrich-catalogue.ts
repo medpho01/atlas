@@ -66,7 +66,22 @@ function parseArgs(): Args {
   };
 }
 
-const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+// Same resolution order as lib/db.ts, so this runs against whatever the app is
+// pointed at without a second connection string to keep in sync. On the server
+// that means .env.production works as-is.
+const connectionString =
+  process.env.APP_DATABASE_URL ??
+  process.env.DATABASE_URL ??
+  process.env.SOURCE_DATABASE_URL;
+
+if (!connectionString) {
+  throw new Error('No database URL — set APP_DATABASE_URL (or DATABASE_URL) in the environment.');
+}
+if (!process.env.ANTHROPIC_API_KEY && !process.env.ANTHROPIC_AUTH_TOKEN) {
+  throw new Error('No Anthropic credential — set ANTHROPIC_API_KEY in the environment.');
+}
+
+const pool = new Pool({ connectionString });
 const anthropic = new Anthropic();
 
 const hash = (v: unknown) => createHash('sha256').update(JSON.stringify(v)).digest('hex').slice(0, 32);
