@@ -191,7 +191,11 @@ export async function getPackageLabs(id: number, limit = 12): Promise<PackageLab
     FROM analytics.mv_lab_packages lp
     JOIN src."Lab" l ON l.id = lp.lab_id
     WHERE lp.package_id = $1
-    ORDER BY lp.b2b NULLS LAST
+      -- Same floor the headline price uses. Without it a placeholder quote
+      -- sorts to the top as the cheapest option and contradicts the price
+      -- shown above it.
+      AND lp.b2b > 10
+    ORDER BY lp.b2b
     LIMIT $2
   `, [id, limit]);
 }
