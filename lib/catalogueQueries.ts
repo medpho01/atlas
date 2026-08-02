@@ -106,7 +106,11 @@ export async function browsePackages(f: PackageFilters = {}): Promise<PackageRow
     params.push(f.valueMax);
     where.push(`e.alacarte_low <= $${params.length}`);
   }
-  params.push(f.limit ?? 300);
+  // The whole package set is a few hundred rows, so it is served entire
+  // rather than capped — a truncated list headed "300 packages" reads as a
+  // total, and quietly hides the rest of the catalogue from the person
+  // trying to find something in it.
+  params.push(f.limit ?? 2000);
 
   return query<PackageRow>(`
     SELECT e.package_id, e.package_name, e.is_custom, e.order_types, e.tat_hours,
