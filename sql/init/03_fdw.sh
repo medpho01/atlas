@@ -65,7 +65,11 @@ if [ -n "$ENUM_SQL" ]; then
 fi
 
 # ---- 3. FDW server + 4. IMPORT FOREIGN SCHEMA -----------------------------
-TABLES='"Appointment","Chain","DOS","Lab","Master","Order","PharmaOrder","Pharmacy","PincodeToLatLong","Profile","Provider","ProviderType","Request","Store","User"'
+# Catalogue tables (Package, PackagesOnLab, _MasterToPackage) and the lookups
+# behind Master (LabDepartment, SampleType, Methodology) are needed by
+# Packages & Pricing. They were imported by hand on the first environments —
+# listing them here is what makes a fresh volume come up complete.
+TABLES='"Appointment","Chain","DOS","Lab","LabDepartment","Master","Methodology","Order","Package","PackagesOnLab","PharmaOrder","Pharmacy","PincodeToLatLong","Profile","Provider","ProviderType","Request","SampleType","Store","User","_MasterToPackage"'
 
 psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<SQL
 CREATE EXTENSION IF NOT EXISTS postgres_fdw;

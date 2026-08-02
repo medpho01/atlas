@@ -1,0 +1,269 @@
+import 'server-only';
+import { query, queryOne } from './db';
+
+/**
+ * Catalogue discovery — browsing what we already sell.
+ *
+ * The rate lookup on /pricing answers "what does this test cost at which lab".
+ * This answers the question that comes first in an account conversation: what
+ * have we already built, for this kind of buyer, in this price range.
+ *
+ * Two things shape every query here.
+ *
+ * Packages carry almost no MRP of their own (15 of 4,870 lab-package rows), so
+ * package value is computed bottom-up from composition in
+ * analytics.v_package_economics. What the UI shows is the à-la-carte value of
+ * the constituent tests against what the labs charge us — the basis for
+ * setting a quote, never a quoted price.
+ *
+ * Commercial categories live in atlas.*, written by scripts/enrich-catalogue.ts.
+ * Every join to them is a LEFT JOIN: the catalogue is fully browsable before
+ * anything has been classified, and category filters simply return nothing
+ * until it has.
+ */
+
+export type CategoryRow = {
+  key: string;
+  label: string;
+  blurb: string | null;
+  packages: number;
+  tests: number;
+};
+
+/** The taxonomy with live counts, so empty categories are visibly empty. */
+export async function getCategories(): Promise<CategoryRow[]> {
+  return query<CategoryRow>(`
+    SELECT c.key, c.label, c.blurb,
+      (SELECT COUNT(*) FROM atlas.package_enrichment pe WHERE c.key = ANY(pe.categories))::int AS packages,
+      (SELECT COUNT(*) FROM atlas.test_enrichment    te WHERE c.key = ANY(te.categories))::int AS tests
+    FROM atlas.catalogue_category c
+    ORDER BY c.sort_order
+  `);
+}
+
+/** Whether anything has been classified yet — drives the empty-state copy. */
+export async function getEnrichmentState(): Promise<{ tests: number; packages: number; last_run: string | null }> {
+  return (await queryOne<{ tests: number; packages: number; last_run: string | null }>(`
+    SELECT
+      (SELECT COUNT(*) FROM atlas.test_enrichment)::int    AS tests,
+      (SELECT COUNT(*) FROM atlas.package_enrichment)::int AS packages,
+      (SELECT MAX(finished_at)::text FROM atlas.enrichment_run) AS last_run
+  `)) ?? { tests: 0, packages: 0, last_run: null };
+}
+
+export type PackageRow = {
+  package_id: number;
+  package_name: string;
+  is_custom: boolean;
+  order_types: string[] | null;
+  tat_hours: number | null;
+  test_count: number;
+  tests_priced: number;
+  alacarte_low: string | null;
+  cost_low: string | null;
+  headroom_pct: number | null;
+  labs_offering: number;
+  categories: string[] | null;
+  intent: string | null;
+  positioning: string | null;
+};
+
+export type PackageFilters = {
+  q?: string;
+  category?: string;
+  modality?: string;
+  minTests?: number;
+  valueMin?: number;
+  valueMax?: number;
+  limit?: number;
+};
+
+export async function browsePackages(f: PackageFilters = {}): Promise<PackageRow[]> {
+  const params: unknown[] = [];
+  const where: string[] = [];
+
+  if (f.q?.trim()) {
+    params.push(`%${f.q.trim().toLowerCase()}%`);
+    where.push(`lower(e.package_name) LIKE $${params.length}`);
+  }
+  if (f.category) {
+    params.push(f.category);
+    where.push(`$${params.length} = ANY(pe.categories)`);
+  }
+  if (f.modality) {
+    params.push(f.modality);
+    where.push(`$${params.length} = ANY(e.order_types)`);
+  }
+  if (f.minTests) {
+    params.push(f.minTests);
+    where.push(`e.test_count >= $${params.length}`);
+  }
+  if (f.valueMin != null) {
+    params.push(f.valueMin);
+    where.push(`e.alacarte_low >= $${params.length}`);
+  }
+  if (f.valueMax != null) {
+    params.push(f.valueMax);
+    where.push(`e.alacarte_low <= $${params.length}`);
+  }
+  params.push(f.limit ?? 300);
+
+  return query<PackageRow>(`
+    SELECT e.package_id, e.package_name, e.is_custom, e.order_types, e.tat_hours,
+           e.test_count, e.tests_priced, e.alacarte_low::text, e.cost_low::text,
+           e.headroom_pct, e.labs_offering,
+           pe.categories, pe.intent, pe.positioning
+    FROM analytics.v_package_economics e
+    LEFT JOIN atlas.package_enrichment pe ON pe.package_id = e.package_id
+    ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
+    ORDER BY e.alacarte_low DESC NULLS LAST, e.test_count DESC
+    LIMIT $${params.length}
+  `, params);
+}
+
+export type PackageDetail = PackageRow & {
+  description: string | null;
+  alacarte_high: string | null;
+  cost_high: string | null;
+  lab_quote_low: string | null;
+  lab_quote_high: string | null;
+  confidence: string | null;
+  enrichment_source: string | null;
+};
+
+export async function getPackageDetail(id: number): Promise<PackageDetail | null> {
+  return queryOne<PackageDetail>(`
+    SELECT e.*, e.alacarte_low::text, e.alacarte_high::text,
+           e.cost_low::text, e.cost_high::text,
+           e.lab_quote_low::text, e.lab_quote_high::text,
+           pe.categories, pe.intent, pe.positioning,
+           pe.confidence::text, pe.source AS enrichment_source
+    FROM analytics.v_package_economics e
+    LEFT JOIN atlas.package_enrichment pe ON pe.package_id = e.package_id
+    WHERE e.package_id = $1
+  `, [id]);
+}
+
+export type ComponentRow = {
+  master_id: number;
+  test_name: string;
+  department: string | null;
+  labs_count: number | null;
+  mrp_min: string | null;
+  b2b_min: string | null;
+  categories: string[] | null;
+  why_it_matters: string | null;
+};
+
+/** What's actually in the package, priced. Unpriced rows are kept and shown. */
+export async function getPackageComponents(id: number): Promise<ComponentRow[]> {
+  return query<ComponentRow>(`
+    SELECT m.id AS master_id, m.name AS test_name, d.department,
+           tc.labs_count, tc.mrp_min::text, tc.b2b_min::text,
+           te.categories, te.why_it_matters
+    FROM src."_MasterToPackage" mp
+    JOIN src."Master" m ON m.id = mp."A"
+    LEFT JOIN src."LabDepartment" d ON d.id = m."labDepartment_id"
+    LEFT JOIN analytics.mv_test_catalog tc ON tc.master_id = m.id
+    LEFT JOIN atlas.test_enrichment te ON te.master_id = m.id
+    WHERE mp."B" = $1
+    ORDER BY tc.mrp_min DESC NULLS LAST, m.name
+  `, [id]);
+}
+
+export type PackageLabRow = { lab_id: number; lab_name: string; city: string | null; b2b: string | null };
+
+export async function getPackageLabs(id: number, limit = 12): Promise<PackageLabRow[]> {
+  return query<PackageLabRow>(`
+    SELECT lp.lab_id, l."labName" AS lab_name, l.city, lp.b2b::text
+    FROM analytics.mv_lab_packages lp
+    JOIN src."Lab" l ON l.id = lp.lab_id
+    WHERE lp.package_id = $1
+    ORDER BY lp.b2b NULLS LAST
+    LIMIT $2
+  `, [id, limit]);
+}
+
+export type TestRow = {
+  master_id: number;
+  test_name: string;
+  department: string | null;
+  labs_count: number;
+  mrp_min: string | null;
+  mrp_max: string | null;
+  b2b_min: string | null;
+  categories: string[] | null;
+  consumer_name: string | null;
+  why_it_matters: string | null;
+};
+
+export type TestFilters = {
+  q?: string;
+  category?: string;
+  department?: string;
+  priceMin?: number;
+  priceMax?: number;
+  limit?: number;
+};
+
+/**
+ * Test search across the sellable catalogue. Matches the canonical name and
+ * the aliases — aliases are how a request for "gut microbiome" or "vitamin D3"
+ * finds a test filed under a different official name.
+ */
+export async function browseTests(f: TestFilters = {}): Promise<TestRow[]> {
+  const params: unknown[] = [];
+  const where: string[] = [];
+
+  if (f.q?.trim()) {
+    params.push(`%${f.q.trim().toLowerCase()}%`);
+    const p = `$${params.length}`;
+    where.push(`(lower(tc.test_name) LIKE ${p}
+                 OR lower(te.consumer_name) LIKE ${p}
+                 OR EXISTS (SELECT 1 FROM unnest(tc.aliases) a WHERE lower(a) LIKE ${p}))`);
+  }
+  if (f.category) {
+    params.push(f.category);
+    where.push(`$${params.length} = ANY(te.categories)`);
+  }
+  if (f.department) {
+    params.push(f.department);
+    where.push(`d.department = $${params.length}`);
+  }
+  if (f.priceMin != null) { params.push(f.priceMin); where.push(`tc.mrp_min >= $${params.length}`); }
+  if (f.priceMax != null) { params.push(f.priceMax); where.push(`tc.mrp_min <= $${params.length}`); }
+  params.push(f.limit ?? 300);
+
+  return query<TestRow>(`
+    SELECT tc.master_id, tc.test_name, d.department, tc.labs_count,
+           tc.mrp_min::text, tc.mrp_max::text, tc.b2b_min::text,
+           te.categories, te.consumer_name, te.why_it_matters
+    FROM analytics.mv_test_catalog tc
+    LEFT JOIN src."Master" m ON m.id = tc.master_id
+    LEFT JOIN src."LabDepartment" d ON d.id = m."labDepartment_id"
+    LEFT JOIN atlas.test_enrichment te ON te.master_id = tc.master_id
+    ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
+    ORDER BY tc.labs_count DESC, tc.test_name
+    LIMIT $${params.length}
+  `, params);
+}
+
+/** Clinical departments with counts — the axis that exists at source. */
+export async function getDepartments(): Promise<{ department: string; tests: number }[]> {
+  return query(`
+    SELECT d.department, COUNT(*)::int AS tests
+    FROM analytics.mv_test_catalog tc
+    JOIN src."Master" m ON m.id = tc.master_id
+    JOIN src."LabDepartment" d ON d.id = m."labDepartment_id"
+    GROUP BY d.department
+    ORDER BY COUNT(*) DESC
+  `);
+}
+
+export const MODALITIES = ['HOME_SAMPLE', 'CENTER_VISIT', 'CAMP'] as const;
+
+export const MODALITY_LABEL: Record<string, string> = {
+  HOME_SAMPLE: 'Home sample',
+  CENTER_VISIT: 'Center visit',
+  CAMP: 'Camp',
+};

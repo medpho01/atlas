@@ -10,9 +10,11 @@
     "db:views": "psql -d labstack -f sql/materialized_views.sql",
     "db:refresh": "psql -d labstack -f sql/refresh_views.sql",
     "db:auth": "psql -d labstack -f sql/atlas_auth.sql",
-    "user:create": "tsx scripts/create-user.ts"
+    "user:create": "tsx scripts/create-user.ts",
+    "catalogue:enrich": "tsx scripts/enrich-catalogue.ts"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.115.0",
     "@types/bcryptjs": "^3.0.0",
     "bcryptjs": "^3.0.3",
     "leaflet": "1.9.4",
