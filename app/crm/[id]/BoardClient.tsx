@@ -214,6 +214,11 @@ function ProviderDrawer({
   const [tab, setTab] = useState<'journey' | 'docs'>('journey');
   const [note, setNote] = useState('');
   const [moveTo, setMoveTo] = useState(provider.stage_key);
+  // Staged like the stage above it: picking an owner shouldn't write on its
+  // own. Saving silently on change gave no confirmation, so a save that had
+  // worked was indistinguishable from one that hadn't.
+  const [ownerTo, setOwnerTo] = useState<number | null>(provider.assignee_id ?? null);
+  const [ownerSaved, setOwnerSaved] = useState(false);
   const [activities, setActivities] = useState<Activity[] | null>(null);
   const [docs, setDocs] = useState<ProviderDoc[] | null>(null);
   const [busy, setBusy] = useState(false);
@@ -245,6 +250,16 @@ function ProviderDrawer({
     if (moveTo === provider.stage_key) return;
     onMove(provider.id, moveTo, note.trim() || undefined);
     setNote('');
+    setTimeout(loadActivities, 600);
+  };
+
+  const ownerDirty = ownerTo !== (provider.assignee_id ?? null);
+
+  const submitOwner = () => {
+    if (!ownerDirty) return;
+    onAssign(provider.id, ownerTo);
+    setOwnerSaved(true);
+    setTimeout(() => setOwnerSaved(false), 2500);
     setTimeout(loadActivities, 600);
   };
 
@@ -308,13 +323,20 @@ function ProviderDrawer({
               <div className="flex items-center gap-2">
                 <span className="text-[11px] uppercase tracking-wider text-ink-500 font-semibold w-16">Owner</span>
                 <select
-                  value={provider.assignee_id ?? ''}
-                  onChange={(e) => onAssign(provider.id, e.target.value ? +e.target.value : null)}
+                  value={ownerTo ?? ''}
+                  onChange={(e) => setOwnerTo(e.target.value ? +e.target.value : null)}
                   className="flex-1 h-8 px-2 text-[13px] rounded-md border border-ink-200 bg-surface"
                 >
                   <option value="">Unassigned</option>
                   {team.map((t) => <option key={t.id} value={t.id}>{t.name} ({t.role})</option>)}
                 </select>
+                <button
+                  onClick={submitOwner}
+                  disabled={pending || !ownerDirty}
+                  className="inline-flex items-center gap-1 px-2.5 h-8 text-[12px] font-semibold rounded-md bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-40 transition min-w-[64px] justify-center"
+                >
+                  {ownerSaved && !ownerDirty ? <><CheckCircle2 className="w-3 h-3" /> Saved</> : 'Save'}
+                </button>
               </div>
               <div className="flex items-start gap-2">
                 <StickyNote className="w-4 h-4 text-ink-400 mt-2" />
