@@ -66,18 +66,21 @@ export async function getLabOptions(): Promise<{ value: string; label: string; c
 }
 
 /**
- * Accounts that have ordered a catalogue package. Only orders with structured
- * results carry a package reference, so this is the set of accounts we can
- * actually attribute package demand to — not every store.
+ * Accounts with packages mapped to them, from "PackagesOnStore".
+ *
+ * This is what an account can sell, not what it has already ordered — a much
+ * larger and more useful set. Plum has 30 packages mapped against 7 ordered,
+ * and "what does this client have access to" is the question the filter is
+ * actually being asked.
  */
 export async function getStoreOptions(): Promise<{ value: string; label: string; count: number }[]> {
   return query(`
     SELECT d.store_id::text AS value, s."storeName" AS label,
            COUNT(DISTINCT d.package_id)::int AS count
-    FROM analytics.mv_package_store_demand d
+    FROM analytics.mv_package_store d
     JOIN src."Store" s ON s.id = d.store_id
     GROUP BY d.store_id, s."storeName"
-    ORDER BY SUM(d.orders) DESC, s."storeName"
+    ORDER BY COUNT(DISTINCT d.package_id) DESC, s."storeName"
   `);
 }
 
@@ -116,7 +119,7 @@ export type PackageFilters = {
   provenOnly?: boolean;
   /** Packages quoted by any of these labs. */
   labIds?: number[];
-  /** Packages ordered by any of these accounts. */
+  /** Packages mapped to any of these accounts. */
   storeIds?: number[];
   limit?: number;
 };
@@ -160,7 +163,7 @@ export async function browsePackages(f: PackageFilters = {}): Promise<PackageRow
   }
   if (f.storeIds?.length) {
     params.push(f.storeIds);
-    where.push(`EXISTS (SELECT 1 FROM analytics.mv_package_store_demand sd
+    where.push(`EXISTS (SELECT 1 FROM analytics.mv_package_store sd
                         WHERE sd.package_id = e.package_id
                           AND sd.store_id = ANY($${params.length}::int[]))`);
   }
@@ -332,3 +335,52 @@ export const MODALITY_LABEL: Record<string, string> = {
   CAMP: 'Camp',
   KIT_BASED: 'Kit',
 };
+
+export type ExportRow = {
+  package_id: number;
+  package_name: string;
+  is_custom: boolean;
+  modality: string | null;
+  tat_hours: number | null;
+  pkg_cost: string | null;
+  best_lab_name: string | null;
+  orders: number;
+  categories: string[] | null;
+  intent: string | null;
+  test_name: string | null;
+  department: string | null;
+  mrp_min: string | null;
+  labs_with_test: number | null;
+};
+
+/**
+ * Flat package × test rows for export.
+ *
+ * One row per test, repeating the package columns, because that is the shape a
+ * spreadsheet can pivot, filter and VLOOKUP against. A single row per package
+ * with tests crammed into one comma-joined cell reads better on screen and is
+ * useless the moment anyone tries to work with it.
+ *
+ * Packages with no composition still get a row, with the test columns blank —
+ * dropping them would silently shorten the client's list.
+ */
+export async function getPackagesForExport(packageIds: number[]): Promise<ExportRow[]> {
+  if (!packageIds?.length) return [];
+  return query<ExportRow>(`
+    SELECT
+      e.package_id, e.package_name, e.is_custom,
+      array_to_string(e.order_types, ' / ') AS modality,
+      e.tat_hours, e.pkg_cost::text, e.best_lab_name, e.orders,
+      pe.categories, pe.intent,
+      m.name AS test_name, d.department,
+      tc.mrp_min::text, tc.labs_count AS labs_with_test
+    FROM analytics.v_package_economics e
+    LEFT JOIN atlas.package_enrichment pe ON pe.package_id = e.package_id
+    LEFT JOIN src."_MasterToPackage" mp ON mp."B" = e.package_id
+    LEFT JOIN src."Master" m ON m.id = mp."A"
+    LEFT JOIN src."LabDepartment" d ON d.id = m."labDepartment_id"
+    LEFT JOIN analytics.mv_test_catalog tc ON tc.master_id = m.id
+    WHERE e.package_id = ANY($1::int[])
+    ORDER BY e.orders DESC, e.package_name, tc.mrp_min DESC NULLS LAST, m.name
+  `, [packageIds]);
+}

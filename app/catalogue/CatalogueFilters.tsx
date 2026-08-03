@@ -56,7 +56,7 @@ export function CatalogueFilters({
         }
       />
 
-      <span className="text-[11px] uppercase tracking-wide text-ink-400 ml-3 mr-1">Bought by</span>
+      <span className="text-[11px] uppercase tracking-wide text-ink-400 ml-3 mr-1">Mapped to</span>
       <MultiSelect
         options={stores}
         selected={read('stores')}
@@ -67,8 +67,8 @@ export function CatalogueFilters({
         searchPlaceholder="Search accounts"
         footerFor={(n) =>
           n === 0
-            ? 'Showing packages regardless of who has bought them'
-            : `Showing packages ordered by any of the ${n} selected account${n > 1 ? 's' : ''}`
+            ? 'Showing every package, mapped or not'
+            : `Showing packages mapped to any of the ${n} selected account${n > 1 ? 's' : ''}`
         }
       />
     </div>

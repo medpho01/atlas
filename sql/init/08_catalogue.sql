@@ -105,33 +105,35 @@ CREATE TABLE IF NOT EXISTS atlas.enrichment_run (
 
 -- What people actually take.
 --
--- Order carries no package or test foreign key, but standardizedValues.testValues
--- does: every result row holds a testId matching Master.lsId and, for packaged
--- orders, a packageId matching Package.id. That is 2.5M result rows across
--- 29,662 orders, so it is materialized rather than unnested per request.
+-- Package demand comes from "_OrderToPackage", the Prisma join between Order
+-- and Package. An earlier version reconstructed this by unnesting 2.5M result
+-- rows out of Order.standardizedValues, because the foreign key wasn't in the
+-- imported table set and so appeared not to exist. That undercounted badly —
+-- 20 packages with demand instead of 135, and PL - Baseline Health at 7,543
+-- orders instead of 15,884 — because only orders carrying structured results
+-- contributed. The join table carries every order.
 --
--- Read from src_local, not src. The source is a hot standby: a scan this long
--- over the FDW gets killed by a recovery conflict when the standby applies WAL
--- that removes rows the query still needs. refresh-data.sh maintains the local
--- snapshot in id-chunks for exactly this reason, and every other MV reads it.
+-- Test-level demand still comes from standardizedValues: there is no
+-- order-to-test foreign key, and the result payload is the only record of
+-- which individual tests an order actually covered.
 --
--- This is deliberately the only demand signal here. Rolled-up money figures --
--- à-la-carte totals, blended lab costs, the headroom between them -- were
--- removed: prices are per-lab and don't add up across labs, so summing them
--- produced numbers nobody could act on. Adoption is a fact about the package.
+-- Order is read from src_local (the source is a hot standby, and a long scan
+-- over the FDW gets killed by recovery conflicts). The join tables themselves
+-- are small enough to read live.
 CREATE MATERIALIZED VIEW IF NOT EXISTS analytics.mv_catalogue_demand AS
-WITH tv AS (
+WITH pkg AS (
+  SELECT op."B" AS package_id, o.id AS order_id, o."userId", o."createdAt"
+  FROM src."_OrderToPackage" op
+  JOIN src_local."Order" o ON o.id = op."A"
+),
+tv AS (
   SELECT o.id AS order_id, o."userId", o."createdAt",
          jsonb_array_elements(o."standardizedValues" -> 'testValues') AS t
   FROM src_local."Order" o
   WHERE jsonb_typeof(o."standardizedValues" -> 'testValues') = 'array'
 ),
-rows AS (
-  SELECT DISTINCT
-    order_id, "userId", "createdAt",
-    t ->> 'testId'  AS ls_id,
-    CASE WHEN t ->> 'packageId' ~ '^[0-9]+$' THEN (t ->> 'packageId')::int END AS package_id
-  FROM tv
+test_rows AS (
+  SELECT DISTINCT order_id, "userId", "createdAt", t ->> 'testId' AS ls_id FROM tv
 )
 SELECT
   'PACKAGE'::text                                  AS kind,
@@ -141,28 +143,55 @@ SELECT
   MAX("createdAt")::date                           AS last_ordered,
   COUNT(DISTINCT order_id) FILTER (
     WHERE "createdAt" >= now() - INTERVAL '90 days')::int AS orders_l90d
-FROM rows WHERE package_id IS NOT NULL
+FROM pkg
 GROUP BY package_id
 UNION ALL
 SELECT
-  'TEST'::text,
-  m.id,
+  'TEST'::text, m.id,
   COUNT(DISTINCT r.order_id)::int,
   COUNT(DISTINCT r."userId")::int,
   MAX(r."createdAt")::date,
   COUNT(DISTINCT r.order_id) FILTER (
     WHERE r."createdAt" >= now() - INTERVAL '90 days')::int
-FROM rows r JOIN src."Master" m ON m."lsId" = r.ls_id
+FROM test_rows r JOIN src."Master" m ON m."lsId" = r.ls_id
 GROUP BY m.id;
 
 CREATE UNIQUE INDEX IF NOT EXISTS mv_catalogue_demand_key
   ON analytics.mv_catalogue_demand (kind, entity_id);
+
+-- Which packages an account can actually sell.
+--
+-- "PackagesOnStore" is the mapping — what has been assigned to that account,
+-- with the account's own price for it. This is a different and larger set than
+-- what the account has ordered: Plum has 30 packages mapped and had ordered 7.
+-- The catalogue filter wants the mapping, because the question behind it is
+-- "what does this client have access to", not "what have they used so far".
+CREATE MATERIALIZED VIEW IF NOT EXISTS analytics.mv_package_store AS
+SELECT
+  ps."packageId"          AS package_id,
+  ps."storeId"            AS store_id,
+  ps."storePackageName"   AS store_package_name,
+  ps."storePrice"::numeric AS store_price,
+  ps."storeMrp"::numeric   AS store_mrp,
+  COALESCE(d.orders, 0)   AS orders
+FROM src."PackagesOnStore" ps
+LEFT JOIN (
+  SELECT op."B" AS package_id, o."storeId" AS store_id, COUNT(DISTINCT o.id)::int AS orders
+  FROM src."_OrderToPackage" op
+  JOIN src_local."Order" o ON o.id = op."A"
+  WHERE o."storeId" IS NOT NULL
+  GROUP BY op."B", o."storeId"
+) d ON d.package_id = ps."packageId" AND d.store_id = ps."storeId";
+
+CREATE UNIQUE INDEX IF NOT EXISTS mv_package_store_key
+  ON analytics.mv_package_store (package_id, store_id);
 
 -- Package facts.
 --
 -- Everything here is a property of the package or of one named lab. There are
 -- no cross-lab totals: a package is bought from a single lab, so a figure
 -- assembled from several is not a price anyone can pay.
+DROP MATERIALIZED VIEW IF EXISTS analytics.mv_package_store_demand CASCADE;
 DROP VIEW IF EXISTS analytics.v_package_economics;
 CREATE VIEW analytics.v_package_economics AS
 WITH comp AS (
@@ -216,39 +245,3 @@ LEFT JOIN reach      r ON r.package_id = p.id
 LEFT JOIN analytics.mv_catalogue_demand d
        ON d.kind = 'PACKAGE' AND d.entity_id = p.id
 WHERE p.active;
-
--- Which accounts order which packages.
---
--- Same source as mv_catalogue_demand — standardizedValues.testValues — but
--- carrying Order.storeId, so the catalogue can be narrowed to "what does this
--- account actually buy". Separate from the demand MV rather than a column on
--- it, because that one is keyed (kind, entity_id) and adding a store dimension
--- would change its grain.
---
--- Small by nature: only packaged orders with structured results contribute, so
--- this covers the accounts that buy catalogue packages rather than every store.
---
--- Reads src_local for the same reason as mv_catalogue_demand: an FDW scan of
--- this size against the hot standby is killed by recovery conflicts.
-CREATE MATERIALIZED VIEW IF NOT EXISTS analytics.mv_package_store_demand AS
-WITH tv AS (
-  SELECT o.id AS order_id, o."storeId" AS store_id, o."createdAt",
-         jsonb_array_elements(o."standardizedValues" -> 'testValues') AS t
-  FROM src_local."Order" o
-  WHERE jsonb_typeof(o."standardizedValues" -> 'testValues') = 'array'
-    AND o."storeId" IS NOT NULL
-),
-rows AS (
-  SELECT DISTINCT order_id, store_id, "createdAt",
-         (t ->> 'packageId')::int AS package_id
-  FROM tv
-  WHERE t ->> 'packageId' ~ '^[0-9]+$'
-)
-SELECT package_id, store_id,
-       COUNT(DISTINCT order_id)::int AS orders,
-       MAX("createdAt")::date        AS last_ordered
-FROM rows
-GROUP BY package_id, store_id;
-
-CREATE UNIQUE INDEX IF NOT EXISTS mv_package_store_demand_key
-  ON analytics.mv_package_store_demand (package_id, store_id);
