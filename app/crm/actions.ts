@@ -47,16 +47,27 @@ export async function createProvider(input: {
   if (err) return { ok: false, error: err };
   if (!input.name.trim()) return { ok: false, error: 'Provider name required' };
 
-  const p = await queryOne<{ id: number }>(
+  const name = input.name.trim();
+
+  // Reuse the directory record if this organisation is already known, the same
+  // way the importer does. Two rows for one hospital split its history across
+  // records that no longer look like the same provider.
+  const existing = await queryOne<{ id: number }>(
+    `SELECT id FROM atlas.crm_providers WHERE lower(name) = lower($1) ORDER BY id LIMIT 1`,
+    [name],
+  );
+
+  const p = existing ?? await queryOne<{ id: number }>(
     `INSERT INTO atlas.crm_providers (name, kind, city, state, pincode, phone, email, contact_person, notes, source, created_by)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'manual', $10) RETURNING id`,
-    [input.name.trim(), input.kind || 'LAB', input.city ?? null, input.state ?? null,
+    [name, input.kind || 'LAB', input.city ?? null, input.state ?? null,
      input.pincode ?? null, input.phone ?? null, input.email ?? null,
      input.contactPerson ?? null, input.notes ?? null, me!.id],
   );
   await logActivity({
     threadId: input.threadId ?? null, providerId: p!.id, authorId: me!.id,
-    type: 'provider_created', body: `Added ${input.name.trim()}`,
+    type: 'provider_created',
+    body: existing ? `Added ${name} from the directory` : `Added ${name}`,
   });
 
   if (input.threadId) {
@@ -211,11 +222,53 @@ export async function updateThread(input: {
   return { ok: true };
 }
 
+export type DupStatus = 'new' | 'in_thread' | 'in_directory' | 'in_file';
+
+/**
+ * Classify names against what already exists, before anything is written.
+ *
+ * Returns one status per distinct name — repeats within the uploaded file are
+ * the caller's business, because only it knows row order. Keying the result by
+ * name here would collapse the two rows of a repeated name into one status and
+ * mark both as repeats, losing the first occurrence that should have imported.
+ */
+export async function checkProviderDuplicates(input: {
+  threadId: number; names: string[];
+}): Promise<{ ok: boolean; error?: string; statuses?: Record<string, DupStatus> }> {
+  const { err } = await writer();
+  if (err) return { ok: false, error: err };
+
+  const names = (input.names ?? []).map((n) => (n ?? '').trim()).filter(Boolean);
+  if (!names.length) return { ok: true, statuses: {} };
+  const keys = names.map((n) => n.toLowerCase());
+
+  const onThread = await query<{ k: string }>(
+    `SELECT lower(p.name) AS k FROM atlas.crm_thread_providers tp
+     JOIN atlas.crm_providers p ON p.id = tp.provider_id
+     WHERE tp.thread_id = $1 AND lower(p.name) = ANY($2::text[])`,
+    [input.threadId, keys],
+  );
+  const inDirectory = await query<{ k: string }>(
+    `SELECT DISTINCT lower(name) AS k FROM atlas.crm_providers WHERE lower(name) = ANY($1::text[])`,
+    [keys],
+  );
+
+  const thread = new Set(onThread.map((r) => r.k));
+  const directory = new Set(inDirectory.map((r) => r.k));
+  const statuses: Record<string, DupStatus> = {};
+
+  for (const n of names) {
+    const k = n.toLowerCase();
+    statuses[k] = thread.has(k) ? 'in_thread' : directory.has(k) ? 'in_directory' : 'new';
+  }
+  return { ok: true, statuses };
+}
+
 export async function bulkCreateProviders(input: {
   threadId: number;
   rows: { name: string; kind?: string; city?: string; state?: string; pincode?: string;
           phone?: string; email?: string; contactPerson?: string; notes?: string }[];
-}): Promise<{ ok: boolean; error?: string; created?: number; skipped?: number }> {
+}): Promise<{ ok: boolean; error?: string; created?: number; linked?: number; skipped?: number }> {
   const { me, err } = await writer();
   if (err) return { ok: false, error: err };
   const rows = (input.rows ?? []).filter((r) => r.name?.trim()).slice(0, 2000);
@@ -228,31 +281,55 @@ export async function bulkCreateProviders(input: {
   if (!t) return { ok: false, error: 'Thread not found' };
   const firstStage = t.stages?.[0]?.key ?? 'identified';
 
-  let created = 0, skipped = 0;
+  let created = 0, linked = 0, skipped = 0;
+  // A file listing the same hospital twice would otherwise add it once and
+  // report the second as an existing provider, which reads like a bug.
+  const seenInFile = new Set<string>();
+
   for (const r of rows) {
-    // Skip exact-name duplicates already in this thread
+    const name = r.name.trim();
+    const key = name.toLowerCase();
+    if (seenInFile.has(key)) { skipped++; continue; }
+    seenInFile.add(key);
+
     const dup = await queryOne(
       `SELECT 1 FROM atlas.crm_thread_providers tp
        JOIN atlas.crm_providers p ON p.id = tp.provider_id
-       WHERE tp.thread_id = $1 AND lower(p.name) = lower($2)`,
-      [input.threadId, r.name.trim()],
+       WHERE tp.thread_id = $1 AND lower(p.name) = $2`,
+      [input.threadId, key],
     );
     if (dup) { skipped++; continue; }
-    const p = await queryOne<{ id: number }>(
-      `INSERT INTO atlas.crm_providers (name, kind, city, state, pincode, phone, email, contact_person, notes, source, created_by)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'import', $10) RETURNING id`,
-      [r.name.trim(), r.kind || 'LAB', r.city ?? null, r.state ?? null, r.pincode ?? null,
-       r.phone ?? null, r.email ?? null, r.contactPerson ?? null, r.notes ?? null, me!.id],
+
+    // Reuse the directory record when the organisation is already known.
+    // Creating a second row for the same hospital splits its history across
+    // two records that no longer look like the same provider.
+    const existing = await queryOne<{ id: number }>(
+      `SELECT id FROM atlas.crm_providers WHERE lower(name) = $1 ORDER BY id LIMIT 1`,
+      [key],
     );
+
+    let providerId = existing?.id;
+    if (providerId) {
+      linked++;
+    } else {
+      const p = await queryOne<{ id: number }>(
+        `INSERT INTO atlas.crm_providers (name, kind, city, state, pincode, phone, email, contact_person, notes, source, created_by)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'import', $10) RETURNING id`,
+        [name, r.kind || 'LAB', r.city ?? null, r.state ?? null, r.pincode ?? null,
+         r.phone ?? null, r.email ?? null, r.contactPerson ?? null, r.notes ?? null, me!.id],
+      );
+      providerId = p!.id;
+      created++;
+    }
+
     await query(
       `INSERT INTO atlas.crm_thread_providers (thread_id, provider_id, stage_key, added_by)
        VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING`,
-      [input.threadId, p!.id, firstStage, me!.id],
+      [input.threadId, providerId, firstStage, me!.id],
     );
-    created++;
   }
   revalidatePath(`/crm/${input.threadId}`);
-  return { ok: true, created, skipped };
+  return { ok: true, created, linked, skipped };
 }
 
 export async function addChecklistItem(input: { threadId: number; label: string; required: boolean }): Promise<R> {

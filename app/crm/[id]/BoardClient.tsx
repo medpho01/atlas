@@ -6,7 +6,7 @@ import {
   ArrowRight, StickyNote, Clock, Phone, Mail, MapPin, Upload as UploadIcon, Settings2, Trash2,
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
-import { createProvider, moveStage, assignProvider, addNote, bulkCreateProviders, addChecklistItem, removeChecklistItem, removeFromThread, bulkUpdateProviders } from '../actions';
+import { createProvider, moveStage, assignProvider, addNote, bulkCreateProviders, addChecklistItem, removeChecklistItem, removeFromThread, bulkUpdateProviders, checkProviderDuplicates, type DupStatus } from '../actions';
 import type { Thread, ThreadProvider, ChecklistItem, ProviderDoc, Activity, FunnelStage } from '@/lib/crm';
 
 type Team = { id: number; name: string; role: string }[];
@@ -646,9 +646,22 @@ function AddProviderModal({ threadId, defaultKind, onClose }: {
     phone: '', email: '', contactPerson: '', notes: '',
   });
   const [err, setErr] = useState<string | null>(null);
+  const [dup, setDup] = useState<DupStatus | null>(null);
   const [pending, startTransition] = useTransition();
 
+  // Checked as the name is typed, so a duplicate is visible before the form is
+  // filled in rather than after it's submitted.
+  const checkName = (name: string) => {
+    setDup(null);
+    if (!name.trim()) return;
+    startTransition(async () => {
+      const res = await checkProviderDuplicates({ threadId, names: [name.trim()] });
+      setDup(res.statuses?.[name.trim()] ?? null);
+    });
+  };
+
   const submit = () => {
+    if (dup === 'in_thread') return;
     startTransition(async () => {
       const res = await createProvider({ threadId, ...form });
       if (!res.ok) { setErr(res.error ?? 'Failed'); return; }
@@ -664,7 +677,9 @@ function AddProviderModal({ threadId, defaultKind, onClose }: {
           <button onClick={onClose} className="text-ink-400 hover:text-ink-900"><X className="w-4 h-4" /></button>
         </div>
         <div className="grid grid-cols-2 gap-2">
-          <input placeholder="Provider name *" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })}
+          <input placeholder="Provider name *" value={form.name}
+            onBlur={(e) => checkName(e.target.value)}
+            onChange={(e) => { setForm({ ...form, name: e.target.value }); setDup(null); }}
             className="col-span-2 h-9 px-3 text-sm rounded-md border border-ink-200 bg-surface" />
           <select value={form.kind} onChange={(e) => setForm({ ...form, kind: e.target.value })}
             className="h-9 px-2 text-sm rounded-md border border-ink-200 bg-surface">
@@ -684,11 +699,22 @@ function AddProviderModal({ threadId, defaultKind, onClose }: {
           <textarea placeholder="Notes" value={form.notes} rows={2} onChange={(e) => setForm({ ...form, notes: e.target.value })}
             className="col-span-2 text-sm rounded-md border border-ink-200 bg-surface p-2" />
         </div>
+        {dup === 'in_thread' && (
+          <p className="text-sm text-warn-600 mt-2">
+            <b>{form.name.trim()}</b> is already on this thread. Open the existing card instead of adding it again.
+          </p>
+        )}
+        {dup === 'in_directory' && (
+          <p className="text-sm text-ink-600 mt-2">
+            <b>{form.name.trim()}</b> already exists in the directory from other work. Adding it here
+            attaches that record rather than creating a second one.
+          </p>
+        )}
         {err && <p className="text-sm text-danger-500 mt-2">{err}</p>}
         <div className="flex gap-2 mt-3">
-          <button onClick={submit} disabled={pending}
+          <button onClick={submit} disabled={pending || dup === 'in_thread'}
             className="px-4 h-9 text-sm font-semibold rounded-md bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-40 transition">
-            {pending ? 'Adding…' : 'Add provider'}
+            {pending ? 'Adding…' : dup === 'in_thread' ? 'Already on this thread' : 'Add provider'}
           </button>
           <button onClick={onClose} className="px-3 h-9 text-sm rounded-md border border-ink-200 text-ink-700 hover:bg-ink-50">Cancel</button>
         </div>
@@ -722,7 +748,9 @@ function ImportModal({ threadId, defaultKind, onClose }: {
   const [rows, setRows] = useState<Record<string, string>[]>([]);
   const [filename, setFilename] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
-  const [result, setResult] = useState<{ created: number; skipped: number } | null>(null);
+  const [result, setResult] = useState<{ created: number; linked: number; skipped: number } | null>(null);
+  const [dups, setDups] = useState<Record<string, DupStatus>>({});
+  const [checking, setChecking] = useState(false);
   const [pending, startTransition] = useTransition();
 
   const handleFile = async (file: File) => {
@@ -755,16 +783,42 @@ function ImportModal({ threadId, defaultKind, onClose }: {
       }
       if (!out.length) throw new Error('No rows with a name found');
       setRows(out);
+      // Classify before anything is written, so the preview shows what will
+      // actually happen rather than reporting it afterwards.
+      setChecking(true);
+      const check = await checkProviderDuplicates({
+        threadId, names: [...new Set(out.map((r) => r.name.trim().toLowerCase()))],
+      });
+      setDups(check.statuses ?? {});
+      setChecking(false);
     } catch (e) {
-      setErr((e as Error).message); setRows([]);
+      setErr((e as Error).message); setRows([]); setDups({}); setChecking(false);
     }
   };
 
+  // Status is per ROW, not per name: a name appearing twice has a real status
+  // on its first row and counts as a repeat only from the second onwards.
+  // Deriving this from a name-keyed map would drop the first occurrence too.
+  const rowStatus: DupStatus[] = (() => {
+    const seen = new Set<string>();
+    return rows.map((r) => {
+      const k = r.name.trim().toLowerCase();
+      if (seen.has(k)) return 'in_file' as DupStatus;
+      seen.add(k);
+      return (dups[k] ?? 'new') as DupStatus;
+    });
+  })();
+
+  // Directory matches are sent — they attach the existing provider rather than
+  // creating a second record for the same organisation.
+  const importable = rows.filter((_, i) => rowStatus[i] !== 'in_thread' && rowStatus[i] !== 'in_file');
+  const blocked = rows.length - importable.length;
+
   const commit = () => {
     startTransition(async () => {
-      const res = await bulkCreateProviders({ threadId, rows: rows as never });
+      const res = await bulkCreateProviders({ threadId, rows: importable as never });
       if (!res.ok) { setErr(res.error ?? 'Import failed'); return; }
-      setResult({ created: res.created ?? 0, skipped: res.skipped ?? 0 });
+      setResult({ created: res.created ?? 0, linked: res.linked ?? 0, skipped: res.skipped ?? 0 });
     });
   };
 
@@ -780,8 +834,9 @@ function ImportModal({ threadId, defaultKind, onClose }: {
           <div className="text-center py-6">
             <CheckCircle2 className="w-8 h-8 text-success-600 mx-auto mb-2" />
             <p className="text-sm text-ink-800">
-              <b>{result.created}</b> providers added to this thread
-              {result.skipped > 0 && <> · <b>{result.skipped}</b> duplicates skipped</>}
+              <b>{result.created}</b> new provider{result.created === 1 ? '' : 's'} added
+              {result.linked > 0 && <> · <b>{result.linked}</b> existing linked from the directory</>}
+              {result.skipped > 0 && <> · <b>{result.skipped}</b> duplicate{result.skipped === 1 ? '' : 's'} skipped</>}
             </p>
             <button
               onClick={() => window.location.reload()}
@@ -809,33 +864,56 @@ function ImportModal({ threadId, defaultKind, onClose }: {
           <>
             <div className="text-[13px] text-ink-700 mb-2">
               <b>{rows.length}</b> providers from <span className="font-mono text-[12px]">{filename}</span>
+              {checking && <span className="text-ink-500"> · checking for duplicates…</span>}
+              {!checking && blocked > 0 && (
+                <span className="text-warn-600"> · {blocked} will be skipped as duplicates</span>
+              )}
             </div>
             <div className="max-h-[300px] overflow-y-auto rounded-lg border border-ink-200 mb-3">
               <table className="w-full text-[12px]">
                 <thead className="bg-ink-50 sticky top-0">
                   <tr className="text-left text-[10px] uppercase tracking-wider text-ink-500">
-                    <th className="px-2 py-1.5">Name</th><th className="px-2 py-1.5">City</th><th className="px-2 py-1.5">Phone</th>
+                    <th className="px-2 py-1.5">Name</th><th className="px-2 py-1.5">City</th><th className="px-2 py-1.5">Phone</th><th className="px-2 py-1.5">Status</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {rows.slice(0, 50).map((r, i) => (
-                    <tr key={i} className="border-t border-ink-100">
-                      <td className="px-2 py-1.5 text-ink-900">{r.name}</td>
-                      <td className="px-2 py-1.5 text-ink-600">{r.city || '—'}</td>
-                      <td className="px-2 py-1.5 text-ink-600 tabular-nums">{r.phone || '—'}</td>
-                    </tr>
-                  ))}
+                  {rows.slice(0, 50).map((r, i) => {
+                    const st = rowStatus[i] ?? 'new';
+                    const dup = st === 'in_thread' || st === 'in_file';
+                    return (
+                      <tr key={i} className={`border-t border-ink-100 ${dup ? 'opacity-45' : ''}`}>
+                        <td className={`px-2 py-1.5 ${dup ? 'text-ink-500 line-through' : 'text-ink-900'}`}>{r.name}</td>
+                        <td className="px-2 py-1.5 text-ink-600">{r.city || '—'}</td>
+                        <td className="px-2 py-1.5 text-ink-600 tabular-nums">{r.phone || '—'}</td>
+                        <td className="px-2 py-1.5">
+                          <span className={`text-[10px] font-semibold ${
+                            st === 'in_thread' ? 'text-warn-600'
+                            : st === 'in_file' ? 'text-warn-600'
+                            : st === 'in_directory' ? 'text-brand-700 dark:text-brand-400'
+                            : 'text-success-600'}`}>
+                            {st === 'in_thread' ? 'already here'
+                              : st === 'in_file' ? 'repeat in file'
+                              : st === 'in_directory' ? 'known — will link'
+                              : 'new'}
+                          </span>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
-              {rows.length > 50 && <div className="px-2 py-1.5 text-[11px] text-ink-500 bg-ink-50 border-t border-ink-200">+{rows.length - 50} more will be imported</div>}
+              {rows.length > 50 && <div className="px-2 py-1.5 text-[11px] text-ink-500 bg-ink-50 border-t border-ink-200">+{rows.length - 50} more rows, checked the same way</div>}
             </div>
             {err && <p className="text-sm text-danger-500 mb-2">{err}</p>}
             <div className="flex gap-2">
-              <button onClick={commit} disabled={pending}
+              <button onClick={commit} disabled={pending || checking || importable.length === 0}
                 className="px-4 h-9 text-sm font-semibold rounded-md bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-40 transition">
-                {pending ? 'Importing…' : `Import ${rows.length} providers`}
+                {pending ? 'Importing…'
+                  : checking ? 'Checking…'
+                  : importable.length === 0 ? 'Nothing new to import'
+                  : `Import ${importable.length} provider${importable.length === 1 ? '' : 's'}`}
               </button>
-              <button onClick={() => { setRows([]); setFilename(null); }} className="px-3 h-9 text-sm rounded-md border border-ink-200 text-ink-700 hover:bg-ink-50">
+              <button onClick={() => { setRows([]); setFilename(null); setDups({}); }} className="px-3 h-9 text-sm rounded-md border border-ink-200 text-ink-700 hover:bg-ink-50">
                 Choose another file
               </button>
             </div>
