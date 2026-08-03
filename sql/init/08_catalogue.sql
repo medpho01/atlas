@@ -110,6 +110,11 @@ CREATE TABLE IF NOT EXISTS atlas.enrichment_run (
 -- orders, a packageId matching Package.id. That is 2.5M result rows across
 -- 29,662 orders, so it is materialized rather than unnested per request.
 --
+-- Read from src_local, not src. The source is a hot standby: a scan this long
+-- over the FDW gets killed by a recovery conflict when the standby applies WAL
+-- that removes rows the query still needs. refresh-data.sh maintains the local
+-- snapshot in id-chunks for exactly this reason, and every other MV reads it.
+--
 -- This is deliberately the only demand signal here. Rolled-up money figures --
 -- à-la-carte totals, blended lab costs, the headroom between them -- were
 -- removed: prices are per-lab and don't add up across labs, so summing them
@@ -118,7 +123,7 @@ CREATE MATERIALIZED VIEW IF NOT EXISTS analytics.mv_catalogue_demand AS
 WITH tv AS (
   SELECT o.id AS order_id, o."userId", o."createdAt",
          jsonb_array_elements(o."standardizedValues" -> 'testValues') AS t
-  FROM src."Order" o
+  FROM src_local."Order" o
   WHERE jsonb_typeof(o."standardizedValues" -> 'testValues') = 'array'
 ),
 rows AS (
@@ -222,11 +227,14 @@ WHERE p.active;
 --
 -- Small by nature: only packaged orders with structured results contribute, so
 -- this covers the accounts that buy catalogue packages rather than every store.
+--
+-- Reads src_local for the same reason as mv_catalogue_demand: an FDW scan of
+-- this size against the hot standby is killed by recovery conflicts.
 CREATE MATERIALIZED VIEW IF NOT EXISTS analytics.mv_package_store_demand AS
 WITH tv AS (
   SELECT o.id AS order_id, o."storeId" AS store_id, o."createdAt",
          jsonb_array_elements(o."standardizedValues" -> 'testValues') AS t
-  FROM src."Order" o
+  FROM src_local."Order" o
   WHERE jsonb_typeof(o."standardizedValues" -> 'testValues') = 'array'
     AND o."storeId" IS NOT NULL
 ),
