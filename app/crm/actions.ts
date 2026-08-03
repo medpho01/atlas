@@ -306,3 +306,113 @@ export async function setFunnelSuccessStage(input: { funnelId: number; stageKey:
   revalidatePath('/crm');
   return { ok: true };
 }
+
+/**
+ * Take a provider off this thread.
+ *
+ * Only the thread membership goes: the provider stays in atlas.crm_providers,
+ * so it can be added back or worked in another thread. Removing the record of
+ * the organisation itself because it was added to one funnel by mistake would
+ * be a much larger action than the button implies.
+ *
+ * Activities and documents are kept. They are provider-scoped and invisible
+ * while the provider isn't on the thread, but if it comes back the journey
+ * comes back with it — including the removal itself, which is worth being able
+ * to see. Deleting them would quietly destroy the record of work already done.
+ */
+export async function removeFromThread(input: {
+  threadId: number; providerId: number;
+}): Promise<R> {
+  const { me, err } = await writer();
+  if (err) return { ok: false, error: err };
+
+  const p = await queryOne<{ name: string }>(
+    `SELECT name FROM atlas.crm_providers WHERE id = $1`, [input.providerId],
+  );
+  if (!p) return { ok: false, error: 'Provider not found' };
+
+  const gone = await query(
+    `DELETE FROM atlas.crm_thread_providers
+     WHERE thread_id = $1 AND provider_id = $2 RETURNING provider_id`,
+    [input.threadId, input.providerId],
+  );
+  if (!gone.length) return { ok: false, error: 'Not on this thread' };
+
+  await logActivity({
+    threadId: input.threadId, providerId: input.providerId, authorId: me!.id,
+    type: 'removal', body: 'Removed from this thread', meta: {},
+  }).catch(() => {});
+  revalidatePath(`/crm/${input.threadId}`);
+  return { ok: true };
+}
+
+/**
+ * Apply one change to many providers at once.
+ *
+ * Assign, move and remove share a shape — a set of thread members and one
+ * instruction — so they share an action rather than three that drift apart.
+ * Each provider is logged individually, so a bulk change reads the same as
+ * the equivalent one-at-a-time changes in every journey.
+ */
+export async function bulkUpdateProviders(input: {
+  threadId: number;
+  providerIds: number[];
+  op: 'assign' | 'move' | 'remove';
+  assigneeId?: number | null;
+  toStage?: string;
+}): Promise<R & { affected?: number }> {
+  const { me, err } = await writer();
+  if (err) return { ok: false, error: err };
+
+  const ids = [...new Set((input.providerIds ?? []).filter((n) => Number.isFinite(n)))];
+  if (!ids.length) return { ok: false, error: 'Nothing selected' };
+  if (ids.length > 500) return { ok: false, error: 'Too many at once — 500 max' };
+
+  if (input.op === 'remove') {
+    for (const providerId of ids) await removeFromThread({ threadId: input.threadId, providerId });
+    return { ok: true, affected: ids.length };
+  }
+
+  if (input.op === 'assign') {
+    const who = input.assigneeId
+      ? (await queryOne<{ name: string }>(`SELECT name FROM atlas.users WHERE id = $1`, [input.assigneeId]))?.name
+      : 'nobody';
+    await query(
+      `UPDATE atlas.crm_thread_providers SET assignee_id = $1, updated_at = now()
+       WHERE thread_id = $2 AND provider_id = ANY($3::int[])`,
+      [input.assigneeId ?? null, input.threadId, ids],
+    );
+    for (const providerId of ids) {
+      await logActivity({
+        threadId: input.threadId, providerId, authorId: me!.id,
+        type: 'assignment', body: `Assigned to ${who}`,
+        meta: { assignee_id: input.assigneeId ?? null, bulk: true },
+      }).catch(() => {});
+    }
+    revalidatePath(`/crm/${input.threadId}`);
+    return { ok: true, affected: ids.length };
+  }
+
+  if (!input.toStage) return { ok: false, error: 'No stage given' };
+  // Only rows actually changing stage are logged, so a bulk move doesn't fill
+  // journeys with "moved to the stage it was already in".
+  const changing = await query<{ provider_id: number; stage_key: string }>(
+    `SELECT provider_id, stage_key FROM atlas.crm_thread_providers
+     WHERE thread_id = $1 AND provider_id = ANY($2::int[]) AND stage_key <> $3`,
+    [input.threadId, ids, input.toStage],
+  );
+  await query(
+    `UPDATE atlas.crm_thread_providers SET stage_key = $1, updated_at = now()
+     WHERE thread_id = $2 AND provider_id = ANY($3::int[])`,
+    [input.toStage, input.threadId, ids],
+  );
+  for (const row of changing) {
+    await logActivity({
+      threadId: input.threadId, providerId: row.provider_id, authorId: me!.id,
+      type: 'stage_move', body: `Moved from ${row.stage_key} to ${input.toStage}`,
+      meta: { from: row.stage_key, to: input.toStage, bulk: true },
+    }).catch(() => {});
+  }
+  revalidatePath(`/crm/${input.threadId}`);
+  return { ok: true, affected: changing.length };
+}

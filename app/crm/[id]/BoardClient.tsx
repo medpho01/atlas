@@ -6,7 +6,7 @@ import {
   ArrowRight, StickyNote, Clock, Phone, Mail, MapPin, Upload as UploadIcon, Settings2, Trash2,
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
-import { createProvider, moveStage, assignProvider, addNote, bulkCreateProviders, addChecklistItem, removeChecklistItem } from '../actions';
+import { createProvider, moveStage, assignProvider, addNote, bulkCreateProviders, addChecklistItem, removeChecklistItem, removeFromThread, bulkUpdateProviders } from '../actions';
 import type { Thread, ThreadProvider, ChecklistItem, ProviderDoc, Activity, FunnelStage } from '@/lib/crm';
 
 type Team = { id: number; name: string; role: string }[];
@@ -23,6 +23,8 @@ export function BoardClient({
 }) {
   const [providers, setProviders] = useState(initialProviders);
   const [openId, setOpenId] = useState<number | null>(null);
+  const [picked, setPicked] = useState<Set<number>>(new Set());
+  const [confirmBulkRemove, setConfirmBulkRemove] = useState(false);
   const [showAdd, setShowAdd] = useState(false);
   const [showImport, setShowImport] = useState(false);
   const [showChecklist, setShowChecklist] = useState(false);
@@ -54,6 +56,47 @@ export function BoardClient({
       const res = await moveStage({ threadId: thread.id, providerId, toStage, note });
       if (!res.ok) { setErr(res.error ?? 'Move failed'); return; }
       setProviders((ps) => ps.map((p) => (p.id === providerId ? { ...p, stage_key: toStage } : p)));
+    });
+  };
+
+  const togglePick = (id: number) =>
+    setPicked((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+
+  const doRemove = (providerId: number) => {
+    startTransition(async () => {
+      const res = await removeFromThread({ threadId: thread.id, providerId });
+      if (!res.ok) { setErr(res.error ?? 'Remove failed'); return; }
+      setProviders((ps) => ps.filter((p) => p.id !== providerId));
+      setPicked((prev) => { const n = new Set(prev); n.delete(providerId); return n; });
+      if (openId === providerId) setOpenId(null);
+    });
+  };
+
+  const doBulk = (op: 'assign' | 'move' | 'remove', value?: string) => {
+    const ids = [...picked];
+    if (!ids.length) return;
+    startTransition(async () => {
+      const res = await bulkUpdateProviders({
+        threadId: thread.id, providerIds: ids, op,
+        assigneeId: op === 'assign' ? (value && value !== '0' ? +value : null) : undefined,
+        toStage: op === 'move' ? value : undefined,
+      });
+      if (!res.ok) { setErr(res.error ?? 'Bulk update failed'); return; }
+      if (op === 'remove') {
+        setProviders((ps) => ps.filter((p) => !picked.has(p.id)));
+      } else if (op === 'assign') {
+        const assigneeId = value && value !== '0' ? +value : null;
+        const name = team.find((t) => t.id === assigneeId)?.name ?? null;
+        setProviders((ps) => ps.map((p) =>
+          picked.has(p.id) ? { ...p, assignee_id: assigneeId, assignee_name: name } : p));
+      } else {
+        setProviders((ps) => ps.map((p) => (picked.has(p.id) ? { ...p, stage_key: value! } : p)));
+      }
+      setPicked(new Set());
     });
   };
 
@@ -126,12 +169,37 @@ export function BoardClient({
               </div>
               <div className="border border-ink-200 rounded-b-xl bg-ink-50/40 p-2 space-y-2 min-h-[120px]">
                 {cards.map((p) => (
-                  <button
+                  <div
                     key={p.id}
-                    onClick={() => setOpenId(p.id)}
-                    className="w-full text-left rounded-lg border border-ink-200 bg-surface p-2.5 hover:border-brand-400 transition"
+                    className={`relative w-full rounded-lg border bg-surface transition ${
+                      picked.has(p.id) ? 'border-brand-500 ring-1 ring-brand-500/30' : 'border-ink-200 hover:border-brand-400'
+                    }`}
                   >
-                    <div className="text-[13px] font-medium text-ink-900 leading-tight">{p.name}</div>
+                    {/* Selection sits outside the card button so ticking a box
+                        never opens the drawer. */}
+                    {canWrite && (
+                      <label
+                        className="absolute top-2 right-2 z-10 flex items-center cursor-pointer p-0.5"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={picked.has(p.id)}
+                          onChange={() => togglePick(p.id)}
+                          className="sr-only"
+                        />
+                        <span className={`inline-flex w-3.5 h-3.5 items-center justify-center rounded border transition ${
+                          picked.has(p.id) ? 'bg-brand-600 border-brand-600' : 'border-ink-300 bg-surface'
+                        }`}>
+                          {picked.has(p.id) && <CheckCircle2 className="w-2.5 h-2.5 text-white" strokeWidth={3} />}
+                        </span>
+                      </label>
+                    )}
+                  <button
+                    onClick={() => setOpenId(p.id)}
+                    className="w-full text-left p-2.5"
+                  >
+                    <div className="text-[13px] font-medium text-ink-900 leading-tight pr-5">{p.name}</div>
                     <div className="text-[11px] text-ink-500 mt-0.5">
                       {p.kind}{p.city ? ` · ${p.city}` : ''}
                     </div>
@@ -146,6 +214,7 @@ export function BoardClient({
                       )}
                     </div>
                   </button>
+                  </div>
                 ))}
                 {cards.length === 0 && (
                   <div className="text-[11px] text-ink-400 text-center py-4">—</div>
@@ -155,6 +224,59 @@ export function BoardClient({
           );
         })}
       </div>
+
+      {/* Bulk actions — only present when something is selected, so the
+          toolbar doesn't carry controls that do nothing most of the time. */}
+      {canWrite && picked.size > 0 && (
+        <div className="sticky bottom-3 z-30 mt-3 flex flex-wrap items-center gap-2 rounded-xl border border-brand-500/40 bg-surface shadow-lg px-3 py-2">
+          <span className="text-[13px] font-semibold text-ink-900">
+            {picked.size} selected
+          </span>
+
+          <select
+            defaultValue=""
+            onChange={(e) => { if (e.target.value !== '') { doBulk('assign', e.target.value); e.target.value = ''; } }}
+            disabled={pending}
+            className="h-8 px-2 text-[12px] rounded-md border border-ink-200 bg-surface"
+          >
+            <option value="" disabled>Assign to…</option>
+            <option value="0">Unassigned</option>
+            {team.map((t) => <option key={t.id} value={t.id}>{t.name} ({t.role})</option>)}
+          </select>
+
+          <select
+            defaultValue=""
+            onChange={(e) => { if (e.target.value) { doBulk('move', e.target.value); e.target.value = ''; } }}
+            disabled={pending}
+            className="h-8 px-2 text-[12px] rounded-md border border-ink-200 bg-surface"
+          >
+            <option value="" disabled>Move to…</option>
+            {stages.map((st) => <option key={st.key} value={st.key}>{st.label}</option>)}
+          </select>
+
+          {confirmBulkRemove ? (
+            <span className="inline-flex items-center gap-1.5">
+              <span className="text-[12px] text-ink-700">Remove {picked.size} from thread?</span>
+              <button onClick={() => { doBulk('remove'); setConfirmBulkRemove(false); }} disabled={pending}
+                className="text-[12px] font-semibold text-danger-500 hover:underline">Yes</button>
+              <button onClick={() => setConfirmBulkRemove(false)}
+                className="text-[12px] text-ink-500">Cancel</button>
+            </span>
+          ) : (
+            <button
+              onClick={() => setConfirmBulkRemove(true)}
+              disabled={pending}
+              className="inline-flex items-center gap-1 px-2 h-8 text-[12px] font-semibold rounded-md border border-ink-200 text-ink-600 hover:text-danger-500 hover:border-danger-500/40 transition"
+            >
+              <Trash2 className="w-3 h-3" /> Remove
+            </button>
+          )}
+
+          <button onClick={() => setPicked(new Set())} className="ml-auto text-[12px] text-ink-500 hover:text-ink-900">
+            Clear
+          </button>
+        </div>
+      )}
 
       {/* Drawer */}
       {open && (
@@ -170,6 +292,7 @@ export function BoardClient({
           onClose={() => setOpenId(null)}
           onMove={doMove}
           onAssign={doAssign}
+          onRemove={doRemove}
           onNoteAdded={() => {}}
         />
       )}
@@ -197,7 +320,7 @@ export function BoardClient({
 /* ---------------------------------------------------------------- drawer */
 
 function ProviderDrawer({
-  thread, provider, stages, checklist, team, canWrite, pending, onClose, onMove, onAssign,
+  thread, provider, stages, checklist, team, canWrite, pending, onClose, onMove, onAssign, onRemove,
 }: {
   thread: Thread;
   provider: ThreadProvider;
@@ -208,6 +331,7 @@ function ProviderDrawer({
   pending: boolean;
   onClose: () => void;
   onMove: (providerId: number, toStage: string, note?: string) => void;
+  onRemove: (providerId: number) => void;
   onAssign: (providerId: number, assigneeId: number | null) => void;
   onNoteAdded: () => void;
 }) {
@@ -219,6 +343,7 @@ function ProviderDrawer({
   // worked was indistinguishable from one that hadn't.
   const [ownerTo, setOwnerTo] = useState<number | null>(provider.assignee_id ?? null);
   const [ownerSaved, setOwnerSaved] = useState(false);
+  const [confirmRemove, setConfirmRemove] = useState(false);
   const [activities, setActivities] = useState<Activity[] | null>(null);
   const [docs, setDocs] = useState<ProviderDoc[] | null>(null);
   const [busy, setBusy] = useState(false);
@@ -294,9 +419,38 @@ function ProviderDrawer({
               {provider.phone && <a href={`tel:${provider.phone}`} className="inline-flex items-center gap-1 text-brand-700 dark:text-brand-400"><Phone className="w-3 h-3" />{provider.phone}</a>}
               {provider.email && <span className="inline-flex items-center gap-1"><Mail className="w-3 h-3" />{provider.email}</span>}
               {provider.contact_person && <span>· {provider.contact_person}</span>}
+              {provider.state && <span>· {provider.state}</span>}
             </div>
+            {/* Captured on the add form but previously never shown, so a note
+                written while creating a provider was effectively write-only. */}
+            {provider.notes && (
+              <p className="text-[12px] text-ink-600 mt-1.5 whitespace-pre-wrap border-l-2 border-ink-200 pl-2">
+                {provider.notes}
+              </p>
+            )}
           </div>
-          <button onClick={onClose} className="text-ink-400 hover:text-ink-900 p-1"><X className="w-4 h-4" /></button>
+          <div className="flex items-center gap-1 shrink-0">
+            {canWrite && (
+              confirmRemove ? (
+                <span className="inline-flex items-center gap-1.5 mr-1">
+                  <span className="text-[11px] text-ink-600">Remove?</span>
+                  <button onClick={() => onRemove(provider.id)} disabled={pending}
+                    className="text-[11px] font-semibold text-danger-500 hover:underline">Yes</button>
+                  <button onClick={() => setConfirmRemove(false)}
+                    className="text-[11px] text-ink-500">No</button>
+                </span>
+              ) : (
+                <button
+                  onClick={() => setConfirmRemove(true)}
+                  title="Remove from this thread — the provider stays in the directory"
+                  className="text-ink-400 hover:text-danger-500 p-1 transition"
+                >
+                  <Trash2 className="w-4 h-4" />
+                </button>
+              )
+            )}
+            <button onClick={onClose} className="text-ink-400 hover:text-ink-900 p-1"><X className="w-4 h-4" /></button>
+          </div>
         </div>
 
         <div className="p-5 space-y-4">
