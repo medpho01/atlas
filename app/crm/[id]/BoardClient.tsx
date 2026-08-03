@@ -6,7 +6,7 @@ import {
   ArrowRight, StickyNote, Clock, Phone, Mail, MapPin, Upload as UploadIcon, Settings2, Trash2,
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
-import { createProvider, moveStage, assignProvider, addNote, bulkCreateProviders, addChecklistItem, removeChecklistItem, removeFromThread, bulkUpdateProviders, checkProviderDuplicates, type DupStatus } from '../actions';
+import { createProvider, moveStage, assignProvider, addNote, updateProvider, bulkCreateProviders, addChecklistItem, removeChecklistItem, removeFromThread, bulkUpdateProviders, checkProviderDuplicates, type DupStatus } from '../actions';
 import type { Thread, ThreadProvider, ChecklistItem, ProviderDoc, Activity, FunnelStage } from '@/lib/crm';
 
 type Team = { id: number; name: string; role: string }[];
@@ -65,6 +65,10 @@ export function BoardClient({
       if (next.has(id)) next.delete(id); else next.add(id);
       return next;
     });
+
+  const doPatch = (providerId: number, patch: Record<string, string>) => {
+    setProviders((ps) => ps.map((p) => (p.id === providerId ? { ...p, ...patch } : p)));
+  };
 
   const doRemove = (providerId: number) => {
     startTransition(async () => {
@@ -293,6 +297,7 @@ export function BoardClient({
           onMove={doMove}
           onAssign={doAssign}
           onRemove={doRemove}
+          onPatch={doPatch}
           onNoteAdded={() => {}}
         />
       )}
@@ -320,7 +325,7 @@ export function BoardClient({
 /* ---------------------------------------------------------------- drawer */
 
 function ProviderDrawer({
-  thread, provider, stages, checklist, team, canWrite, pending, onClose, onMove, onAssign, onRemove,
+  thread, provider, stages, checklist, team, canWrite, pending, onClose, onMove, onAssign, onRemove, onPatch,
 }: {
   thread: Thread;
   provider: ThreadProvider;
@@ -332,17 +337,23 @@ function ProviderDrawer({
   onClose: () => void;
   onMove: (providerId: number, toStage: string, note?: string) => void;
   onRemove: (providerId: number) => void;
+  onPatch: (providerId: number, patch: Record<string, string>) => void;
   onAssign: (providerId: number, assigneeId: number | null) => void;
   onNoteAdded: () => void;
 }) {
   const [tab, setTab] = useState<'journey' | 'docs'>('journey');
   const [note, setNote] = useState('');
+  const blank = {
+    name: provider.name ?? '', kind: provider.kind ?? 'LAB',
+    city: provider.city ?? '', state: provider.state ?? '', pincode: provider.pincode ?? '',
+    phone: provider.phone ?? '', email: provider.email ?? '',
+    contact_person: provider.contact_person ?? '', notes: provider.notes ?? '',
+  };
+  const [fields, setFields] = useState(blank);
   const [moveTo, setMoveTo] = useState(provider.stage_key);
-  // Staged like the stage above it: picking an owner shouldn't write on its
-  // own. Saving silently on change gave no confirmation, so a save that had
-  // worked was indistinguishable from one that hadn't.
   const [ownerTo, setOwnerTo] = useState<number | null>(provider.assignee_id ?? null);
-  const [ownerSaved, setOwnerSaved] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [saveErr, setSaveErr] = useState<string | null>(null);
   const [confirmRemove, setConfirmRemove] = useState(false);
   const [activities, setActivities] = useState<Activity[] | null>(null);
   const [docs, setDocs] = useState<ProviderDoc[] | null>(null);
@@ -362,30 +373,52 @@ function ProviderDrawer({
   if (activities === null && tab === 'journey') loadActivities();
   if (docs === null && tab === 'docs') loadDocs();
 
-  const submitNote = async () => {
-    if (!note.trim()) return;
-    setBusy(true);
-    try {
-      const res = await addNote({ threadId: thread.id, providerId: provider.id, body: note });
-      if (res.ok) { setNote(''); await loadActivities(); }
-    } finally { setBusy(false); }
+  const setField = (k: keyof typeof blank, v: string) => {
+    setFields((f) => ({ ...f, [k]: v }));
+    setSaved(false);
   };
 
-  const submitMove = () => {
-    if (moveTo === provider.stage_key) return;
-    onMove(provider.id, moveTo, note.trim() || undefined);
-    setNote('');
-    setTimeout(loadActivities, 600);
-  };
-
+  const fieldsDirty = (Object.keys(blank) as (keyof typeof blank)[]).some((k) => fields[k] !== blank[k]);
+  const stageDirty = moveTo !== provider.stage_key;
   const ownerDirty = ownerTo !== (provider.assignee_id ?? null);
+  const dirty = fieldsDirty || stageDirty || ownerDirty || note.trim().length > 0;
 
-  const submitOwner = () => {
-    if (!ownerDirty) return;
-    onAssign(provider.id, ownerTo);
-    setOwnerSaved(true);
-    setTimeout(() => setOwnerSaved(false), 2500);
-    setTimeout(loadActivities, 600);
+  const resetDraft = () => {
+    setFields(blank); setMoveTo(provider.stage_key);
+    setOwnerTo(provider.assignee_id ?? null); setNote(''); setSaveErr(null);
+  };
+
+  /**
+   * One save for everything on the card.
+   *
+   * Order matters: fields first so a rename is in place before the move is
+   * logged, then the stage (which carries the note, so the note explains the
+   * move), then the owner. A note with no stage change is posted on its own.
+   */
+  const saveAll = async () => {
+    setBusy(true); setSaveErr(null);
+    try {
+      const patch: Record<string, string> = {};
+      if (fieldsDirty) {
+        (Object.keys(blank) as (keyof typeof blank)[]).forEach((k) => {
+          if (fields[k] !== blank[k]) patch[k] = fields[k];
+        });
+        const res = await updateProvider({ providerId: provider.id, threadId: thread.id, fields: patch });
+        if (!res.ok) { setSaveErr(res.error ?? 'Could not save details'); return; }
+      }
+      if (stageDirty) onMove(provider.id, moveTo, note.trim() || undefined);
+      else if (note.trim()) {
+        const res = await addNote({ threadId: thread.id, providerId: provider.id, body: note.trim() });
+        if (!res.ok) { setSaveErr(res.error ?? 'Could not post note'); return; }
+      }
+      if (ownerDirty) onAssign(provider.id, ownerTo);
+      if (fieldsDirty) onPatch(provider.id, patch);
+
+      setNote('');
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2500);
+      setTimeout(loadActivities, 700);
+    } finally { setBusy(false); }
   };
 
   const uploadDoc = async (file: File, checklistItemId: number | null) => {
@@ -454,60 +487,83 @@ function ProviderDrawer({
         </div>
 
         <div className="p-5 space-y-4">
-          {/* Stage + assignee controls */}
+          {/* One editable card: every provider field, the stage, the owner and
+              an optional note, saved together. Three separate save buttons
+              meant three ways to lose an edit by clicking the wrong one. */}
           {canWrite && (
             <div className="rounded-xl border border-ink-200 bg-ink-50 p-3 space-y-2.5">
+              <div className="grid grid-cols-2 gap-2">
+                <input value={fields.name} onChange={(e) => setField('name', e.target.value)}
+                  placeholder="Provider name"
+                  className="col-span-2 h-8 px-2 text-[13px] rounded-md border border-ink-200 bg-surface font-medium" />
+                <select value={fields.kind} onChange={(e) => setField('kind', e.target.value)}
+                  className="h-8 px-2 text-[13px] rounded-md border border-ink-200 bg-surface">
+                  {['LAB','HOSPITAL','CLINIC','COLLECTION_CENTRE','PHARMACY','OTHER'].map((k) =>
+                    <option key={k} value={k}>{k}</option>)}
+                </select>
+                <input value={fields.contact_person} onChange={(e) => setField('contact_person', e.target.value)}
+                  placeholder="Contact person"
+                  className="h-8 px-2 text-[13px] rounded-md border border-ink-200 bg-surface" />
+                <input value={fields.phone} onChange={(e) => setField('phone', e.target.value)}
+                  placeholder="Phone"
+                  className="h-8 px-2 text-[13px] rounded-md border border-ink-200 bg-surface tabular-nums" />
+                <input value={fields.email} onChange={(e) => setField('email', e.target.value)}
+                  placeholder="Email"
+                  className="h-8 px-2 text-[13px] rounded-md border border-ink-200 bg-surface" />
+                <input value={fields.city} onChange={(e) => setField('city', e.target.value)}
+                  placeholder="City"
+                  className="h-8 px-2 text-[13px] rounded-md border border-ink-200 bg-surface" />
+                <input value={fields.state} onChange={(e) => setField('state', e.target.value)}
+                  placeholder="State"
+                  className="h-8 px-2 text-[13px] rounded-md border border-ink-200 bg-surface" />
+                <input value={fields.pincode} maxLength={6}
+                  onChange={(e) => setField('pincode', e.target.value.replace(/\D/g, ''))}
+                  placeholder="Pincode"
+                  className="h-8 px-2 text-[13px] rounded-md border border-ink-200 bg-surface tabular-nums" />
+                <textarea value={fields.notes} rows={2} onChange={(e) => setField('notes', e.target.value)}
+                  placeholder="Notes"
+                  className="col-span-2 text-[13px] rounded-md border border-ink-200 bg-surface p-2" />
+              </div>
+
               <div className="flex items-center gap-2">
                 <span className="text-[11px] uppercase tracking-wider text-ink-500 font-semibold w-16">Stage</span>
-                <select
-                  value={moveTo}
-                  onChange={(e) => setMoveTo(e.target.value)}
-                  className="flex-1 h-8 px-2 text-[13px] rounded-md border border-ink-200 bg-surface font-medium"
-                >
-                  {stages.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
+                <select value={moveTo} onChange={(e) => setMoveTo(e.target.value)}
+                  className="flex-1 h-8 px-2 text-[13px] rounded-md border border-ink-200 bg-surface font-medium">
+                  {stages.map((st) => <option key={st.key} value={st.key}>{st.label}</option>)}
                 </select>
-                <button
-                  onClick={submitMove}
-                  disabled={pending || moveTo === provider.stage_key}
-                  className="inline-flex items-center gap-1 px-2.5 h-8 text-[12px] font-semibold rounded-md bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-40 transition"
-                >
-                  Move <ArrowRight className="w-3 h-3" />
-                </button>
               </div>
+
               <div className="flex items-center gap-2">
                 <span className="text-[11px] uppercase tracking-wider text-ink-500 font-semibold w-16">Owner</span>
-                <select
-                  value={ownerTo ?? ''}
-                  onChange={(e) => setOwnerTo(e.target.value ? +e.target.value : null)}
-                  className="flex-1 h-8 px-2 text-[13px] rounded-md border border-ink-200 bg-surface"
-                >
+                <select value={ownerTo ?? ''} onChange={(e) => setOwnerTo(e.target.value ? +e.target.value : null)}
+                  className="flex-1 h-8 px-2 text-[13px] rounded-md border border-ink-200 bg-surface">
                   <option value="">Unassigned</option>
                   {team.map((t) => <option key={t.id} value={t.id}>{t.name} ({t.role})</option>)}
                 </select>
-                <button
-                  onClick={submitOwner}
-                  disabled={pending || !ownerDirty}
-                  className="inline-flex items-center gap-1 px-2.5 h-8 text-[12px] font-semibold rounded-md bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-40 transition min-w-[64px] justify-center"
-                >
-                  {ownerSaved && !ownerDirty ? <><CheckCircle2 className="w-3 h-3" /> Saved</> : 'Save'}
-                </button>
               </div>
+
               <div className="flex items-start gap-2">
                 <StickyNote className="w-4 h-4 text-ink-400 mt-2" />
-                <textarea
-                  value={note}
-                  onChange={(e) => setNote(e.target.value)}
-                  placeholder="Note — attached to the move, or post standalone"
+                <textarea value={note} onChange={(e) => setNote(e.target.value)}
+                  placeholder="Add a note — saved with these changes"
                   rows={2}
-                  className="flex-1 text-[13px] rounded-md border border-ink-200 bg-surface p-2"
-                />
+                  className="flex-1 text-[13px] rounded-md border border-ink-200 bg-surface p-2" />
+              </div>
+
+              <div className="flex items-center gap-2 pt-0.5">
                 <button
-                  onClick={submitNote}
-                  disabled={busy || !note.trim()}
-                  className="px-2.5 h-8 text-[12px] font-semibold rounded-md border border-ink-200 text-ink-700 hover:bg-ink-100 disabled:opacity-40 transition self-end"
+                  onClick={saveAll}
+                  disabled={pending || busy || !dirty}
+                  className="inline-flex items-center gap-1 px-3 h-8 text-[12px] font-semibold rounded-md bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-40 transition"
                 >
-                  Post
+                  {saved && !dirty ? <><CheckCircle2 className="w-3 h-3" /> Saved</> : busy ? 'Saving…' : 'Save changes'}
                 </button>
+                {dirty && (
+                  <button onClick={resetDraft} className="text-[12px] text-ink-500 hover:text-ink-900">
+                    Discard
+                  </button>
+                )}
+                {saveErr && <span className="text-[12px] text-danger-500">{saveErr}</span>}
               </div>
             </div>
           )}
