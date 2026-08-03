@@ -200,3 +200,120 @@ export async function logActivity(input: {
      input.meta ? JSON.stringify(input.meta) : null],
   );
 }
+
+/**
+ * Work assigned to one person, across every thread.
+ *
+ * The board is organised by thread, but work is done by person — so anything
+ * sitting in a thread someone doesn't open regularly is invisible to them.
+ * This is the same rows the board shows, pivoted to the unit the work is
+ * actually done in.
+ *
+ * "Open" means not in the funnel's success stage. Nothing else is terminal:
+ * a stalled or dropped provider is precisely the kind of thing worth
+ * resurfacing, so it stays in the queue.
+ *
+ * Staleness is measured from the last activity, falling back to when the
+ * assignment row last changed — a provider nobody has touched since it was
+ * added has been sitting exactly that long.
+ */
+export type QueueRow = {
+  provider_id: number;
+  provider_name: string;
+  kind: string;
+  city: string | null;
+  thread_id: number;
+  thread_name: string;
+  stage_key: string;
+  stage_label: string;
+  assignee_id: number | null;
+  assignee_name: string | null;
+  last_touch: string;
+  days_stale: number;
+};
+
+export async function getQueue(opts: {
+  assigneeId?: number | null;
+  /** true → only rows with no owner. Overrides assigneeId. */
+  unassigned?: boolean;
+  limit?: number;
+} = {}): Promise<QueueRow[]> {
+  const params: unknown[] = [];
+  const where: string[] = ['tp.stage_key IS DISTINCT FROM f.success_stage_key'];
+
+  if (opts.unassigned) {
+    where.push('tp.assignee_id IS NULL');
+  } else if (opts.assigneeId != null) {
+    params.push(opts.assigneeId);
+    where.push(`tp.assignee_id = $${params.length}`);
+  }
+  params.push(opts.limit ?? 500);
+
+  return query<QueueRow>(`
+    WITH touch AS (
+      SELECT thread_id, provider_id, MAX(created_at) AS last_activity
+      FROM atlas.crm_activities GROUP BY thread_id, provider_id
+    )
+    SELECT
+      p.id AS provider_id, p.name AS provider_name, p.kind, p.city,
+      t.id AS thread_id, t.name AS thread_name,
+      tp.stage_key,
+      COALESCE(st.value ->> 'label', tp.stage_key) AS stage_label,
+      tp.assignee_id, u.name AS assignee_name,
+      GREATEST(tp.updated_at, COALESCE(tc.last_activity, tp.updated_at))::text AS last_touch,
+      EXTRACT(DAY FROM now() - GREATEST(tp.updated_at, COALESCE(tc.last_activity, tp.updated_at)))::int AS days_stale
+    FROM atlas.crm_thread_providers tp
+    JOIN atlas.crm_threads t ON t.id = tp.thread_id AND t.status = 'active'
+    JOIN atlas.crm_funnels f ON f.id = t.funnel_id
+    JOIN atlas.crm_providers p ON p.id = tp.provider_id
+    LEFT JOIN atlas.users u ON u.id = tp.assignee_id
+    LEFT JOIN touch tc ON tc.thread_id = tp.thread_id AND tc.provider_id = tp.provider_id
+    LEFT JOIN LATERAL jsonb_array_elements(f.stages) st ON st.value ->> 'key' = tp.stage_key
+    WHERE ${where.join(' AND ')}
+    ORDER BY days_stale DESC, p.name
+    LIMIT $${params.length}
+  `, params);
+}
+
+export type WorkloadRow = {
+  assignee_id: number | null;
+  assignee_name: string | null;
+  role: string | null;
+  open_count: number;
+  threads: number;
+  oldest_days: number;
+  stale_count: number;
+};
+
+/**
+ * One row per person, plus a row for work nobody owns.
+ *
+ * Unassigned is included deliberately: an unowned provider is the one most
+ * reliably missed, and a team view that only lists people hides it.
+ */
+export async function getTeamWorkload(staleAfterDays = 7): Promise<WorkloadRow[]> {
+  return query<WorkloadRow>(`
+    WITH touch AS (
+      SELECT thread_id, provider_id, MAX(created_at) AS last_activity
+      FROM atlas.crm_activities GROUP BY thread_id, provider_id
+    ),
+    open_work AS (
+      SELECT tp.assignee_id, tp.thread_id,
+             EXTRACT(DAY FROM now() - GREATEST(tp.updated_at, COALESCE(tc.last_activity, tp.updated_at)))::int AS days_stale
+      FROM atlas.crm_thread_providers tp
+      JOIN atlas.crm_threads t ON t.id = tp.thread_id AND t.status = 'active'
+      JOIN atlas.crm_funnels f ON f.id = t.funnel_id
+      LEFT JOIN touch tc ON tc.thread_id = tp.thread_id AND tc.provider_id = tp.provider_id
+      WHERE tp.stage_key IS DISTINCT FROM f.success_stage_key
+    )
+    SELECT w.assignee_id, u.name AS assignee_name, u.role,
+           COUNT(*)::int                                             AS open_count,
+           COUNT(DISTINCT w.thread_id)::int                           AS threads,
+           COALESCE(MAX(w.days_stale), 0)::int                        AS oldest_days,
+           COUNT(*) FILTER (WHERE w.days_stale >= $1)::int            AS stale_count
+    FROM open_work w
+    LEFT JOIN atlas.users u ON u.id = w.assignee_id
+    GROUP BY w.assignee_id, u.name, u.role
+    ORDER BY (w.assignee_id IS NULL) DESC, COUNT(*) FILTER (WHERE w.days_stale >= $1) DESC, COUNT(*) DESC
+  `, [staleAfterDays]);
+}
