@@ -163,7 +163,8 @@ CREATE UNIQUE INDEX IF NOT EXISTS mv_catalogue_demand_key
 --
 -- "PackagesOnStore" is the mapping — what has been assigned to that account,
 -- with the account's own price for it. This is a different and larger set than
--- what the account has ordered: Plum has 30 packages mapped and had ordered 7.
+-- what the account has ordered — Plum has dozens mapped against the 7 that
+-- order-derived demand used to show.
 -- The catalogue filter wants the mapping, because the question behind it is
 -- "what does this client have access to", not "what have they used so far".
 CREATE MATERIALIZED VIEW IF NOT EXISTS analytics.mv_package_store AS
