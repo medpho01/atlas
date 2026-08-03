@@ -60,12 +60,13 @@ export function PackagesTable({ packages }: { packages: PackageRow[] }) {
   const allShown = packages.length > 0 && packages.every((p) => picked.has(p.package_id));
 
   /**
-   * Two sheets, on purpose.
+   * "Packages" is one column per package: the name in row 1, its tests listed
+   * down the column. Columns are ragged — a 30-test package and a 3-test one
+   * sit side by side and the short one just stops — which is what makes it
+   * readable as a comparison.
    *
-   * "Packages" is one row each — the summary someone reads. "Package tests" is
-   * flat, one row per test with the package columns repeated, which is the
-   * shape a spreadsheet can pivot and VLOOKUP against. Tests joined into a
-   * single cell would look tidier and be unusable.
+   * "Summary" keeps the per-package facts (price, orders, categories) that
+   * don't fit a shape whose only axis is tests.
    */
   const download = async () => {
     setDownloading(true); setErr(null);
@@ -99,24 +100,31 @@ export function PackagesTable({ packages }: { packages: PackageRow[] }) {
         'Orders': r.orders ?? 0,
       }));
 
-      const detail = rows
-        .filter((r: Record<string, unknown>) => r.test_name)
-        .map((r: Record<string, any>) => ({
-          'Package': r.package_name,
-          'Test': r.test_name,
-          'Department': r.department ? String(r.department).toLowerCase() : '',
-          'Test MRP from': money(r.mrp_min),
-          'Labs with test': r.labs_with_test ?? '',
-        }));
+      // One column per package, tests down the column, in the order picked.
+      const columns: { name: string; tests: string[] }[] = [];
+      const byId = new Map<number, number>();
+      for (const r of rows as Record<string, any>[]) {
+        let at = byId.get(r.package_id);
+        if (at === undefined) {
+          at = columns.push({ name: r.package_name, tests: [] }) - 1;
+          byId.set(r.package_id, at);
+        }
+        if (r.test_name) columns[at].tests.push(r.test_name);
+      }
+      const deepest = columns.reduce((n, c) => Math.max(n, c.tests.length), 0);
+      const grid = [
+        columns.map((c) => c.name),
+        ...Array.from({ length: deepest }, (_, i) => columns.map((c) => c.tests[i] ?? '')),
+      ];
 
       const wb = XLSX.utils.book_new();
-      const s1 = XLSX.utils.json_to_sheet(summary);
-      s1['!cols'] = [{ wch: 34 }, { wch: 8 }, { wch: 7 }, { wch: 46 }, { wch: 28 }, { wch: 20 }, { wch: 14 }, { wch: 10 }, { wch: 26 }, { wch: 9 }];
+      const s1 = XLSX.utils.aoa_to_sheet(grid);
+      s1['!cols'] = columns.map(() => ({ wch: 42 }));
       XLSX.utils.book_append_sheet(wb, s1, 'Packages');
 
-      const s2 = XLSX.utils.json_to_sheet(detail);
-      s2['!cols'] = [{ wch: 34 }, { wch: 42 }, { wch: 18 }, { wch: 14 }, { wch: 14 }];
-      XLSX.utils.book_append_sheet(wb, s2, 'Package tests');
+      const s2 = XLSX.utils.json_to_sheet(summary);
+      s2['!cols'] = [{ wch: 34 }, { wch: 8 }, { wch: 7 }, { wch: 46 }, { wch: 28 }, { wch: 20 }, { wch: 14 }, { wch: 10 }, { wch: 26 }, { wch: 9 }];
+      XLSX.utils.book_append_sheet(wb, s2, 'Summary');
 
       const stamp = new Date().toISOString().slice(0, 10);
       XLSX.writeFile(wb, `labstack-packages-${stamp}.xlsx`);
