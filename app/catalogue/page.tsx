@@ -6,8 +6,10 @@ import { CatalogueTabs } from './CatalogueTabs';
 import { Card, CardBody, CardHeader } from '@/components/ui/Card';
 import { ChipButton, Pill } from '@/components/ui/Toggle';
 import { PackagesTable } from './PackagesTable';
+import { CatalogueFilters } from './CatalogueFilters';
 import {
-  browsePackages, getCategories, getEnrichmentState, MODALITIES, MODALITY_LABEL,
+  browsePackages, getCategories, getEnrichmentState, getLabOptions, getStoreOptions,
+  MODALITIES, MODALITY_LABEL,
 } from '@/lib/catalogueQueries';
 
 export const dynamic = 'force-dynamic';
@@ -26,13 +28,16 @@ const BANDS = [
 export default async function PackagesPage({
   searchParams,
 }: {
-  searchParams: { q?: string; category?: string; modality?: string; band?: string; minTests?: string; proven?: string };
+  searchParams: { q?: string; category?: string; modality?: string; band?: string; minTests?: string; proven?: string; labs?: string; stores?: string };
 }) {
   const { blocked } = await requireView('catalogue', '/catalogue');
   if (blocked) return <RoleBlocked area="The catalogue" detail="the network, accounts and admin teams" />;
 
   const band = BANDS.find((b) => b.key === searchParams.band);
-  const [packages, categories, enrichment] = await Promise.all([
+  const ids = (raw?: string) =>
+    (raw ?? '').split(',').map(Number).filter((n) => Number.isFinite(n) && n > 0);
+
+  const [packages, categories, enrichment, labOptions, storeOptions] = await Promise.all([
     browsePackages({
       q: searchParams.q,
       category: searchParams.category,
@@ -41,9 +46,13 @@ export default async function PackagesPage({
       priceMin: band?.min,
       priceMax: band?.max,
       provenOnly: searchParams.proven === '1',
+      labIds: ids(searchParams.labs),
+      storeIds: ids(searchParams.stores),
     }),
     getCategories(),
     getEnrichmentState(),
+    getLabOptions(),
+    getStoreOptions(),
   ]);
 
   const withCategories = categories.filter((c) => c.packages > 0);
@@ -111,6 +120,10 @@ export default async function PackagesPage({
         >
           ✓ Ordered before
         </ChipButton>
+      </div>
+
+      <div className="mb-2">
+        <CatalogueFilters labs={labOptions} stores={storeOptions} />
       </div>
 
       {withCategories.length > 0 ? (

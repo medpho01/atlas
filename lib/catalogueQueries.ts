@@ -51,6 +51,36 @@ export async function getEnrichmentState(): Promise<{ tests: number; packages: n
   `)) ?? { tests: 0, packages: 0, last_run: null };
 }
 
+/** Labs that quote at least one package, for the lab filter. */
+export async function getLabOptions(): Promise<{ value: string; label: string; count: number }[]> {
+  return query(`
+    SELECT lp.lab_id::text AS value,
+           l."labName" || CASE WHEN l.city IS NOT NULL THEN ' · ' || l.city ELSE '' END AS label,
+           COUNT(DISTINCT lp.package_id)::int AS count
+    FROM analytics.mv_lab_packages lp
+    JOIN src."Lab" l ON l.id = lp.lab_id
+    WHERE lp.b2b > 10
+    GROUP BY lp.lab_id, l."labName", l.city
+    ORDER BY COUNT(DISTINCT lp.package_id) DESC, l."labName"
+  `);
+}
+
+/**
+ * Accounts that have ordered a catalogue package. Only orders with structured
+ * results carry a package reference, so this is the set of accounts we can
+ * actually attribute package demand to — not every store.
+ */
+export async function getStoreOptions(): Promise<{ value: string; label: string; count: number }[]> {
+  return query(`
+    SELECT d.store_id::text AS value, s."storeName" AS label,
+           COUNT(DISTINCT d.package_id)::int AS count
+    FROM analytics.mv_package_store_demand d
+    JOIN src."Store" s ON s.id = d.store_id
+    GROUP BY d.store_id, s."storeName"
+    ORDER BY SUM(d.orders) DESC, s."storeName"
+  `);
+}
+
 export type PackageRow = {
   package_id: number;
   package_name: string;
@@ -84,6 +114,10 @@ export type PackageFilters = {
   priceMax?: number;
   /** Only packages someone has actually ordered. */
   provenOnly?: boolean;
+  /** Packages quoted by any of these labs. */
+  labIds?: number[];
+  /** Packages ordered by any of these accounts. */
+  storeIds?: number[];
   limit?: number;
 };
 
@@ -116,6 +150,20 @@ export async function browsePackages(f: PackageFilters = {}): Promise<PackageRow
     where.push(`e.pkg_cost <= $${params.length}`);
   }
   if (f.provenOnly) where.push('e.orders > 0');
+  // Both are "any of", not "all of": a package quoted by one selected lab is a
+  // package that lab can fulfil, which is the question being asked.
+  if (f.labIds?.length) {
+    params.push(f.labIds);
+    where.push(`EXISTS (SELECT 1 FROM analytics.mv_lab_packages lp
+                        WHERE lp.package_id = e.package_id AND lp.b2b > 10
+                          AND lp.lab_id = ANY($${params.length}::int[]))`);
+  }
+  if (f.storeIds?.length) {
+    params.push(f.storeIds);
+    where.push(`EXISTS (SELECT 1 FROM analytics.mv_package_store_demand sd
+                        WHERE sd.package_id = e.package_id
+                          AND sd.store_id = ANY($${params.length}::int[]))`);
+  }
   // The whole package set is a few hundred rows, so it is served entire
   // rather than capped — a truncated list headed "300 packages" reads as a
   // total, and quietly hides the rest of the catalogue from the person

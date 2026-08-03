@@ -319,6 +319,7 @@ REFRESH MATERIALIZED VIEW analytics.mv_nurses_derived;
 -- since both read the same snapshots.
 REFRESH MATERIALIZED VIEW analytics.mv_account_activity;
 REFRESH MATERIALIZED VIEW CONCURRENTLY analytics.mv_catalogue_demand;
+REFRESH MATERIALIZED VIEW CONCURRENTLY analytics.mv_package_store_demand;
 -- Pricing intelligence: per-lab test rates from src_local DOS + Master.
 REFRESH MATERIALIZED VIEW analytics.mv_test_rates;
 REFRESH MATERIALIZED VIEW analytics.mv_test_catalog;

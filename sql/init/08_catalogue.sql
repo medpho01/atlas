@@ -211,3 +211,36 @@ LEFT JOIN reach      r ON r.package_id = p.id
 LEFT JOIN analytics.mv_catalogue_demand d
        ON d.kind = 'PACKAGE' AND d.entity_id = p.id
 WHERE p.active;
+
+-- Which accounts order which packages.
+--
+-- Same source as mv_catalogue_demand — standardizedValues.testValues — but
+-- carrying Order.storeId, so the catalogue can be narrowed to "what does this
+-- account actually buy". Separate from the demand MV rather than a column on
+-- it, because that one is keyed (kind, entity_id) and adding a store dimension
+-- would change its grain.
+--
+-- Small by nature: only packaged orders with structured results contribute, so
+-- this covers the accounts that buy catalogue packages rather than every store.
+CREATE MATERIALIZED VIEW IF NOT EXISTS analytics.mv_package_store_demand AS
+WITH tv AS (
+  SELECT o.id AS order_id, o."storeId" AS store_id, o."createdAt",
+         jsonb_array_elements(o."standardizedValues" -> 'testValues') AS t
+  FROM src."Order" o
+  WHERE jsonb_typeof(o."standardizedValues" -> 'testValues') = 'array'
+    AND o."storeId" IS NOT NULL
+),
+rows AS (
+  SELECT DISTINCT order_id, store_id, "createdAt",
+         (t ->> 'packageId')::int AS package_id
+  FROM tv
+  WHERE t ->> 'packageId' ~ '^[0-9]+$'
+)
+SELECT package_id, store_id,
+       COUNT(DISTINCT order_id)::int AS orders,
+       MAX("createdAt")::date        AS last_ordered
+FROM rows
+GROUP BY package_id, store_id;
+
+CREATE UNIQUE INDEX IF NOT EXISTS mv_package_store_demand_key
+  ON analytics.mv_package_store_demand (package_id, store_id);
