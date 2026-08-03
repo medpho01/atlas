@@ -275,6 +275,84 @@ export async function getQueue(opts: {
   `, params);
 }
 
+export type QueueFunnelStage = {
+  stage_key: string;
+  stage_label: string;
+  is_success: boolean;
+  n: number;
+};
+
+export type QueueFunnel = {
+  stages: QueueFunnelStage[];
+  total: number;
+  open: number;
+  onboarded: number;
+  threads: number;
+};
+
+/**
+ * The same person's work as getQueue, counted by stage — including the
+ * terminal stage, which getQueue deliberately excludes.
+ *
+ * A funnel without its bottom isn't a funnel: the whole question it answers is
+ * "how much of what I picked up actually landed". So this counts everything
+ * assigned, and the table below it stays open-only.
+ *
+ * One person can hold providers on threads running different funnels, so the
+ * stages here are the union of those funnels' stages, ordered by the earliest
+ * position the stage holds in any of them. Two funnels that disagree about
+ * ordering will produce an order that is right for one of them — visible in
+ * the labels, and better than refusing to draw anything.
+ */
+export async function getQueueFunnel(opts: {
+  assigneeId?: number | null;
+  unassigned?: boolean;
+} = {}): Promise<QueueFunnel> {
+  const params: unknown[] = [];
+  const where: string[] = ["t.status = 'active'"];
+
+  if (opts.unassigned) {
+    where.push('tp.assignee_id IS NULL');
+  } else if (opts.assigneeId != null) {
+    params.push(opts.assigneeId);
+    where.push(`tp.assignee_id = $${params.length}`);
+  }
+
+  const rows = await query<QueueFunnelStage & { threads: number }>(`
+    WITH scoped AS (
+      SELECT tp.stage_key, t.funnel_id, tp.thread_id
+      FROM atlas.crm_thread_providers tp
+      JOIN atlas.crm_threads t ON t.id = tp.thread_id
+      WHERE ${where.join(' AND ')}
+    ),
+    stage_order AS (
+      SELECT st.value ->> 'key'                                   AS stage_key,
+             MIN(COALESCE(st.value ->> 'label', st.value ->> 'key')) AS stage_label,
+             MIN(st.ord)                                          AS pos,
+             bool_or(f.success_stage_key = st.value ->> 'key')    AS is_success
+      FROM atlas.crm_funnels f
+      CROSS JOIN LATERAL jsonb_array_elements(f.stages) WITH ORDINALITY AS st(value, ord)
+      WHERE f.id IN (SELECT funnel_id FROM scoped)
+      GROUP BY 1
+    )
+    SELECT so.stage_key, so.stage_label, so.is_success,
+           COUNT(s.stage_key)::int                        AS n,
+           (SELECT COUNT(DISTINCT thread_id) FROM scoped)::int AS threads
+    FROM stage_order so
+    LEFT JOIN scoped s ON s.stage_key = so.stage_key
+    GROUP BY so.stage_key, so.stage_label, so.is_success, so.pos
+    ORDER BY so.pos
+  `, params);
+
+  const stages = rows.map(({ stage_key, stage_label, is_success, n }) => ({
+    stage_key, stage_label, is_success, n,
+  }));
+  const onboarded = stages.filter((s) => s.is_success).reduce((t, s) => t + s.n, 0);
+  const total = stages.reduce((t, s) => t + s.n, 0);
+
+  return { stages, total, open: total - onboarded, onboarded, threads: rows[0]?.threads ?? 0 };
+}
+
 export type WorkloadRow = {
   assignee_id: number | null;
   assignee_name: string | null;

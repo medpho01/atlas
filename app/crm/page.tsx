@@ -4,8 +4,9 @@ import { requireView } from '@/lib/guard';
 import { RoleBlocked } from '@/components/RoleBlocked';
 import { Card, CardBody, CardHeader } from '@/components/ui/Card';
 import { ChipButton } from '@/components/ui/Toggle';
-import { getQueue, listTeam } from '@/lib/crm';
+import { getQueue, getQueueFunnel, listTeam } from '@/lib/crm';
 import { CrmTabs } from './CrmTabs';
+import { QueueFunnel } from './QueueFunnel';
 import { QueueTable } from './QueueTable';
 
 export const dynamic = 'force-dynamic';
@@ -33,8 +34,9 @@ export default async function MyQueuePage({
   const unassigned = searchParams.who === 'unassigned';
   const viewingId = unassigned ? null : searchParams.who ? Number(searchParams.who) : me.id;
 
-  const [rows, team] = await Promise.all([
+  const [rows, funnel, team] = await Promise.all([
     getQueue({ assigneeId: viewingId, unassigned, limit: 500 }),
+    getQueueFunnel({ assigneeId: viewingId, unassigned }),
     listTeam(),
   ]);
 
@@ -81,14 +83,13 @@ export default async function MyQueuePage({
         ))}
       </div>
 
+      <QueueFunnel funnel={funnel} staleCount={stale.length} staleAfter={staleAfter} />
+
       {stale.length > 0 && (
         <div className="mb-4 flex items-start gap-2 rounded-md border border-warn-500/30 bg-warn-500/5 px-3 py-2">
           <AlertTriangle className="w-4 h-4 text-warn-600 mt-0.5 shrink-0" strokeWidth={2.25} />
           <p className="text-xs text-ink-700">
-            <span className="font-semibold text-ink-900">
-              {stale.length} of {rows.length} untouched for {staleAfter}+ days
-            </span>
-            {' '}— oldest is {rows[0]?.days_stale}d. Threshold is {staleAfter} days;{' '}
+            Oldest untouched is {rows[0]?.days_stale}d. Stale means {staleAfter}+ days;{' '}
             <Link href={href({ stale: staleAfter === 7 ? '14' : '7' })} className="underline hover:text-ink-900">
               try {staleAfter === 7 ? 14 : 7}
             </Link>.
