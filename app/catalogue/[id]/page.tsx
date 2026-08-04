@@ -71,7 +71,16 @@ export default async function PackageDetailPage({ params }: { params: { id: stri
           value={pkg.test_count > 0 ? String(pkg.test_count) : '—'}
           sub={pkg.test_count === 0
             ? 'sold as a unit, not a test list'
-            : `${pkg.department_count} department${pkg.department_count === 1 ? '' : 's'}${pkg.sample_type_count === 1 ? ' · single sample' : ''}`}
+            : `${pkg.department_count} department${pkg.department_count === 1 ? '' : 's'}`}
+        />
+        <KpiTile
+          label="Sample"
+          value={pkg.sample_types?.length ? pkg.sample_types.join(' + ') : '—'}
+          sub={pkg.test_count === 0
+            ? 'no test list to derive it from'
+            : pkg.tests_without_sample > 0
+              ? `${pkg.tests_without_sample} of ${pkg.test_count} tests have none recorded`
+              : 'across every test in the package'}
         />
         <KpiTile
           label="Report in"
@@ -103,6 +112,7 @@ export default async function PackageDetailPage({ params }: { params: { id: stri
                     <tr className="text-[11px] uppercase tracking-wide text-ink-400 border-b border-ink-200">
                       <th className="text-left font-medium px-5 py-2">Test</th>
                       <th className="text-left font-medium px-2 py-2">Department</th>
+                      <th className="text-left font-medium px-2 py-2">Sample</th>
                       <th className="text-right font-medium px-2 py-2">Orders</th>
                       <th className="text-right font-medium px-2 py-2">MRP from</th>
                       <th className="text-right font-medium px-2 py-2">Cost from</th>
@@ -120,6 +130,9 @@ export default async function PackageDetailPage({ params }: { params: { id: stri
                         </td>
                         <td className="px-2 py-1.5 text-xs text-ink-500">
                           {c.department ? c.department.toLowerCase() : '—'}
+                        </td>
+                        <td className="px-2 py-1.5 text-xs text-ink-600">
+                          {c.sample ?? <span className="text-ink-300">—</span>}
                         </td>
                         <td className="px-2 py-1.5 num text-ink-700">
                           {c.orders > 0 ? c.orders.toLocaleString('en-IN') : <span className="text-ink-300">—</span>}

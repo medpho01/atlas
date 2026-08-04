@@ -125,6 +125,7 @@ export default async function TestsPage({
                 <tr className="text-[11px] uppercase tracking-wide text-ink-400 border-b border-ink-200">
                   <th className="text-left font-medium px-5 py-2">Test</th>
                   <th className="text-left font-medium px-2 py-2">Department</th>
+                  <th className="text-left font-medium px-2 py-2">Sample</th>
                   <th className="text-right font-medium px-2 py-2">MRP</th>
                   <th className="text-right font-medium px-2 py-2">Lab cost</th>
                   <th className="text-right font-medium px-5 py-2">Labs</th>
@@ -147,6 +148,9 @@ export default async function TestsPage({
                     </td>
                     <td className="px-2 py-1.5 text-xs text-ink-500">
                       {t.department ? t.department.toLowerCase() : '—'}
+                    </td>
+                    <td className="px-2 py-1.5 text-xs text-ink-600" title={t.sample_raw ?? undefined}>
+                      {t.sample ?? <span className="text-ink-300">—</span>}
                     </td>
                     <td className="px-2 py-1.5 num font-medium">{inr(t.mrp_min)}</td>
                     <td className="px-2 py-1.5 num text-ink-600">{inr(t.b2b_min)}</td>

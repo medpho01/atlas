@@ -19,6 +19,8 @@ type PackageRow = {
   labs_quoting: number;
   orders: number;
   orders_l90d: number;
+  sample_types: string[] | null;
+  tests_without_sample: number;
   categories: string[] | null;
   intent: string | null;
 };
@@ -39,6 +41,7 @@ const columns: SortableColumn<PackageRow>[] = [
   { key: 'package_name', label: 'Package' },
   { key: 'orders', label: 'Orders', align: 'right' },
   { key: 'test_count', label: 'Tests', align: 'right' },
+  { key: 'sample_types', label: 'Sample', sortValue: (p) => (p.sample_types ?? []).join(',') },
   { key: 'tat_hours', label: 'Report in', align: 'right', sortValue: (p) => p.tat_hours },
   { key: 'pkg_cost', label: 'Price', align: 'right', sortValue: (p) => num(p.pkg_cost) },
   { key: 'best_lab_name', label: 'From' },
@@ -94,6 +97,7 @@ export function PackagesTable({ packages }: { packages: PackageRow[] }) {
         'Who it is for': r.intent ?? '',
         'Categories': (r.categories ?? []).map((c: string) => c.replace(/_/g, ' ').toLowerCase()).join(', '),
         'Modality': r.modality ?? '',
+        'Sample': r.sample_types ?? '',
         'Report in (hrs)': r.tat_hours ?? '',
         'Price': money(r.pkg_cost),
         'Cheapest lab': r.best_lab_name ?? '',
@@ -257,6 +261,19 @@ export function PackagesTable({ packages }: { packages: PackageRow[] }) {
             {p.test_count || <span className="text-ink-300">—</span>}
             {p.department_count > 1 && (
               <span className="text-[10px] text-ink-400 ml-1">/{p.department_count} depts</span>
+            )}
+          </td>
+          <td className="text-xs text-ink-700 whitespace-nowrap">
+            {p.sample_types?.length
+              ? p.sample_types.join(' + ')
+              : <span className="text-ink-300">—</span>}
+            {p.tests_without_sample > 0 && p.test_count > 0 && (
+              <span
+                className="text-[10px] text-warn-600 ml-1"
+                title={`${p.tests_without_sample} of ${p.test_count} tests have no sample type recorded at source`}
+              >
+                +?
+              </span>
             )}
           </td>
           <td className="num text-ink-600">

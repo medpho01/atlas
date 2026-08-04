@@ -192,6 +192,51 @@ CREATE UNIQUE INDEX IF NOT EXISTS mv_package_store_key
 -- Everything here is a property of the package or of one named lab. There are
 -- no cross-lab totals: a package is bought from a single lab, so a figure
 -- assembled from several is not a price anyone can pay.
+
+-- ---------------------------------------------------------------------------
+-- Sample types, in language someone collecting the sample would use.
+--
+-- The source has 114 distinct values, most of them one-offs ("CENTRAL VENOUS
+-- CATHEIER TIP SWAB"). Shown raw they are noise; the question the catalogue is
+-- being asked is "what do we need from the patient", and the answer is a
+-- handful of buckets. The raw value stays available on the test itself.
+--
+-- Some rows carry two ("BLOOD, RANDOM URINE"), so the entry point splits on
+-- comma first — otherwise a blood-and-urine test reads as urine only.
+-- ---------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION atlas.sample_bucket(raw text) RETURNS text
+LANGUAGE sql IMMUTABLE PARALLEL SAFE AS $fn$
+  SELECT CASE
+    WHEN raw IS NULL THEN NULL
+    WHEN raw ILIKE '%URINE%'                             THEN 'Urine'
+    WHEN raw ILIKE '%BLOOD%' OR raw ILIKE '%SERUM%'
+      OR raw ILIKE '%PLASMA%'                            THEN 'Blood'
+    WHEN raw ILIKE '%STOOL%'                             THEN 'Stool'
+    WHEN raw ILIKE '%SPUTUM%'                            THEN 'Sputum'
+    WHEN raw ILIKE '%SEMEN%'                             THEN 'Semen'
+    WHEN raw ILIKE '%SWAB%'  OR raw ILIKE '%SMEAR%'      THEN 'Swab'
+    WHEN raw ILIKE '%BIOPSY%' OR raw ILIKE '%TISSUE%'
+      OR raw ILIKE '%BONE%'   OR raw ILIKE '%FNAC%'
+      OR raw ILIKE '%ASPIRAT%'                           THEN 'Tissue'
+    WHEN raw ILIKE '%FLUID%' OR raw = 'CSF'
+      OR raw ILIKE '%LAVAGE%' OR raw ILIKE '%WASHING%'
+      OR raw ILIKE '%SECRETION%' OR raw ILIKE '%DISCHARGE%'
+      OR raw ILIKE '%BILE%'  OR raw ILIKE '%PUS%'        THEN 'Fluid'
+    WHEN raw ILIKE '%SKIN%' OR raw ILIKE '%NAIL%'
+      OR raw ILIKE '%HAIR%'                              THEN 'Skin, nail or hair'
+    ELSE 'Other'
+  END
+$fn$;
+
+CREATE OR REPLACE FUNCTION atlas.sample_buckets(raw text) RETURNS text[]
+LANGUAGE sql IMMUTABLE PARALLEL SAFE AS $fn$
+  SELECT CASE WHEN raw IS NULL THEN NULL ELSE
+    ARRAY(SELECT DISTINCT atlas.sample_bucket(btrim(part))
+          FROM unnest(string_to_array(raw, ',')) AS part
+          WHERE btrim(part) <> '')
+  END
+$fn$;
+
 DROP MATERIALIZED VIEW IF EXISTS analytics.mv_package_store_demand CASCADE;
 DROP VIEW IF EXISTS analytics.v_package_economics;
 CREATE VIEW analytics.v_package_economics AS
@@ -219,6 +264,28 @@ best_quote AS (
 reach AS (
   SELECT package_id, COUNT(*) FILTER (WHERE b2b > 10)::int AS labs_quoting
   FROM analytics.mv_lab_packages GROUP BY package_id
+),
+-- What has to be collected for this package: the distinct buckets across its
+-- tests, blood first because that is what a phlebotomist plans around.
+pkg_sample AS (
+  SELECT c.package_id, s.b
+  FROM comp c
+  JOIN src."Master" m      ON m.id = c.master_id
+  JOIN src."SampleType" st ON st.id = m."sampleType_id"
+  CROSS JOIN LATERAL unnest(atlas.sample_buckets(st."sampleType")) AS s(b)
+  GROUP BY 1, 2
+),
+samples AS (
+  SELECT package_id,
+         array_agg(b ORDER BY CASE b WHEN 'Blood' THEN 1 WHEN 'Urine' THEN 2 ELSE 3 END, b) AS sample_types
+  FROM pkg_sample GROUP BY package_id
+),
+-- Counted, not hidden: 29% of tests carry no sample type at source, so a
+-- package's list can be incomplete and the screen should be able to say so.
+untyped AS (
+  SELECT c.package_id, COUNT(*) FILTER (WHERE m."sampleType_id" IS NULL)::int AS tests_without_sample
+  FROM comp c LEFT JOIN src."Master" m ON m.id = c.master_id
+  GROUP BY 1
 )
 SELECT
   p.id                                        AS package_id,
@@ -230,6 +297,8 @@ SELECT
   COALESCE(b.test_count, 0)                   AS test_count,
   COALESCE(b.department_count, 0)             AS department_count,
   COALESCE(b.sample_type_count, 0)            AS sample_type_count,
+  COALESCE(sm.sample_types, '{}')             AS sample_types,
+  COALESCE(ut.tests_without_sample, 0)        AS tests_without_sample,
   q.pkg_cost,
   l."labName"                                 AS best_lab_name,
   l.city                                      AS best_lab_city,
@@ -243,6 +312,8 @@ LEFT JOIN built      b ON b.package_id = p.id
 LEFT JOIN best_quote q ON q.package_id = p.id
 LEFT JOIN src."Lab"  l ON l.id = q.best_lab_id
 LEFT JOIN reach      r ON r.package_id = p.id
+LEFT JOIN samples    sm ON sm.package_id = p.id
+LEFT JOIN untyped    ut ON ut.package_id = p.id
 LEFT JOIN analytics.mv_catalogue_demand d
        ON d.kind = 'PACKAGE' AND d.entity_id = p.id
 WHERE p.active;

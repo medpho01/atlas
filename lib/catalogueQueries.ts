@@ -93,6 +93,10 @@ export type PackageRow = {
   test_count: number;
   department_count: number;
   sample_type_count: number;
+  /** What has to be collected, e.g. ['Blood','Urine']. Blood first. */
+  sample_types: string[] | null;
+  /** Tests in the package with no sample type at source — the list may be short. */
+  tests_without_sample: number;
   /** What the package costs at the cheapest lab quoting it — one lab, one price. */
   pkg_cost: string | null;
   best_lab_name: string | null;
@@ -175,7 +179,8 @@ export async function browsePackages(f: PackageFilters = {}): Promise<PackageRow
 
   return query<PackageRow>(`
     SELECT e.package_id, e.package_name, e.is_custom, e.order_types, e.tat_hours,
-           e.test_count, e.department_count, e.sample_type_count, e.pkg_cost::text,
+           e.test_count, e.department_count, e.sample_type_count,
+           e.sample_types, e.tests_without_sample, e.pkg_cost::text,
            e.best_lab_name, e.best_lab_city, e.labs_quoting,
            e.orders, e.orders_l90d, e.last_ordered::text,
            pe.categories, pe.intent, pe.positioning
@@ -211,6 +216,7 @@ export type ComponentRow = {
   labs_count: number | null;
   mrp_min: string | null;
   b2b_min: string | null;
+  sample: string | null;
   categories: string[] | null;
   why_it_matters: string | null;
   orders: number;
@@ -221,10 +227,12 @@ export async function getPackageComponents(id: number): Promise<ComponentRow[]> 
   return query<ComponentRow>(`
     SELECT m.id AS master_id, m.name AS test_name, d.department,
            tc.labs_count, tc.mrp_min::text, tc.b2b_min::text,
+           atlas.sample_bucket(st."sampleType") AS sample,
            te.categories, te.why_it_matters,
            COALESCE(dm.orders, 0) AS orders
     FROM src."_MasterToPackage" mp
     JOIN src."Master" m ON m.id = mp."A"
+    LEFT JOIN src."SampleType" st ON st.id = m."sampleType_id"
     LEFT JOIN src."LabDepartment" d ON d.id = m."labDepartment_id"
     LEFT JOIN analytics.mv_test_catalog tc ON tc.master_id = m.id
     LEFT JOIN atlas.test_enrichment te ON te.master_id = m.id
@@ -259,6 +267,10 @@ export type TestRow = {
   mrp_min: string | null;
   mrp_max: string | null;
   b2b_min: string | null;
+  /** Normalised for reading — 'Blood', 'Urine', … */
+  sample: string | null;
+  /** Exactly what the source says, e.g. 'BLOOD SERUM'. */
+  sample_raw: string | null;
   categories: string[] | null;
   consumer_name: string | null;
   why_it_matters: string | null;
@@ -304,9 +316,12 @@ export async function browseTests(f: TestFilters = {}): Promise<TestRow[]> {
   return query<TestRow>(`
     SELECT tc.master_id, tc.test_name, d.department, tc.labs_count,
            tc.mrp_min::text, tc.mrp_max::text, tc.b2b_min::text,
+           atlas.sample_bucket(st."sampleType") AS sample,
+           st."sampleType"                      AS sample_raw,
            te.categories, te.consumer_name, te.why_it_matters
     FROM analytics.mv_test_catalog tc
     LEFT JOIN src."Master" m ON m.id = tc.master_id
+    LEFT JOIN src."SampleType" st ON st.id = m."sampleType_id"
     LEFT JOIN src."LabDepartment" d ON d.id = m."labDepartment_id"
     LEFT JOIN atlas.test_enrichment te ON te.master_id = tc.master_id
     ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
@@ -345,10 +360,12 @@ export type ExportRow = {
   pkg_cost: string | null;
   best_lab_name: string | null;
   orders: number;
+  sample_types: string | null;
   categories: string[] | null;
   intent: string | null;
   test_name: string | null;
   department: string | null;
+  test_sample: string | null;
   mrp_min: string | null;
   labs_with_test: number | null;
 };
@@ -371,13 +388,16 @@ export async function getPackagesForExport(packageIds: number[]): Promise<Export
       e.package_id, e.package_name, e.is_custom,
       array_to_string(e.order_types, ' / ') AS modality,
       e.tat_hours, e.pkg_cost::text, e.best_lab_name, e.orders,
+      array_to_string(e.sample_types, ' + ') AS sample_types,
       pe.categories, pe.intent,
       m.name AS test_name, d.department,
+      atlas.sample_bucket(st."sampleType") AS test_sample,
       tc.mrp_min::text, tc.labs_count AS labs_with_test
     FROM analytics.v_package_economics e
     LEFT JOIN atlas.package_enrichment pe ON pe.package_id = e.package_id
     LEFT JOIN src."_MasterToPackage" mp ON mp."B" = e.package_id
     LEFT JOIN src."Master" m ON m.id = mp."A"
+    LEFT JOIN src."SampleType" st ON st.id = m."sampleType_id"
     LEFT JOIN src."LabDepartment" d ON d.id = m."labDepartment_id"
     LEFT JOIN analytics.mv_test_catalog tc ON tc.master_id = m.id
     WHERE e.package_id = ANY($1::int[])
