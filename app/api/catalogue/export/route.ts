@@ -18,7 +18,7 @@ export async function POST(req: NextRequest) {
 
   const body = await req.json().catch(() => ({}));
   const ids = Array.isArray(body?.packageIds)
-    ? body.packageIds.map(Number).filter((n: number) => Number.isFinite(n) && n > 0).slice(0, 500)
+    ? body.packageIds.map(Number).filter((n: number) => Number.isFinite(n) && n > 0).slice(0, 1000)
     : [];
   if (!ids.length) return NextResponse.json({ error: 'No packages selected' }, { status: 400 });
 

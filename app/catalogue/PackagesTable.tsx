@@ -68,13 +68,13 @@ export function PackagesTable({ packages }: { packages: PackageRow[] }) {
    * "Summary" keeps the per-package facts (price, orders, categories) that
    * don't fit a shape whose only axis is tests.
    */
-  const download = async () => {
+  const download = async (ids: number[]) => {
     setDownloading(true); setErr(null);
     try {
       const res = await fetch('/api/catalogue/export', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ packageIds: [...picked] }),
+        body: JSON.stringify({ packageIds: ids }),
       });
       if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error ?? 'Export failed');
       const { rows } = await res.json();
@@ -141,13 +141,57 @@ export function PackagesTable({ packages }: { packages: PackageRow[] }) {
     );
   }
 
+  const targets = picked.size ? [...picked] : packages.map((p) => p.package_id);
+
   return (
     <>
+    {/* Always present. The sticky bar below only appears once something is
+        picked, which left no way to say "all of them" without picking one
+        first — so downloading a whole filtered set meant a pointless click. */}
+    <div className="mx-5 mb-3 flex flex-wrap items-center gap-3 border-b border-ink-100 pb-3">
+      <label className="flex items-center gap-2 cursor-pointer">
+        <input
+          type="checkbox"
+          checked={allShown}
+          onChange={() => setPicked(allShown ? new Set() : new Set(packages.map((p) => p.package_id)))}
+          className="sr-only"
+        />
+        <span className={`inline-flex w-3.5 h-3.5 items-center justify-center rounded border transition ${
+          allShown ? 'bg-brand-600 border-brand-600' : 'border-ink-300 bg-surface'
+        }`}>
+          {allShown && <Check className="w-2.5 h-2.5 text-white" strokeWidth={3.5} />}
+        </span>
+        <span className="text-xs text-ink-600">
+          {allShown ? 'Deselect all' : `Select all ${packages.length}`}
+        </span>
+      </label>
+
+      <button
+        onClick={() => download(targets)}
+        disabled={downloading}
+        className="inline-flex items-center gap-1.5 px-3 h-8 text-xs font-semibold rounded-md bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-50 transition"
+      >
+        <Download className="w-3.5 h-3.5" />
+        {downloading
+          ? 'Building…'
+          : picked.size
+            ? `Download ${picked.size} selected`
+            : `Download all ${packages.length}`}
+      </button>
+
+      {picked.size > 0 && (
+        <button onClick={() => setPicked(new Set())} className="text-xs text-ink-500 hover:text-ink-900">
+          Clear
+        </button>
+      )}
+      {err && <span className="text-xs text-danger-500">{err}</span>}
+    </div>
+
     {picked.size > 0 && (
       <div className="sticky bottom-3 z-30 mx-5 mb-3 flex flex-wrap items-center gap-2 rounded-xl border border-brand-500/40 bg-surface shadow-lg px-3 py-2">
         <span className="text-[13px] font-semibold text-ink-900">{picked.size} selected</span>
         <button
-          onClick={download}
+          onClick={() => download([...picked])}
           disabled={downloading}
           className="inline-flex items-center gap-1.5 px-3 h-8 text-xs font-semibold rounded-md bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-50 transition"
         >
