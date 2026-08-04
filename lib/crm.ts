@@ -5,7 +5,6 @@ import type { User } from './auth';
 /** Roles allowed to mutate CRM state. Everyone logged-in can read. */
 export const CRM_WRITE_ROLES: User['role'][] = ['admin', 'network'];
 export const canWriteCrm = (u: User | null): boolean => !!u && CRM_WRITE_ROLES.includes(u.role);
-
 export type FunnelStage = { key: string; label: string };
 export type Funnel = { id: number; name: string; stages: FunnelStage[]; is_default: boolean; success_stage_key: string | null };
 

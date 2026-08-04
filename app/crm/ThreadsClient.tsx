@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { Plus, Target, ChevronRight, Settings2, X } from 'lucide-react';
 import { createThread, createFunnel, updateThread, setFunnelSuccessStage } from './actions';
 import type { Thread, Funnel } from '@/lib/crm';
+import { PROVIDER_KINDS } from '@/lib/providerKinds';
 
 export function ThreadsClient({ threads, funnels, canWrite, isAdmin }: {
   threads: Thread[]; funnels: Funnel[]; canWrite: boolean; isAdmin: boolean;
@@ -83,7 +84,7 @@ export function ThreadsClient({ threads, funnels, canWrite, isAdmin }: {
                 onChange={(e) => setForm({ ...form, providerKind: e.target.value })}
                 className="h-9 px-2 text-sm rounded-md border border-ink-200 bg-surface"
               >
-                {['LAB','DIAGNOSTICS','HOSPITAL','DOCTOR','PHLEBO','OTHER'].map((k) => <option key={k}>{k}</option>)}
+                {PROVIDER_KINDS.map((k) => <option key={k}>{k}</option>)}
               </select>
               <input
                 type="text" placeholder="Region (e.g. Pune)" value={form.region}

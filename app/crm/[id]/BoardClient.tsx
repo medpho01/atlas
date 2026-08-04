@@ -8,6 +8,7 @@ import {
 import * as XLSX from 'xlsx';
 import { createProvider, moveStage, assignProvider, addNote, updateProvider, bulkCreateProviders, addChecklistItem, removeChecklistItem, removeFromThread, bulkUpdateProviders, checkProviderDuplicates, type DupStatus } from '../actions';
 import type { Thread, ThreadProvider, ChecklistItem, ProviderDoc, Activity, FunnelStage } from '@/lib/crm';
+import { PROVIDER_KINDS } from '@/lib/providerKinds';
 
 type Team = { id: number; name: string; role: string }[];
 
@@ -498,7 +499,7 @@ function ProviderDrawer({
                   className="col-span-2 h-8 px-2 text-[13px] rounded-md border border-ink-200 bg-surface font-medium" />
                 <select value={fields.kind} onChange={(e) => setField('kind', e.target.value)}
                   className="h-8 px-2 text-[13px] rounded-md border border-ink-200 bg-surface">
-                  {['LAB','HOSPITAL','CLINIC','COLLECTION_CENTRE','PHARMACY','OTHER'].map((k) =>
+                  {PROVIDER_KINDS.map((k) =>
                     <option key={k} value={k}>{k}</option>)}
                 </select>
                 <input value={fields.contact_person} onChange={(e) => setField('contact_person', e.target.value)}
@@ -739,7 +740,7 @@ function AddProviderModal({ threadId, defaultKind, onClose }: {
             className="col-span-2 h-9 px-3 text-sm rounded-md border border-ink-200 bg-surface" />
           <select value={form.kind} onChange={(e) => setForm({ ...form, kind: e.target.value })}
             className="h-9 px-2 text-sm rounded-md border border-ink-200 bg-surface">
-            {['LAB','DIAGNOSTICS','HOSPITAL','DOCTOR','PHLEBO','OTHER'].map((k) => <option key={k}>{k}</option>)}
+            {PROVIDER_KINDS.map((k) => <option key={k}>{k}</option>)}
           </select>
           <input placeholder="Contact person" value={form.contactPerson} onChange={(e) => setForm({ ...form, contactPerson: e.target.value })}
             className="h-9 px-3 text-sm rounded-md border border-ink-200 bg-surface" />
