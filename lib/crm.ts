@@ -235,10 +235,28 @@ export async function getQueue(opts: {
   assigneeId?: number | null;
   /** true → only rows with no owner. Overrides assigneeId. */
   unassigned?: boolean;
+  /** Narrow to one campaign, the way the thread board does. */
+  threadId?: number | null;
+  /**
+   * Hide rows in the funnel's success stage.
+   *
+   * Off by default. It used to be forced on, which made this view disagree
+   * with the thread board about the same providers: onboarded ones simply
+   * weren't here, so a stage that read 3 on one screen read 0 on the other.
+   * Callers that genuinely want only unfinished work ask for it.
+   */
+  openOnly?: boolean;
   limit?: number;
 } = {}): Promise<QueueRow[]> {
   const params: unknown[] = [];
-  const where: string[] = ['tp.stage_key IS DISTINCT FROM f.success_stage_key'];
+  // Seeded so an unfiltered call still produces a valid WHERE clause.
+  const where: string[] = ['TRUE'];
+
+  if (opts.openOnly) where.push('tp.stage_key IS DISTINCT FROM f.success_stage_key');
+  if (opts.threadId) {
+    params.push(opts.threadId);
+    where.push(`t.id = $${params.length}`);
+  }
 
   if (opts.unassigned) {
     where.push('tp.assignee_id IS NULL');
@@ -306,9 +324,17 @@ export type QueueFunnel = {
 export async function getQueueFunnel(opts: {
   assigneeId?: number | null;
   unassigned?: boolean;
+  threadId?: number | null;
 } = {}): Promise<QueueFunnel> {
   const params: unknown[] = [];
   const where: string[] = ["t.status = 'active'"];
+
+  // Must take the same narrowing as getQueue, or the summary counts a wider
+  // set than the board beneath it draws.
+  if (opts.threadId) {
+    params.push(opts.threadId);
+    where.push(`t.id = $${params.length}`);
+  }
 
   if (opts.unassigned) {
     where.push('tp.assignee_id IS NULL');

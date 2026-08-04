@@ -24,7 +24,7 @@ const DEFAULT_STALE_DAYS = 7;
 export default async function MyQueuePage({
   searchParams,
 }: {
-  searchParams: { who?: string; stale?: string };
+  searchParams: { who?: string; stale?: string; thread?: string };
 }) {
   const gate = await requireView('providerPipeline', '/crm');
   if (gate.blocked) return <RoleBlocked area="The network CRM" detail="the network and admin teams" />;
@@ -34,13 +34,29 @@ export default async function MyQueuePage({
   const unassigned = searchParams.who === 'unassigned';
   const viewingId = unassigned ? null : searchParams.who ? Number(searchParams.who) : me.id;
 
+  const threadFilter = Number(searchParams.thread) || null;
+
   const [rows, funnel, team] = await Promise.all([
-    getQueue({ assigneeId: viewingId, unassigned, limit: 500 }),
-    getQueueFunnel({ assigneeId: viewingId, unassigned }),
+    getQueue({ assigneeId: viewingId, unassigned, threadId: threadFilter, limit: 500 }),
+    getQueueFunnel({ assigneeId: viewingId, unassigned, threadId: threadFilter }),
     listTeam(),
   ]);
 
-  const stale = rows.filter((r) => r.days_stale >= staleAfter);
+  // Onboarded rows are in the list now, so "open" and "stale" are derived here
+  // rather than by the query having quietly dropped them. Staleness only means
+  // something for unfinished work — an onboarded provider nobody has touched
+  // in a month is finished, not neglected.
+  const done = new Set(funnel.stages.filter((s) => s.is_success).map((s) => s.stage_key));
+  const openRows = rows.filter((r) => !done.has(r.stage_key));
+  const stale = openRows.filter((r) => r.days_stale >= staleAfter);
+
+  // Which campaigns this person's work spans — the thread board's context,
+  // carried into the person view so the two aren't different worlds.
+  const threads = [...rows.reduce((m, r) => {
+    m.set(r.thread_id, { id: r.thread_id, name: r.thread_name, n: (m.get(r.thread_id)?.n ?? 0) + 1 });
+    return m;
+  }, new Map<number, { id: number; name: string; n: number }>()).values()]
+    .sort((a, b) => b.n - a.n);
   const whoLabel = unassigned
     ? 'Nobody'
     : viewingId === me.id
@@ -83,13 +99,27 @@ export default async function MyQueuePage({
         ))}
       </div>
 
+      {threads.length > 1 && (
+        <div className="flex flex-wrap items-center gap-1.5 mb-4">
+          <span className="text-[11px] uppercase tracking-wide text-ink-400 mr-1">Thread</span>
+          <ChipButton href={href({ thread: undefined })} active={!threadFilter}>
+            All {threads.length}
+          </ChipButton>
+          {threads.map((t) => (
+            <ChipButton key={t.id} href={href({ thread: String(t.id) })} active={threadFilter === t.id}>
+              {t.name} · {t.n}
+            </ChipButton>
+          ))}
+        </div>
+      )}
+
       <QueueFunnel funnel={funnel} staleCount={stale.length} staleAfter={staleAfter} />
 
       {stale.length > 0 && (
         <div className="mb-4 flex items-start gap-2 rounded-md border border-warn-500/30 bg-warn-500/5 px-3 py-2">
           <AlertTriangle className="w-4 h-4 text-warn-600 mt-0.5 shrink-0" strokeWidth={2.25} />
           <p className="text-xs text-ink-700">
-            Oldest untouched is {rows[0]?.days_stale}d. Stale means {staleAfter}+ days;{' '}
+            Oldest untouched is {openRows[0]?.days_stale}d. Stale means {staleAfter}+ days;{' '}
             <Link href={href({ stale: staleAfter === 7 ? '14' : '7' })} className="underline hover:text-ink-900">
               try {staleAfter === 7 ? 14 : 7}
             </Link>.
@@ -99,10 +129,10 @@ export default async function MyQueuePage({
 
       <Card>
         <CardHeader
-          title={`${rows.length} open${unassigned ? ' · unowned' : ''}`}
+          title={`${rows.length} in pipeline · ${openRows.length} open${unassigned ? ' · unowned' : ''}`}
           subtitle={
             rows.length
-              ? 'Open means not yet onboarded — stalled and dropped stay here on purpose.'
+              ? 'Every stage, the same as the thread board — onboarded included, so the two agree.'
               : undefined
           }
           icon={<Inbox className="w-4 h-4" strokeWidth={2.25} />}
@@ -113,6 +143,7 @@ export default async function MyQueuePage({
               rows={rows}
               stages={funnel.stages}
               staleAfter={staleAfter}
+              whoParam={unassigned ? 'unassigned' : viewingId ? String(viewingId) : undefined}
               emptyLabel={
                 unassigned
                   ? 'Every provider on an active thread has an owner.'

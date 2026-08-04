@@ -13,7 +13,7 @@ import { PROVIDER_KINDS } from '@/lib/providerKinds';
 type Team = { id: number; name: string; role: string }[];
 
 export function BoardClient({
-  thread, initialProviders, checklist, team, canWrite, myId,
+  thread, initialProviders, checklist, team, canWrite, myId, openProviderId, focusAssigneeId,
 }: {
   thread: Thread;
   initialProviders: ThreadProvider[];
@@ -21,15 +21,19 @@ export function BoardClient({
   team: Team;
   canWrite: boolean;
   myId: number;
+  /** Arriving from the queue: open this provider's panel straight away. */
+  openProviderId?: number | null;
+  /** …and keep the person filter the queue was showing. */
+  focusAssigneeId?: number | null;
 }) {
   const [providers, setProviders] = useState(initialProviders);
-  const [openId, setOpenId] = useState<number | null>(null);
+  const [openId, setOpenId] = useState<number | null>(openProviderId ?? null);
   const [picked, setPicked] = useState<Set<number>>(new Set());
   const [confirmBulkRemove, setConfirmBulkRemove] = useState(false);
   const [showAdd, setShowAdd] = useState(false);
   const [showImport, setShowImport] = useState(false);
   const [showChecklist, setShowChecklist] = useState(false);
-  const [assigneeFilter, setAssigneeFilter] = useState<number | 'all' | 'mine'>('all');
+  const [assigneeFilter, setAssigneeFilter] = useState<number | 'all' | 'mine'>(focusAssigneeId ?? 'all');
   const [pending, startTransition] = useTransition();
   const [err, setErr] = useState<string | null>(null);
 

@@ -10,7 +10,13 @@ import { ThreadStats } from './ThreadStats';
 
 export const dynamic = 'force-dynamic';
 
-export default async function ThreadPage({ params }: { params: Promise<{ id: string }> }) {
+export default async function ThreadPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ id: string }>;
+  searchParams: { provider?: string; who?: string };
+}) {
   const { id } = await params;
   const threadId = parseInt(id, 10);
   if (!Number.isInteger(threadId)) notFound();
@@ -55,6 +61,8 @@ export default async function ThreadPage({ params }: { params: Promise<{ id: str
         team={team}
         canWrite={canWriteCrm(me)}
         myId={me?.id ?? 0}
+        openProviderId={Number(searchParams.provider) || null}
+        focusAssigneeId={Number(searchParams.who) || null}
       />
     </main>
   );
