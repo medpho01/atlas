@@ -7,7 +7,7 @@ import { ChipButton } from '@/components/ui/Toggle';
 import { getQueue, getQueueFunnel, listTeam } from '@/lib/crm';
 import { CrmTabs } from './CrmTabs';
 import { QueueFunnel } from './QueueFunnel';
-import { QueueTable } from './QueueTable';
+import { QueueBoard } from './QueueBoard';
 
 export const dynamic = 'force-dynamic';
 
@@ -108,9 +108,10 @@ export default async function MyQueuePage({
           icon={<Inbox className="w-4 h-4" strokeWidth={2.25} />}
         />
         <CardBody className="pt-0">
-          <div className="-mx-5 overflow-x-auto">
-            <QueueTable
+          <div className="-mx-5">
+            <QueueBoard
               rows={rows}
+              stages={funnel.stages}
               staleAfter={staleAfter}
               emptyLabel={
                 unassigned

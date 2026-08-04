@@ -76,10 +76,15 @@ export async function createProvider(input: {
       [input.threadId],
     );
     const firstStage = t?.stages?.[0]?.key ?? 'identified';
+    // A network person adding a provider is picking up that work, so it lands
+    // owned rather than in the unassigned pile someone has to notice and
+    // distribute. Admins are excluded: they add on other people's behalf, and
+    // auto-owning it would hide the row from whoever should act on it.
+    const owner = me!.role === 'admin' ? null : me!.id;
     await query(
-      `INSERT INTO atlas.crm_thread_providers (thread_id, provider_id, stage_key, added_by)
-       VALUES ($1, $2, $3, $4) ON CONFLICT (thread_id, provider_id) DO NOTHING`,
-      [input.threadId, p!.id, firstStage, me!.id],
+      `INSERT INTO atlas.crm_thread_providers (thread_id, provider_id, stage_key, added_by, assignee_id)
+       VALUES ($1, $2, $3, $4, $5) ON CONFLICT (thread_id, provider_id) DO NOTHING`,
+      [input.threadId, p!.id, firstStage, me!.id, owner],
     );
     revalidatePath(`/crm/${input.threadId}`);
   }
@@ -281,6 +286,10 @@ export async function bulkCreateProviders(input: {
   if (!t) return { ok: false, error: 'Thread not found' };
   const firstStage = t.stages?.[0]?.key ?? 'identified';
 
+  // Same rule as the single-provider path: whoever imports the list owns the
+  // rows, unless they're an admin loading it for someone else.
+  const importOwner = me!.role === 'admin' ? null : me!.id;
+
   let created = 0, linked = 0, skipped = 0;
   // A file listing the same hospital twice would otherwise add it once and
   // report the second as an existing provider, which reads like a bug.
@@ -323,9 +332,9 @@ export async function bulkCreateProviders(input: {
     }
 
     await query(
-      `INSERT INTO atlas.crm_thread_providers (thread_id, provider_id, stage_key, added_by)
-       VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING`,
-      [input.threadId, providerId, firstStage, me!.id],
+      `INSERT INTO atlas.crm_thread_providers (thread_id, provider_id, stage_key, added_by, assignee_id)
+       VALUES ($1, $2, $3, $4, $5) ON CONFLICT DO NOTHING`,
+      [input.threadId, providerId, firstStage, me!.id, importOwner],
     );
   }
   revalidatePath(`/crm/${input.threadId}`);
@@ -402,6 +411,9 @@ export async function removeFromThread(input: {
 }): Promise<R> {
   const { me, err } = await writer();
   if (err) return { ok: false, error: err };
+  if (me!.role !== 'admin') {
+    return { ok: false, error: 'Only an admin can remove a provider from a thread' };
+  }
 
   const p = await queryOne<{ name: string }>(
     `SELECT name FROM atlas.crm_providers WHERE id = $1`, [input.providerId],
@@ -446,6 +458,12 @@ export async function bulkUpdateProviders(input: {
   if (ids.length > 500) return { ok: false, error: 'Too many at once — 500 max' };
 
   if (input.op === 'remove') {
+    // Checked here as well as inside removeFromThread: this loop ignores each
+    // call's result, so without it a non-admin would be told 500 providers
+    // were removed while nothing happened.
+    if (me!.role !== 'admin') {
+      return { ok: false, error: 'Only an admin can remove providers from a thread' };
+    }
     for (const providerId of ids) await removeFromThread({ threadId: input.threadId, providerId });
     return { ok: true, affected: ids.length };
   }

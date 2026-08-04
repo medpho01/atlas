@@ -83,7 +83,7 @@ export function ThreadsClient({ threads, funnels, canWrite, isAdmin }: {
                 onChange={(e) => setForm({ ...form, providerKind: e.target.value })}
                 className="h-9 px-2 text-sm rounded-md border border-ink-200 bg-surface"
               >
-                {['LAB','HOSPITAL','DOCTOR','PHLEBO','OTHER'].map((k) => <option key={k}>{k}</option>)}
+                {['LAB','DIAGNOSTICS','HOSPITAL','DOCTOR','PHLEBO','OTHER'].map((k) => <option key={k}>{k}</option>)}
               </select>
               <input
                 type="text" placeholder="Region (e.g. Pune)" value={form.region}

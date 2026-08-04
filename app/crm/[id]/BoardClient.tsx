@@ -739,7 +739,7 @@ function AddProviderModal({ threadId, defaultKind, onClose }: {
             className="col-span-2 h-9 px-3 text-sm rounded-md border border-ink-200 bg-surface" />
           <select value={form.kind} onChange={(e) => setForm({ ...form, kind: e.target.value })}
             className="h-9 px-2 text-sm rounded-md border border-ink-200 bg-surface">
-            {['LAB','HOSPITAL','DOCTOR','PHLEBO','OTHER'].map((k) => <option key={k}>{k}</option>)}
+            {['LAB','DIAGNOSTICS','HOSPITAL','DOCTOR','PHLEBO','OTHER'].map((k) => <option key={k}>{k}</option>)}
           </select>
           <input placeholder="Contact person" value={form.contactPerson} onChange={(e) => setForm({ ...form, contactPerson: e.target.value })}
             className="h-9 px-3 text-sm rounded-md border border-ink-200 bg-surface" />
