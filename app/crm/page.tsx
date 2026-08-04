@@ -143,7 +143,6 @@ export default async function MyQueuePage({
               rows={rows}
               stages={funnel.stages}
               staleAfter={staleAfter}
-              whoParam={unassigned ? 'unassigned' : viewingId ? String(viewingId) : undefined}
               emptyLabel={
                 unassigned
                   ? 'Every provider on an active thread has an owner.'

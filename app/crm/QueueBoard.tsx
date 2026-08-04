@@ -1,8 +1,20 @@
 'use client';
 
-import Link from 'next/link';
+import { useState, useTransition } from 'react';
+import { useRouter } from 'next/navigation';
 import { Clock } from 'lucide-react';
-import type { QueueRow, QueueFunnelStage } from '@/lib/crm';
+import type { QueueRow, QueueFunnelStage, Thread, ThreadProvider, ChecklistItem, FunnelStage } from '@/lib/crm';
+import { ProviderDrawer, type Team } from './ProviderDrawer';
+import { moveStage, assignProvider, removeFromThread } from './actions';
+
+type Loaded = {
+  thread: Thread;
+  provider: ThreadProvider;
+  stages: FunnelStage[];
+  checklist: ChecklistItem[];
+  team: Team;
+  canWrite: boolean;
+};
 
 /**
  * A person's open work laid out as the funnel, not as a list.
@@ -20,23 +32,45 @@ import type { QueueRow, QueueFunnelStage } from '@/lib/crm';
  * — a stage reading 3 there and 0 here — which is worse than a column someone
  * has to scroll past.
  *
- * Cards open the provider's panel on its thread rather than just landing on
- * the thread: the reason to click a card is that specific provider.
+ * Cards open the provider's panel here, without leaving the page. Sending
+ * someone to the thread first threw away the view they were working — the
+ * person and stage they had filtered to — to show them one provider.
  */
 export function QueueBoard({
   rows,
   stages,
   staleAfter,
   emptyLabel,
-  whoParam,
 }: {
   rows: QueueRow[];
   stages: QueueFunnelStage[];
   staleAfter: number;
   emptyLabel: string;
-  /** Carried onto the thread so it opens on the same person's work. */
-  whoParam?: string;
 }) {
+  const router = useRouter();
+  const [loaded, setLoaded] = useState<Loaded | null>(null);
+  const [loadingId, setLoadingId] = useState<number | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const [pending, startTransition] = useTransition();
+
+  const openProvider = async (r: QueueRow) => {
+    setLoadingId(r.provider_id); setErr(null);
+    try {
+      const res = await fetch(`/api/crm/provider?thread=${r.thread_id}&provider=${r.provider_id}`);
+      const body = await res.json();
+      if (!res.ok) throw new Error(body?.error ?? 'Could not open that provider');
+      setLoaded(body as Loaded);
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setLoadingId(null);
+    }
+  };
+
+  // The queue is server-rendered, so a change made in the panel has to come
+  // back through the server for the board behind it to agree with the panel.
+  const refresh = () => startTransition(() => router.refresh());
+
   if (!rows.length) {
     return <p className="px-5 py-10 text-sm text-ink-500 text-center">{emptyLabel}</p>;
   }
@@ -88,10 +122,13 @@ export function QueueBoard({
                     <p className="text-center text-xs text-ink-300 py-5">—</p>
                   ) : (
                     list.map((r) => (
-                      <Link
+                      <button
                         key={`${r.thread_id}-${r.provider_id}`}
-                        href={`/crm/${r.thread_id}?provider=${r.provider_id}${whoParam ? `&who=${whoParam}` : ''}`}
-                        className="block rounded-md border border-ink-200 bg-surface px-2.5 py-2 hover:border-brand-400 transition"
+                        type="button"
+                        onClick={() => openProvider(r)}
+                        className={`block w-full text-left rounded-md border border-ink-200 bg-surface px-2.5 py-2 hover:border-brand-400 transition ${
+                          loadingId === r.provider_id ? 'opacity-60' : ''
+                        }`}
                       >
                         <div className="text-sm font-medium text-ink-900 leading-snug">
                           {r.provider_name}
@@ -117,7 +154,7 @@ export function QueueBoard({
                             {r.days_stale === 0 ? 'today' : `${r.days_stale}d`}
                           </span>
                         </div>
-                      </Link>
+                      </button>
                     ))
                   )}
                 </div>
@@ -125,6 +162,53 @@ export function QueueBoard({
             );
           })}
       </div>
+
+      {err && (
+        <p className="mt-2 text-xs text-danger-500">{err}</p>
+      )}
+
+      {loaded && (
+        <ProviderDrawer
+          thread={loaded.thread}
+          provider={loaded.provider}
+          stages={loaded.stages}
+          checklist={loaded.checklist}
+          team={loaded.team}
+          canWrite={loaded.canWrite}
+          pending={pending}
+          onClose={() => setLoaded(null)}
+          onMove={(providerId, toStage, note) => {
+            startTransition(async () => {
+              const res = await moveStage({ threadId: loaded.thread.id, providerId, toStage, note });
+              if (!res.ok) { setErr(res.error ?? 'Move failed'); return; }
+              setLoaded((l) => (l ? { ...l, provider: { ...l.provider, stage_key: toStage } } : l));
+              router.refresh();
+            });
+          }}
+          onAssign={(providerId, assigneeId) => {
+            startTransition(async () => {
+              const res = await assignProvider({ threadId: loaded.thread.id, providerId, assigneeId });
+              if (!res.ok) { setErr(res.error ?? 'Assign failed'); return; }
+              const name = loaded.team.find((t) => t.id === assigneeId)?.name ?? null;
+              setLoaded((l) => (l ? { ...l, provider: { ...l.provider, assignee_id: assigneeId, assignee_name: name } } : l));
+              router.refresh();
+            });
+          }}
+          onRemove={(providerId) => {
+            startTransition(async () => {
+              const res = await removeFromThread({ threadId: loaded.thread.id, providerId });
+              if (!res.ok) { setErr(res.error ?? 'Remove failed'); return; }
+              setLoaded(null);
+              router.refresh();
+            });
+          }}
+          onPatch={(providerId, patch) => {
+            setLoaded((l) => (l ? { ...l, provider: { ...l.provider, ...patch } } : l));
+            refresh();
+          }}
+          onNoteAdded={refresh}
+        />
+      )}
     </div>
   );
 }
