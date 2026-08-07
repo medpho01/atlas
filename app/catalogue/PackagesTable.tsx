@@ -139,6 +139,9 @@ export function PackagesTable({ packages }: { packages: PackageRow[] }) {
       const pricing = (labs ?? []).map((x: Record<string, any>) => ({
         'Package': x.package_name,
         'Lab': x.lab_name,
+        // DIAGNOSTIC_CENTER reads as shouting in a spreadsheet column.
+        'Centre type': (x.center_type ?? '')
+          .toLowerCase().replace(/_/g, ' ').replace(/^./, (c: string) => c.toUpperCase()),
         'City': x.lab_city ?? '',
         'State': x.lab_state ?? '',
         'Pincode': x.lab_pincode ?? '',
@@ -151,7 +154,7 @@ export function PackagesTable({ packages }: { packages: PackageRow[] }) {
       const s3 = XLSX.utils.json_to_sheet(
         pricing.length ? pricing : [{ Package: 'No lab has a quote above ₹10 for the selected packages' }],
       );
-      s3['!cols'] = [{ wch: 34 }, { wch: 34 }, { wch: 16 }, { wch: 16 }, { wch: 10 }, { wch: 12 }, { wch: 12 }];
+      s3['!cols'] = [{ wch: 34 }, { wch: 34 }, { wch: 18 }, { wch: 16 }, { wch: 16 }, { wch: 10 }, { wch: 12 }, { wch: 12 }];
       XLSX.utils.book_append_sheet(wb, s3, 'Lab pricing');
 
       const stamp = new Date().toISOString().slice(0, 10);

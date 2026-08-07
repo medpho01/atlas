@@ -428,6 +428,8 @@ export type LabPriceRow = {
   package_id: number;
   package_name: string;
   lab_name: string;
+  /** DIAGNOSTIC_CENTER | HOSPITAL | COLLECTION_CENTER — set on every quoting lab. */
+  center_type: string | null;
   lab_city: string | null;
   lab_state: string | null;
   lab_pincode: string | null;
@@ -448,6 +450,7 @@ export async function getPackageLabPricing(packageIds: number[]): Promise<LabPri
   return query<LabPriceRow>(`
     SELECT lp.package_id, e.package_name,
            l."labName" AS lab_name,
+           l."centerType"::text AS center_type,
            TRIM(l.city) AS lab_city, TRIM(l.state) AS lab_state, TRIM(l.pincode) AS lab_pincode,
            ct.tier AS city_tier,
            lp.b2b::text, lp.mrp::text
