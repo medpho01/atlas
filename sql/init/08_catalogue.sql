@@ -317,3 +317,38 @@ LEFT JOIN untyped    ut ON ut.package_id = p.id
 LEFT JOIN analytics.mv_catalogue_demand d
        ON d.kind = 'PACKAGE' AND d.entity_id = p.id
 WHERE p.active;
+
+-- ---------------------------------------------------------------------------
+-- City tier.
+--
+-- City, state and pincode all exist on Lab and need no inference — every lab
+-- that quotes a package carries all three. Tier does not exist anywhere at
+-- source, and it is the axis network planning actually uses: a price in a
+-- metro and the same price in a tier-3 town mean different things.
+--
+-- Classified once per city by scripts/enrich-city-tiers.ts and cached here,
+-- rather than inferred per export. 419 cities appear across the quoting labs,
+-- so this is one small job, not a per-row cost.
+--
+-- Keyed on the city name alone, punctuation and case stripped. City+state
+-- would be more precise but the state column is not usable: Chennai appears as
+-- both 'Tamil  Nadu' and 'TamilNadu', and every Orange Health and Thyrocare lab
+-- carries '-'. Keying on the pair split single cities into several rows.
+--
+-- The cost is that same-named cities in different states collapse into one row
+-- (Aurangabad in Maharashtra is Tier 2, in Bihar Tier 3). The states a city
+-- appears with are passed to the classifier as context, and such a row can be
+-- corrected by hand. Rows with source='human' are never overwritten.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS atlas.city_tier (
+  city_key    text PRIMARY KEY,          -- regexp_replace(lower(trim(city)), '[^a-z0-9]', '', 'g')
+  city        text NOT NULL,
+  states      text,          -- every spelling seen at source, for context
+  tier        text NOT NULL CHECK (tier IN ('Tier 1', 'Tier 2', 'Tier 3', 'Unknown')),
+  rationale   text,
+  confidence  numeric(3,2),
+  source      text NOT NULL DEFAULT 'llm' CHECK (source IN ('llm', 'human')),
+  model       text,
+  prompt_version int,
+  updated_at  timestamptz NOT NULL DEFAULT now()
+);

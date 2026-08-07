@@ -11,7 +11,8 @@
     "db:refresh": "psql -d labstack -f sql/refresh_views.sql",
     "db:auth": "psql -d labstack -f sql/atlas_auth.sql",
     "user:create": "tsx scripts/create-user.ts",
-    "catalogue:enrich": "tsx scripts/enrich-catalogue.ts"
+    "catalogue:enrich": "tsx scripts/enrich-catalogue.ts",
+    "cities:enrich": "tsx scripts/enrich-city-tiers.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.115.0",

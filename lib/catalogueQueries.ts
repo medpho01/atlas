@@ -429,6 +429,9 @@ export type LabPriceRow = {
   package_name: string;
   lab_name: string;
   lab_city: string | null;
+  lab_state: string | null;
+  lab_pincode: string | null;
+  city_tier: string | null;
   b2b: string | null;
   mrp: string | null;
 };
@@ -444,11 +447,15 @@ export async function getPackageLabPricing(packageIds: number[]): Promise<LabPri
   if (!packageIds?.length) return [];
   return query<LabPriceRow>(`
     SELECT lp.package_id, e.package_name,
-           l."labName" AS lab_name, l.city AS lab_city,
+           l."labName" AS lab_name,
+           TRIM(l.city) AS lab_city, TRIM(l.state) AS lab_state, TRIM(l.pincode) AS lab_pincode,
+           ct.tier AS city_tier,
            lp.b2b::text, lp.mrp::text
     FROM analytics.mv_lab_packages lp
     JOIN src."Lab" l ON l.id = lp.lab_id
     JOIN analytics.v_package_economics e ON e.package_id = lp.package_id
+    -- Tier is looked up, never inferred here: same key the enricher writes.
+    LEFT JOIN atlas.city_tier ct ON ct.city_key = regexp_replace(lower(TRIM(l.city)), '[^a-z0-9]', '', 'g')
     WHERE lp.package_id = ANY($1::int[]) AND lp.b2b > 10
     ORDER BY e.package_name, lp.b2b
   `, [packageIds]);
