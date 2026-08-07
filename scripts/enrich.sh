@@ -24,14 +24,32 @@ JOB="$1"
 shift
 
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
-ENV_FILE="${ENV_FILE:-$REPO/.env.production}"
-[ -f "$ENV_FILE" ] || { echo "No env file at $ENV_FILE (override with ENV_FILE=)" >&2; exit 1; }
 
-# shellcheck disable=SC1090
-set -a; . "$ENV_FILE"; set +a
+# Settings are split across files on the server: .env.production is what
+# docker compose loads (database password, source DSN), while the Anthropic key
+# was added to .env. Read every one that exists rather than pick a side —
+# later files win, and ENV_FILE= overrides the lot.
+if [ -n "$ENV_FILE" ]; then
+  CANDIDATES="$ENV_FILE"
+else
+  CANDIDATES="$REPO/.env.production $REPO/.env $REPO/.env.local"
+fi
 
-[ -n "$ANTHROPIC_API_KEY" ] || { echo "ANTHROPIC_API_KEY not set in $ENV_FILE" >&2; exit 1; }
-[ -n "$ATLAS_DB_PASSWORD" ] || { echo "ATLAS_DB_PASSWORD not set in $ENV_FILE" >&2; exit 1; }
+LOADED=""
+for f in $CANDIDATES; do
+  [ -f "$f" ] || continue
+  # shellcheck disable=SC1090
+  set -a; . "$f"; set +a
+  LOADED="$LOADED $f"
+done
+[ -n "$LOADED" ] || { echo "No env file found. Looked in:$CANDIDATES" >&2; exit 1; }
+echo "Loaded env from:$LOADED"
+
+[ -n "$ANTHROPIC_API_KEY" ] || {
+  echo "ANTHROPIC_API_KEY not set in any of:$LOADED" >&2
+  echo "Add it to one of them, or run with ANTHROPIC_API_KEY=... $0 $JOB" >&2
+  exit 1; }
+[ -n "$ATLAS_DB_PASSWORD" ] || { echo "ATLAS_DB_PASSWORD not set in any of:$LOADED" >&2; exit 1; }
 
 case "$JOB" in
   cities)   SCRIPT="scripts/enrich-city-tiers.ts"; ARGS="$*" ;;
