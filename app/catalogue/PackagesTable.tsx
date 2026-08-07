@@ -17,6 +17,7 @@ type PackageRow = {
   pkg_cost: string | null;
   best_lab_name: string | null;
   labs_quoting: number;
+  lab_offers: { lab: string; b2b: number }[] | null;
   orders: number;
   orders_l90d: number;
   sample_types: string[] | null;
@@ -43,8 +44,7 @@ const columns: SortableColumn<PackageRow>[] = [
   { key: 'test_count', label: 'Tests', align: 'right' },
   { key: 'sample_types', label: 'Sample', sortValue: (p) => (p.sample_types ?? []).join(',') },
   { key: 'tat_hours', label: 'Report in', align: 'right', sortValue: (p) => p.tat_hours },
-  { key: 'pkg_cost', label: 'Price', align: 'right', sortValue: (p) => num(p.pkg_cost) },
-  { key: 'best_lab_name', label: 'From' },
+  { key: 'pkg_cost', label: 'Labs & price', sortValue: (p) => num(p.pkg_cost) },
   { key: 'order_types', label: 'Modality', sortValue: (p) => (p.order_types ?? []).join(',') },
 ];
 
@@ -68,8 +68,13 @@ export function PackagesTable({ packages }: { packages: PackageRow[] }) {
    * sit side by side and the short one just stops — which is what makes it
    * readable as a comparison.
    *
-   * "Summary" keeps the per-package facts (price, orders, categories) that
-   * don't fit a shape whose only axis is tests.
+   * "Summary" keeps the per-package facts (orders, categories) that don't fit
+   * a shape whose only axis is tests.
+   *
+   * "Lab pricing" is one row per package per lab. A package price is only
+   * meaningful next to the lab quoting it — the same package is ₹900 at one
+   * lab and ₹2,000 at another — and some are quoted by over a thousand labs,
+   * which is exactly why this belongs in a file rather than on screen.
    */
   const download = async (ids: number[]) => {
     setDownloading(true); setErr(null);
@@ -80,7 +85,7 @@ export function PackagesTable({ packages }: { packages: PackageRow[] }) {
         body: JSON.stringify({ packageIds: ids }),
       });
       if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error ?? 'Export failed');
-      const { rows } = await res.json();
+      const { rows, labs } = await res.json();
 
       const XLSX = await import('xlsx');
       const money = (v: string | null) => (v == null ? '' : Math.round(Number(v)));
@@ -99,8 +104,9 @@ export function PackagesTable({ packages }: { packages: PackageRow[] }) {
         'Modality': r.modality ?? '',
         'Sample': r.sample_types ?? '',
         'Report in (hrs)': r.tat_hours ?? '',
-        'Price': money(r.pkg_cost),
+        'Cheapest price': money(r.pkg_cost),
         'Cheapest lab': r.best_lab_name ?? '',
+        'Labs quoting': (labs ?? []).filter((x: Record<string, unknown>) => x.package_id === r.package_id).length,
         'Orders': r.orders ?? 0,
       }));
 
@@ -127,8 +133,23 @@ export function PackagesTable({ packages }: { packages: PackageRow[] }) {
       XLSX.utils.book_append_sheet(wb, s1, 'Packages');
 
       const s2 = XLSX.utils.json_to_sheet(summary);
-      s2['!cols'] = [{ wch: 34 }, { wch: 8 }, { wch: 7 }, { wch: 46 }, { wch: 28 }, { wch: 20 }, { wch: 14 }, { wch: 10 }, { wch: 26 }, { wch: 9 }];
+      s2['!cols'] = [{ wch: 34 }, { wch: 8 }, { wch: 7 }, { wch: 46 }, { wch: 28 }, { wch: 20 }, { wch: 18 }, { wch: 14 }, { wch: 13 }, { wch: 26 }, { wch: 12 }, { wch: 9 }];
       XLSX.utils.book_append_sheet(wb, s2, 'Summary');
+
+      const pricing = (labs ?? []).map((x: Record<string, any>) => ({
+        'Package': x.package_name,
+        'Lab': x.lab_name,
+        'Lab city': x.lab_city ?? '',
+        // MRP omitted: populated on 15 of 4,870 lab-package rows at source,
+        // so a column of blanks that looks like missing data rather than
+        // absent data.
+        'Price': money(x.b2b),
+      }));
+      const s3 = XLSX.utils.json_to_sheet(
+        pricing.length ? pricing : [{ Package: 'No lab has a quote above ₹10 for the selected packages' }],
+      );
+      s3['!cols'] = [{ wch: 34 }, { wch: 34 }, { wch: 16 }, { wch: 12 }];
+      XLSX.utils.book_append_sheet(wb, s3, 'Lab pricing');
 
       const stamp = new Date().toISOString().slice(0, 10);
       XLSX.writeFile(wb, `labstack-packages-${stamp}.xlsx`);
@@ -279,10 +300,28 @@ export function PackagesTable({ packages }: { packages: PackageRow[] }) {
           <td className="num text-ink-600">
             {p.tat_hours ? `${p.tat_hours}h` : <span className="text-ink-300">—</span>}
           </td>
-          <td className="num font-medium">{inr(p.pkg_cost)}</td>
-          <td className="text-xs text-ink-600 max-w-[11rem] truncate">
-            {p.best_lab_name ?? <span className="text-ink-300">no quote</span>}
-            {p.labs_quoting > 1 && <span className="text-ink-400"> +{p.labs_quoting - 1}</span>}
+          <td className="text-xs max-w-[20rem]">
+            {p.lab_offers?.length ? (
+              <>
+                {p.lab_offers.map((o) => (
+                  <div key={o.lab} className="flex items-baseline gap-1.5 leading-snug">
+                    <span className="text-ink-700 truncate" title={o.lab}>{o.lab}</span>
+                    <span className="text-ink-300">—</span>
+                    <span className="num font-medium text-ink-900">
+                      ₹{Math.round(o.b2b).toLocaleString('en-IN')}
+                    </span>
+                  </div>
+                ))}
+                {p.labs_quoting > p.lab_offers.length && (
+                  <div className="text-[11px] text-ink-400 mt-0.5">
+                    +{p.labs_quoting - p.lab_offers.length} more lab
+                    {p.labs_quoting - p.lab_offers.length === 1 ? '' : 's'}
+                  </div>
+                )}
+              </>
+            ) : (
+              <span className="text-ink-300">no quote</span>
+            )}
           </td>
           <td className="text-xs text-ink-500">
             {(p.order_types ?? []).map((m) => MODALITY_SHORT[m] ?? m).join(' · ') || '—'}

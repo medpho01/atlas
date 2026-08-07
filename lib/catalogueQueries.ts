@@ -102,6 +102,13 @@ export type PackageRow = {
   best_lab_name: string | null;
   best_lab_city: string | null;
   labs_quoting: number;
+  /**
+   * The cheapest few labs and what each charges. A package price only means
+   * something next to the lab quoting it — the same package runs ₹900 at one
+   * lab and ₹2,000 at another, and two packages here are quoted by 1,260
+   * labs, so the full list belongs in the export, not the table.
+   */
+  lab_offers: { lab: string; b2b: number }[] | null;
   /** How many times the package has been booked. Zero is a real signal. */
   orders: number;
   orders_l90d: number;
@@ -183,9 +190,21 @@ export async function browsePackages(f: PackageFilters = {}): Promise<PackageRow
            e.sample_types, e.tests_without_sample, e.pkg_cost::text,
            e.best_lab_name, e.best_lab_city, e.labs_quoting,
            e.orders, e.orders_l90d, e.last_ordered::text,
+           off.offers AS lab_offers,
            pe.categories, pe.intent, pe.positioning
     FROM analytics.v_package_economics e
     LEFT JOIN atlas.package_enrichment pe ON pe.package_id = e.package_id
+    LEFT JOIN LATERAL (
+      SELECT jsonb_agg(jsonb_build_object('lab', x.lab, 'b2b', x.b2b) ORDER BY x.b2b) AS offers
+      FROM (
+        SELECT l2."labName" AS lab, lp.b2b
+        FROM analytics.mv_lab_packages lp
+        JOIN src."Lab" l2 ON l2.id = lp.lab_id
+        WHERE lp.package_id = e.package_id AND lp.b2b > 10
+        ORDER BY lp.b2b
+        LIMIT 4
+      ) x
+    ) off ON true
     ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
     ORDER BY e.orders DESC, e.test_count DESC, e.package_name
     LIMIT $${params.length}
@@ -402,5 +421,35 @@ export async function getPackagesForExport(packageIds: number[]): Promise<Export
     LEFT JOIN analytics.mv_test_catalog tc ON tc.master_id = m.id
     WHERE e.package_id = ANY($1::int[])
     ORDER BY e.orders DESC, e.package_name, tc.mrp_min DESC NULLS LAST, m.name
+  `, [packageIds]);
+}
+
+export type LabPriceRow = {
+  package_id: number;
+  package_name: string;
+  lab_name: string;
+  lab_city: string | null;
+  b2b: string | null;
+  mrp: string | null;
+};
+
+/**
+ * Every lab that quotes each package, with its price.
+ *
+ * Unbounded on purpose — the table has to summarise, a spreadsheet does not,
+ * and "which labs is this live at and for how much" is the question the file
+ * exists to answer. Quotes at or below Rs.10 are placeholders, not prices.
+ */
+export async function getPackageLabPricing(packageIds: number[]): Promise<LabPriceRow[]> {
+  if (!packageIds?.length) return [];
+  return query<LabPriceRow>(`
+    SELECT lp.package_id, e.package_name,
+           l."labName" AS lab_name, l.city AS lab_city,
+           lp.b2b::text, lp.mrp::text
+    FROM analytics.mv_lab_packages lp
+    JOIN src."Lab" l ON l.id = lp.lab_id
+    JOIN analytics.v_package_economics e ON e.package_id = lp.package_id
+    WHERE lp.package_id = ANY($1::int[]) AND lp.b2b > 10
+    ORDER BY e.package_name, lp.b2b
   `, [packageIds]);
 }

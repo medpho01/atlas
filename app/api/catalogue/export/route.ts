@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSessionUser } from '@/lib/auth';
 import { canAccess } from '@/lib/access';
-import { getPackagesForExport } from '@/lib/catalogueQueries';
+import { getPackagesForExport, getPackageLabPricing } from '@/lib/catalogueQueries';
 
 /**
  * Package export, built server-side.
@@ -22,6 +22,9 @@ export async function POST(req: NextRequest) {
     : [];
   if (!ids.length) return NextResponse.json({ error: 'No packages selected' }, { status: 400 });
 
-  const rows = await getPackagesForExport(ids);
-  return NextResponse.json({ rows });
+  const [rows, labs] = await Promise.all([
+    getPackagesForExport(ids),
+    getPackageLabPricing(ids),
+  ]);
+  return NextResponse.json({ rows, labs });
 }
