@@ -39,7 +39,7 @@ export function ThreadsClient({ threads, funnels, canWrite, isAdmin }: {
     <div className="space-y-4">
       <div className="rounded-2xl border border-ink-200 bg-surface p-4">
         <div className="flex flex-wrap gap-2">
-          {canWrite && !showCreate && (
+          {isAdmin && !showCreate && (
             <button
               onClick={() => setShowCreate(true)}
               className="inline-flex items-center gap-1.5 px-3 h-9 text-sm font-semibold rounded-md bg-ink-900 text-ink-50 hover:bg-ink-800 transition"

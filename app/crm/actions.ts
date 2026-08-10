@@ -20,6 +20,10 @@ export async function createThread(input: {
 }): Promise<R> {
   const { me, err } = await writer();
   if (err) return { ok: false, error: err };
+  // Threads are the CRM's top-level structure and deleting one cascades to
+  // every provider link, activity and checklist item on it. Creating them is
+  // an admin decision, not day-to-day network work.
+  if (me!.role !== 'admin') return { ok: false, error: 'Only an admin can create a thread' };
   if (!input.name.trim()) return { ok: false, error: 'Thread name required' };
   const row = await queryOne<{ id: number }>(
     `INSERT INTO atlas.crm_threads (name, description, funnel_id, target_count, provider_kind, region, created_by)
