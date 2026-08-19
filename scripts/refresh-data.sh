@@ -326,5 +326,23 @@ REFRESH MATERIALIZED VIEW analytics.mv_test_catalog;
 REFRESH MATERIALIZED VIEW analytics.mv_lab_packages;
 SQL
 
+# ---- Phase 5: capture this week's network snapshot -------------------------
+#
+# Everything above is a projection of the source's current state — refresh it
+# tomorrow and today's picture is gone. This is the one place Atlas
+# accumulates, so growth can be replayed later. Idempotent per week: running
+# nightly overwrites the current week's rows rather than double-counting.
+#
+# Deliberately after Phase 4: it reads mv_provider_unified, which has to be
+# fresh, and atlas.city_tier for the tier split.
+log "Phase 5 · capture network snapshot"
+if $PG -t -A -c "SELECT to_regproc('atlas.capture_network_snapshot')" | grep -q .; then
+  SNAP_ROWS=$($PG -t -A -c "SELECT atlas.capture_network_snapshot();" 2>&1) \
+    && log "  snapshot: $SNAP_ROWS rows for week $($PG -t -A -c "SELECT date_trunc('week', current_date)::date;")" \
+    || log "  WARN snapshot failed: $SNAP_ROWS"
+else
+  log "  WARN atlas.capture_network_snapshot() missing — run sql/init/09_network_snapshot.sql"
+fi
+
 MV_COUNT=$($PG -t -A -c "SELECT COUNT(*) FROM pg_matviews WHERE schemaname='analytics';")
 log "Refresh complete. analytics has $MV_COUNT MVs."
