@@ -2,6 +2,7 @@
 # Run an enrichment job on a host that has no Node.
 #
 #   ./scripts/enrich.sh cities  [--dry-run] [--limit 50] [--reclassify]
+#   ./scripts/enrich.sh tiers   [--dry-run] [--limit 50] [--reclassify]
 #   ./scripts/enrich.sh tests   [--reclassify]
 #   ./scripts/enrich.sh packages [--reclassify]
 #
@@ -20,7 +21,7 @@
 set -e
 
 JOB="$1"
-[ -n "$JOB" ] || { echo "usage: $0 {cities|tests|packages} [flags...]" >&2; exit 2; }
+[ -n "$JOB" ] || { echo "usage: $0 {cities|tiers|tests|packages} [flags...]" >&2; exit 2; }
 shift
 
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
@@ -52,10 +53,11 @@ echo "Loaded env from:$LOADED"
 [ -n "$ATLAS_DB_PASSWORD" ] || { echo "ATLAS_DB_PASSWORD not set in any of:$LOADED" >&2; exit 1; }
 
 case "$JOB" in
-  cities)   SCRIPT="scripts/enrich-city-tiers.ts"; ARGS="$*" ;;
+  cities)   SCRIPT="scripts/enrich-city-tiers.ts";     ARGS="$*" ;;
+  tiers)    SCRIPT="scripts/enrich-provider-tiers.ts"; ARGS="$*" ;;
   tests)    SCRIPT="scripts/enrich-catalogue.ts";  ARGS="--stage tests $*" ;;
   packages) SCRIPT="scripts/enrich-catalogue.ts";  ARGS="--stage packages $*" ;;
-  *) echo "unknown job '$JOB' — expected cities, tests or packages" >&2; exit 2 ;;
+  *) echo "unknown job '$JOB' — expected cities, tiers, tests or packages" >&2; exit 2 ;;
 esac
 
 echo "Running $SCRIPT $ARGS"
