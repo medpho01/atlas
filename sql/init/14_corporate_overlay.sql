@@ -74,7 +74,7 @@ $$;
 CREATE OR REPLACE FUNCTION atlas.overlay_readiness(p_overlay bigint, p_category text DEFAULT 'DIAGNOSTICS')
 RETURNS TABLE (score int, cities int, headcount_covered bigint) LANGUAGE sql STABLE AS $$
   WITH client_cities AS (
-    SELECT regexp_replace(lower(TRIM(pc.city)), '[^a-z0-9]', '', 'g') AS city_key,
+    SELECT atlas.city_key(pc.city) AS city_key,
            SUM(COALESCE(op.headcount, 1))::bigint AS hc
     FROM atlas.corporate_overlay_pincode op
     JOIN analytics.mv_pincode_city pc ON pc.pincode = op.pincode

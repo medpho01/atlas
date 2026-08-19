@@ -77,8 +77,8 @@ BEGIN
     -- Grouped on the normalised key alone. Including the raw name here let
     -- 'Bangalore' and 'BANGALORE' become two rows with the same key, which
     -- ON CONFLICT then rejected outright.
-    SELECT regexp_replace(lower(TRIM(city)), '[^a-z0-9]', '', 'g') AS city_key,
-           MIN(TRIM(city)) AS city,
+    SELECT atlas.city_key(city) AS city_key,
+           MIN(atlas.city_display(city)) AS city,
            SUM(orders_all_time)::bigint AS orders,
            SUM(SUM(orders_all_time)) OVER (ORDER BY SUM(orders_all_time) DESC)::numeric
              / NULLIF(SUM(SUM(orders_all_time)) OVER (), 0) AS cum
@@ -87,6 +87,10 @@ BEGIN
     GROUP BY 1
   ) x
   ON CONFLICT (city_key) DO UPDATE SET
+    -- city included: without it the display name is frozen at whatever was
+    -- first inserted, so adding a spelling alias later fixes the grouping but
+    -- leaves the old label on screen.
+    city = EXCLUDED.city,
     band = EXCLUDED.band, rationale = EXCLUDED.rationale, updated_at = now()
   -- A human decision about which band a city belongs in outranks the data.
   WHERE atlas.city_band.source <> 'human';
@@ -118,7 +122,7 @@ WITH supply AS (
   SELECT kind, city, pincode, active FROM atlas.wellness_provider
 ),
 categorised AS (
-  SELECT regexp_replace(lower(TRIM(s.city)), '[^a-z0-9]', '', 'g') AS city_key,
+  SELECT atlas.city_key(s.city) AS city_key,
          CASE
            WHEN s.kind IN ('LAB','HOSPITAL','PHLEBO') THEN 'DIAGNOSTICS'
            WHEN s.kind = 'DOCTOR'                     THEN 'CONSULTS'
@@ -132,7 +136,7 @@ categorised AS (
   WHERE NULLIF(TRIM(s.city), '') IS NOT NULL
 ),
 city_pincodes AS (
-  SELECT regexp_replace(lower(TRIM(city)), '[^a-z0-9]', '', 'g') AS city_key,
+  SELECT atlas.city_key(city) AS city_key,
          COUNT(DISTINCT pincode)::int AS total_pincodes
   FROM analytics.mv_pincode_city
   WHERE NULLIF(TRIM(city), '') IS NOT NULL
@@ -152,7 +156,7 @@ per_cat AS (
          CASE WHEN c.category = 'DIAGNOSTICS' THEN
            (SELECT COUNT(DISTINCT pt.tier) FROM atlas.provider_tier pt
             JOIN src."Lab" l2 ON l2.id = pt.lab_id
-            WHERE regexp_replace(lower(TRIM(l2.city)), '[^a-z0-9]', '', 'g') = c.city_key
+            WHERE atlas.city_key(l2.city) = c.city_key
               AND pt.tier <> 'Unknown')::int
          END                                                        AS tiers_present,
          -- Integration: share of this city's labs wired in at F3 or better.
@@ -162,7 +166,7 @@ per_cat AS (
                    / NULLIF(COUNT(*), 0)
             FROM atlas.provider_integration pi
             JOIN src."Lab" l3 ON l3.id = pi.lab_id
-            WHERE regexp_replace(lower(TRIM(l3.city)), '[^a-z0-9]', '', 'g') = c.city_key)
+            WHERE atlas.city_key(l3.city) = c.city_key)
          END                                                        AS integration_ratio,
          -- SLA: delivered-vs-target across this city's labs.
          CASE WHEN c.category = 'DIAGNOSTICS' THEN
@@ -170,7 +174,7 @@ per_cat AS (
             FROM analytics.mv_lab_quality_v2 q
             CROSS JOIN atlas.sla_targets t
             WHERE t.kind = 'LAB' AND t.metric = 'delivered_pct'
-              AND regexp_replace(lower(TRIM(q.city)), '[^a-z0-9]', '', 'g') = c.city_key
+              AND atlas.city_key(q.city) = c.city_key
               AND q.orders_total > 0)
          END                                                        AS sla_ratio
   FROM categorised c

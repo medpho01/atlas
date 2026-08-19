@@ -55,7 +55,7 @@ BEGIN
     false
   FROM analytics.mv_provider_unified p
   LEFT JOIN atlas.city_tier ct
-    ON ct.city_key = regexp_replace(lower(TRIM(p.city)), '[^a-z0-9]', '', 'g')
+    ON ct.city_key = atlas.city_key(p.city)
   GROUP BY 1, 2, 3, 4
   ON CONFLICT (week_start, city, kind) DO UPDATE SET
     city_tier       = EXCLUDED.city_tier,
@@ -106,7 +106,7 @@ BEGIN
   JOIN analytics.mv_provider_unified pu
     ON pu.source_table = 'Lab' AND pu.source_id = l.id
   LEFT JOIN atlas.city_tier ct
-    ON ct.city_key = regexp_replace(lower(TRIM(l.city)), '[^a-z0-9]', '', 'g')
+    ON ct.city_key = atlas.city_key(l.city)
   GROUP BY 1, 2, 3, 4
   -- An observed row always wins: never overwrite live data with a guess.
   ON CONFLICT (week_start, city, kind) DO UPDATE SET
