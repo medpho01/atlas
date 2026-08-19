@@ -10,6 +10,8 @@ export const SERVICE_LINES = [
   'NURSING_HOME_VISIT',
   'PHARMACY_DELIVERY',
   'CAMP_ORDER',
+  'WELLNESS_OFFLINE',
+  'WELLNESS_ONLINE',
   'OTHER_APPOINTMENT',
 ] as const;
 export type ServiceLine = (typeof SERVICE_LINES)[number];
@@ -23,6 +25,8 @@ export const SERVICE_LINE_LABEL: Record<ServiceLine, string> = {
   NURSING_HOME_VISIT: 'Nursing / Injection',
   PHARMACY_DELIVERY: 'Pharmacy — Delivery',
   CAMP_ORDER: 'Camp Order',
+  WELLNESS_OFFLINE: 'Wellness — In-centre',
+  WELLNESS_ONLINE: 'Wellness — Online',
   OTHER_APPOINTMENT: 'Other Appointments',
 };
 
@@ -35,6 +39,8 @@ export const SERVICE_LINE_SHORT: Record<ServiceLine, string> = {
   NURSING_HOME_VISIT: 'Nursing/Inj',
   PHARMACY_DELIVERY: 'Pharma',
   CAMP_ORDER: 'Camp',
+  WELLNESS_OFFLINE: 'Wellness',
+  WELLNESS_ONLINE: 'Wellness Online',
   OTHER_APPOINTMENT: 'Other',
 };
 
@@ -49,10 +55,15 @@ export const SERVICE_LINE_TO_KINDS: Record<ServiceLine, string[]> = {
   NURSING_HOME_VISIT: ['NURSE', 'DOCTOR'],
   PHARMACY_DELIVERY: ['PHARMACY'],
   CAMP_ORDER: ['LAB', 'PHLEBO'],
+  WELLNESS_OFFLINE: ['GYM', 'STUDIO', 'PHYSIO'],
+  // Location-agnostic supply. Imbalance is computed per city, so an online
+  // instructor cannot be "missing" in Indore the way a gym can — treat this
+  // line as nationally supplied and read demand for it, not gaps.
+  WELLNESS_ONLINE: ['INSTRUCTOR'],
   OTHER_APPOINTMENT: [],
 };
 
-export const SERVICE_LINE_TONE: Record<ServiceLine, 'lab' | 'doctor' | 'nurse' | 'pharmacy' | 'camp' | 'other'> = {
+export const SERVICE_LINE_TONE: Record<ServiceLine, 'lab' | 'doctor' | 'nurse' | 'pharmacy' | 'camp' | 'wellness' | 'other'> = {
   LAB_HOME_SAMPLE: 'lab',
   LAB_CENTER_VISIT: 'lab',
   DOCTOR_CONSULT_CENTER: 'doctor',
@@ -61,6 +72,8 @@ export const SERVICE_LINE_TONE: Record<ServiceLine, 'lab' | 'doctor' | 'nurse' |
   NURSING_HOME_VISIT: 'nurse',
   PHARMACY_DELIVERY: 'pharmacy',
   CAMP_ORDER: 'camp',
+  WELLNESS_OFFLINE: 'wellness',
+  WELLNESS_ONLINE: 'wellness',
   OTHER_APPOINTMENT: 'other',
 };
 
@@ -70,5 +83,6 @@ export const TONE_COLORS = {
   nurse: { dot: 'bg-warn-500', text: 'text-warn-600', bg: 'bg-warn-50', border: 'border-warn-100' },
   pharmacy: { dot: 'bg-danger-500', text: 'text-danger-500', bg: 'bg-danger-50', border: 'border-danger-100' },
   camp: { dot: 'bg-brand-400', text: 'text-brand-400', bg: 'bg-brand-50/40', border: 'border-brand-100' },
+  wellness: { dot: 'bg-success-400', text: 'text-success-600', bg: 'bg-success-50/50', border: 'border-success-100' },
   other: { dot: 'bg-ink-400', text: 'text-ink-500', bg: 'bg-ink-100', border: 'border-ink-200' },
 } as const;

@@ -9,20 +9,38 @@ export const PROVIDER_KINDS = [
   'PHLEBO',
   'NURSE',
   'PHARMACY',
+  // Wellness. These have no representation in LabStack — the source has no
+  // ProviderType for them and Atlas cannot write to it — so their supply lives
+  // in atlas.* and is uploaded, never derived. Anything counting them has to
+  // be explicit about identified-vs-live.
+  'GYM',
+  'STUDIO',
+  'PHYSIO',
+  'INSTRUCTOR',
 ] as const;
 export type ProviderKind = (typeof PROVIDER_KINDS)[number];
 
-export const MODALITIES = ['CENTER_VISIT', 'HOME_SAMPLE', 'HOME_VISIT', 'DELIVERY'] as const;
+export const MODALITIES = [
+  'CENTER_VISIT', 'HOME_SAMPLE', 'HOME_VISIT', 'DELIVERY',
+  // Location-agnostic. Deliberately last: every pincode-keyed coverage query
+  // has to exclude it, since a teleconsult serves everywhere or nowhere and
+  // counting it as local supply would inflate coverage in every pincode.
+  'VIRTUAL',
+] as const;
 export type Modality = (typeof MODALITIES)[number];
 
 // Which (kind, modality) combinations are valid (i.e., shown in matrix UI)
 export const CAPABILITY_MATRIX: Record<ProviderKind, Modality[]> = {
   LAB: ['CENTER_VISIT', 'HOME_SAMPLE'],
   HOSPITAL: ['CENTER_VISIT', 'HOME_SAMPLE'],
-  DOCTOR: ['CENTER_VISIT', 'HOME_VISIT'],
+  DOCTOR: ['CENTER_VISIT', 'HOME_VISIT', 'VIRTUAL'],
   PHLEBO: ['HOME_SAMPLE'],
   NURSE: ['HOME_VISIT'],
   PHARMACY: ['CENTER_VISIT', 'DELIVERY'],
+  GYM: ['CENTER_VISIT'],
+  STUDIO: ['CENTER_VISIT'],
+  PHYSIO: ['CENTER_VISIT', 'HOME_VISIT', 'VIRTUAL'],
+  INSTRUCTOR: ['VIRTUAL'],
 };
 
 export const KIND_LABEL: Record<ProviderKind, string> = {
@@ -32,6 +50,10 @@ export const KIND_LABEL: Record<ProviderKind, string> = {
   PHLEBO: 'Phlebo',
   NURSE: 'Nurse',
   PHARMACY: 'Pharmacy',
+  GYM: 'Gym',
+  STUDIO: 'Studio',
+  PHYSIO: 'Physiotherapy',
+  INSTRUCTOR: 'Instructor',
 };
 
 export const KIND_SHORT: Record<ProviderKind, string> = {
@@ -41,9 +63,14 @@ export const KIND_SHORT: Record<ProviderKind, string> = {
   PHLEBO: 'Phlebo',
   NURSE: 'Nurse',
   PHARMACY: 'Pharmacy',
+  GYM: 'Gym',
+  STUDIO: 'Studio',
+  PHYSIO: 'Physio',
+  INSTRUCTOR: 'Instructor',
 };
 
 export const MODALITY_LABEL: Record<Modality, string> = {
+  VIRTUAL: 'Virtual',
   CENTER_VISIT: 'Center Visit',
   HOME_SAMPLE: 'Home Sample',
   HOME_VISIT: 'Home Visit',
@@ -51,6 +78,7 @@ export const MODALITY_LABEL: Record<Modality, string> = {
 };
 
 export const MODALITY_SHORT: Record<Modality, string> = {
+  VIRTUAL: 'Virtual',
   CENTER_VISIT: 'Center',
   HOME_SAMPLE: 'Home Sample',
   HOME_VISIT: 'Home Visit',
