@@ -489,3 +489,67 @@ export async function getPlatformStats() {
       (SELECT COUNT(*) FROM "Provider")::int AS providers
   `);
 }
+
+/**
+ * The same heatmap, aggregated to cities.
+ *
+ * A pincode view answers "where exactly", a city view answers "where at all" —
+ * and for a network conversation the second is the one people hold in their
+ * heads. 7,693 pincode markers is a shape; 300 city markers is a list you can
+ * read out.
+ *
+ * Coordinates are the mean of the city's plotted pincodes. Good enough for a
+ * marker and wrong for anything else, which is why this returns no geometry
+ * beyond a point — a city is not really a location.
+ *
+ * Keyed through atlas.city_key so 'Bangalore' and 'Bengaluru' are one city
+ * here too, rather than two markers a few hundred metres apart.
+ */
+export type CityMapPoint = {
+  city: string;
+  city_key: string;
+  latitude: number;
+  longitude: number;
+  pincodes: number;
+  orders_all_time: number;
+  orders_l30d: number;
+  providers_total: number;
+  labs_local: number;
+  network_strength: number;
+  /**
+   * Pincodes in this city with demand and no local provider.
+   *
+   * Not the average of mv_pincode_summary.gap_score: that is 0 on 8,814 of
+   * 8,849 pincodes, so averaging it across a city returns 0 everywhere and the
+   * column says nothing. A count of demand-without-supply pincodes is both
+   * non-degenerate and directly actionable.
+   */
+  gap_pincodes: number;
+  gap_score: number;
+};
+
+export async function getCityMapPoints(minOrders = 1): Promise<CityMapPoint[]> {
+  return query<CityMapPoint>(`
+    SELECT atlas.city_display(pc.city)                    AS city,
+           atlas.city_key(pc.city)                        AS city_key,
+           AVG(g.latitude)::double precision              AS latitude,
+           AVG(g.longitude)::double precision             AS longitude,
+           COUNT(DISTINCT s.pincode)::int                 AS pincodes,
+           SUM(s.orders_all_time)::int                    AS orders_all_time,
+           SUM(s.orders_l30d)::int                        AS orders_l30d,
+           SUM(s.providers_total)::int                    AS providers_total,
+           SUM(s.labs_local)::int                         AS labs_local,
+           ROUND(AVG(s.network_strength))::int            AS network_strength,
+           COUNT(*) FILTER (WHERE s.orders_all_time > 0
+                              AND s.providers_total = 0)::int AS gap_pincodes,
+           MAX(s.gap_score)::int                          AS gap_score
+    FROM mv_pincode_summary s
+    JOIN mv_pincode_geo g  ON g.pincode = s.pincode
+    JOIN mv_pincode_city pc ON pc.pincode = s.pincode
+    WHERE g.latitude IS NOT NULL AND g.longitude IS NOT NULL
+      AND NULLIF(TRIM(pc.city), '') IS NOT NULL
+    GROUP BY 1, 2
+    HAVING SUM(s.orders_all_time) >= $1
+    ORDER BY SUM(s.orders_all_time) DESC
+  `, [minOrders]);
+}

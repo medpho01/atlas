@@ -9,32 +9,61 @@ import { SegmentedControl } from '@/components/ui/Toggle';
 import { FilterBar, FilterSelect } from '@/components/ui/FilterBar';
 import { InfoTip } from '@/components/ui/InfoTip';
 import { TopPincodesTable } from './TopPincodesTable';
-import { getMapPoints } from '@/lib/queries';
+import { TopCitiesTable } from './TopCitiesTable';
+import { getMapPoints, getCityMapPoints } from '@/lib/queries';
 import { getMapPointsByKindModality } from '@/lib/coverageQueries';
 import { LENS_OPTIONS, parseLens } from '@/lib/coverage';
 import { query } from '@/lib/db';
 
 export const dynamic = 'force-dynamic';
 
-export default async function HeatmapPage({ searchParams }: { searchParams: { mode?: string; lens?: string } }) {
+export default async function HeatmapPage({
+  searchParams,
+}: {
+  searchParams: { mode?: string; lens?: string; view?: string };
+}) {
   const gate = await requireView('coverage', '/heatmap');
   if (gate.blocked) return <RoleBlocked area="Coverage" detail="every signed-in role" />;
 
   const mode = (searchParams.mode as 'supply' | 'demand' | 'gap') ?? 'demand';
+  const view = searchParams.view === 'city' ? 'city' : 'pincode';
   const lensKey = searchParams.lens ?? 'ANY';
   const { kinds, modality } = parseLens(lensKey);
   const isFilteredSupply = lensKey !== 'ANY';
 
-  const [points, topPincodes] = await Promise.all([
+  // The lens filters supply by kind/modality, which only exists per pincode —
+  // so city view falls back to the unfiltered city aggregate rather than
+  // silently ignoring the lens.
+  const [points, topPincodes, cities] = await Promise.all([
     isFilteredSupply ? getMapPointsByKindModality({ kinds, modality }) : getMapPoints({ minOrders: 1 }),
-    query(`
-      SELECT s.pincode, s.orders_all_time, s.orders_l30d, s.home_sample, s.camp, s.center_visit,
-             s.providers_total, s.labs_local, s.gap_score
-      FROM mv_pincode_summary s
-      WHERE s.orders_all_time > 0
-      ORDER BY s.orders_all_time DESC LIMIT 25
-    `),
+    view === 'pincode'
+      ? query(`
+          SELECT s.pincode, s.orders_all_time, s.orders_l30d, s.home_sample, s.camp, s.center_visit,
+                 s.providers_total, s.labs_local, s.gap_score
+          FROM mv_pincode_summary s
+          WHERE s.orders_all_time > 0
+          ORDER BY s.orders_all_time DESC LIMIT 25
+        `)
+      : Promise.resolve([]),
+    view === 'city' ? getCityMapPoints(1) : Promise.resolve([]),
   ]);
+
+  // City markers carry the same fields the map colours by, so the existing
+  // renderer works unchanged.
+  const mapPoints = view === 'city'
+    ? cities.map((c) => ({
+        pincode: c.city,
+        latitude: c.latitude,
+        longitude: c.longitude,
+        network_strength: c.network_strength,
+        orders_l30d: c.orders_l30d,
+        orders_l90d: c.orders_l30d,
+        orders_all_time: c.orders_all_time,
+        coverage_bucket: null,
+        gap_score: c.gap_score,
+        geo_source: 'exact',
+      }))
+    : points;
 
   return (
     <div className="px-6 lg:px-8 py-6 max-w-[1600px] mx-auto">
@@ -58,9 +87,15 @@ export default async function HeatmapPage({ searchParams }: { searchParams: { mo
             />
             <SegmentedControl
               options={[
-                { label: 'Demand', href: buildHref({ mode: 'demand', lens: lensKey }), active: mode === 'demand' },
-                { label: 'Supply', href: buildHref({ mode: 'supply', lens: lensKey }), active: mode === 'supply' },
-                { label: 'Gap', href: buildHref({ mode: 'gap', lens: lensKey }), active: mode === 'gap' },
+                { label: 'Pincodes', href: buildHref({ mode, lens: lensKey, view: 'pincode' }), active: view === 'pincode' },
+                { label: 'Cities', href: buildHref({ mode, lens: lensKey, view: 'city' }), active: view === 'city' },
+              ]}
+            />
+            <SegmentedControl
+              options={[
+                { label: 'Demand', href: buildHref({ mode: 'demand', lens: lensKey, view }), active: mode === 'demand' },
+                { label: 'Supply', href: buildHref({ mode: 'supply', lens: lensKey, view }), active: mode === 'supply' },
+                { label: 'Gap', href: buildHref({ mode: 'gap', lens: lensKey, view }), active: mode === 'gap' },
               ]}
             />
           </div>
@@ -71,9 +106,11 @@ export default async function HeatmapPage({ searchParams }: { searchParams: { mo
         <FilterBar
           searchName="pin_lookup"
           searchPlaceholder="Jump to pincode…"
-          hidden={{ mode }}
-          clearHref={lensKey !== 'ANY' ? buildHref({ mode, lens: 'ANY' }) : undefined}
-          meta={`${points.length.toLocaleString()} pincodes`}
+          hidden={{ mode, view }}
+          clearHref={lensKey !== 'ANY' ? buildHref({ mode, lens: 'ANY', view }) : undefined}
+          meta={view === 'city'
+            ? `${cities.length.toLocaleString()} cities`
+            : `${points.length.toLocaleString()} pincodes`}
         >
           <FilterSelect name="lens" defaultValue={lensKey}>
             {LENS_OPTIONS.map((o) => (
@@ -94,15 +131,22 @@ export default async function HeatmapPage({ searchParams }: { searchParams: { mo
           icon={<Map className="w-4 h-4" strokeWidth={2.25} />}
         />
         <CardBody className="pt-0">
-          <MapClient points={points} colorMode={mode} height="520px" />
+          <MapClient points={mapPoints as never} colorMode={mode} height="520px" />
         </CardBody>
       </Card>
 
       <Card>
-        <CardHeader title="Top 25 origin pincodes" subtitle="Highest-volume pincodes by all-time orders · click any column to sort" />
+        <CardHeader
+          title={view === 'city' ? `${cities.length} cities with demand` : 'Top 25 origin pincodes'}
+          subtitle={view === 'city'
+            ? 'Strength and gap are averaged across each city\u2019s pincodes, not summed \u2014 one strong pincode among forty empty ones is not a strong city.'
+            : 'Highest-volume pincodes by all-time orders · click any column to sort'}
+        />
         <CardBody className="pt-0">
           <div className="-mx-5 overflow-x-auto">
-            <TopPincodesTable rows={topPincodes} />
+            {view === 'city'
+              ? <TopCitiesTable rows={cities} />
+              : <TopPincodesTable rows={topPincodes} />}
           </div>
         </CardBody>
       </Card>
@@ -110,10 +154,11 @@ export default async function HeatmapPage({ searchParams }: { searchParams: { mo
   );
 }
 
-function buildHref({ mode, lens }: { mode: string; lens: string }) {
+function buildHref({ mode, lens, view }: { mode: string; lens: string; view?: string }) {
   const params = new URLSearchParams();
   if (mode !== 'demand') params.set('mode', mode);
   if (lens && lens !== 'ANY') params.set('lens', lens);
+  if (view === 'city') params.set('view', 'city');
   const qs = params.toString();
   return `/heatmap${qs ? `?${qs}` : ''}`;
 }
