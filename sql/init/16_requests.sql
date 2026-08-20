@@ -236,8 +236,18 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_master_lookup_norm ON analytics.mv_master_
 CREATE OR REPLACE FUNCTION atlas.sync_request_items()
 RETURNS TABLE (from_packages int, from_masters int, from_notes int)
 LANGUAGE plpgsql AS $$
-DECLARE p int; m int; n int;
+DECLARE p int := 0; m int := 0; n int := 0;
 BEGIN
+  -- The join tables arrive via the refresh's self-bootstrap, which may not
+  -- have run yet on a freshly deployed host. Missing snapshots are a "not
+  -- yet", not a failure: parse what is available and report zero for the rest.
+  IF to_regclass('src_local._PackageToRequest') IS NULL
+     OR to_regclass('src_local._MasterToRequest') IS NULL THEN
+    RAISE NOTICE 'Request join tables not snapshotted yet — run the refresh first.';
+    RETURN QUERY SELECT 0, 0, 0;
+    RETURN;
+  END IF;
+
   INSERT INTO atlas.request_item (request_id, kind, package_id, source)
   SELECT pr."B", 'PACKAGE', pr."A", 'package'
   FROM src_local."_PackageToRequest" pr
@@ -276,7 +286,12 @@ BEGIN
   RETURN QUERY SELECT p, m, n;
 END $$;
 
-SELECT * FROM atlas.sync_request_items();
+-- Deliberately NOT run here. This file defines the pipeline; it does not
+-- execute it. On a fresh install the src_local snapshots do not exist yet, so
+-- calling the sync from a DDL file aborts the rest of the script — which is
+-- exactly how it failed the first time it met production. The nightly refresh
+-- (Phase 4.6) and the deploy runbook call it, in the right order, once the
+-- snapshots are there.
 
 -- ---------------------------------------------------------------------------
 -- Which labs can collect in which pincode.
