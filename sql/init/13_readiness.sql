@@ -135,15 +135,21 @@ categorised AS (
   FROM supply s
   WHERE NULLIF(TRIM(s.city), '') IS NOT NULL
 ),
--- Lab is a foreign table on a hot standby. The tier and integration subscores
--- used to be correlated subqueries joining src."Lab" once per city, which is
--- ~1,200 remote scans in a single statement — long enough that the standby
--- kills the query with "conflict with recovery" partway through the refresh.
+-- Read from src_local, not src.
 --
--- Scanned once here, aggregated locally, joined below. Same numbers, one trip.
+-- src."Lab" is a foreign table on a hot standby. The tier and integration
+-- subscores began as correlated subqueries joining it once per city — ~1,200
+-- remote scans in one statement, which the standby killed with "conflict with
+-- recovery" partway through every refresh. Collapsing that to a single scan
+-- helped but still touched the standby, and still failed on production.
+--
+-- src_local."Lab" is the nightly snapshot the refresh already maintains for
+-- exactly this reason, and it is what mv_catalogue_demand reads too. A day-old
+-- lab list is fine for a readiness score, and it cannot be cancelled mid-flight
+-- by replication.
 lab_city AS (
   SELECT l.id AS lab_id, atlas.city_key(l.city) AS city_key
-  FROM src."Lab" l
+  FROM src_local."Lab" l
   WHERE NULLIF(TRIM(l.city), '') IS NOT NULL
 ),
 tier_by_city AS (

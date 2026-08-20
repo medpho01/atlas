@@ -64,7 +64,9 @@ SELECT
   q.health_score_v2          AS health_score,
   q.orders_total,
   q.repeat_rate_pct
-FROM src."Lab" l
+-- src_local for Lab: same standby-conflict reasoning as mv_city_readiness.
+-- Chain has no snapshot and is small, so it stays on the live foreign table.
+FROM src_local."Lab" l
 LEFT JOIN src."Chain" c ON c.id = l.chain_id
 LEFT JOIN atlas.city_tier ct
   ON ct.city_key = atlas.city_key(l.city)
