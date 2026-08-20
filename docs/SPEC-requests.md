@@ -15,7 +15,7 @@ and where the day is organised.
 
 | # | Where | Who | What happens |
 |---|---|---|---|
-| 1 | **Atlas** | Ops | Logs in, sees the requests assigned to them |
+| 1 | **Atlas** | Ops | Logs in, sees every open request — one shared queue, no assignment |
 | 2 | **Atlas** | Ops | Reads the price and ETA — no judgement required |
 | 3 | Atlas → console | Ops | Copies price + date into LS console, moves to *price quoted* |
 | 4 | Console | Store | Price accepted, order booked against an existing lab or the **LS placeholder** |
@@ -41,13 +41,17 @@ Three consequences that shape the design:
 ### How step 7 works
 
 The order's `labId` moving off the placeholder is the completion signal. When
-Atlas sees that transition it closes the open commitment and records
-promised-vs-actual, writes the onboarded lab into `atlas.crm_providers` if it is
-new, attributes it to the network member who held the commitment, and assigns
-the resulting CRM record to them.
+Atlas sees that transition it closes the open commitment, records
+promised-vs-actual, and writes the onboarded lab into `atlas.crm_providers` if
+it is new.
 
-Credit is therefore automatic rather than self-reported: Atlas already knows who
-held the commitment, and the console tells us when they finished.
+**Attribution without assignment.** There is no assignment model — the queue is
+open to everyone — so Atlas cannot infer who did the work from who it was given
+to. With a single network member today, the CRM record is attributed to them and
+that is correct by construction. The `attributed_to` column exists from day one
+so this is a behaviour change later, not a migration: when there is a second
+person, the cheapest addition is a **self-service claim** ("I'm working this")
+rather than a manager-driven assignment. Deliberately not built now.
 
 One engineering consequence: **open commitments must be polled far more often
 than the nightly refresh.** They are a small set — tens, not tens of thousands —
@@ -81,9 +85,9 @@ leaves a record without anyone having to write one.
 
 | # | Handover | Trigger | Recorded | If it stalls |
 |---|---|---|---|---|
-| A | Atlas → ops | Request classified, price + ETA computed | Quote: price, date, basis, target lab | Ages in the assignee's queue, visibly |
+| A | Atlas → ops | Request classified, price + ETA computed | Quote: price, date, basis, target lab | Ages at the top of the shared queue, visibly |
 | B | Ops → store | Ops quotes in console | Console values, reconciled against Atlas's | No store response by *n* days → back to ops |
-| C | Store → network | Order booked on the LS placeholder | **`atlas.commitment`** opens, clock starts, owner assigned | — |
+| C | Store → network | Order booked on the LS placeholder | **`atlas.commitment`** opens, clock starts | — |
 | D | Network → closed | Order moved off the placeholder | Allocated lab, CRM record, attribution | Days-left hits zero → escalation, store told **before** the date |
 
 Handover C carries the risk: an obligation exists and the supply does not. That
@@ -143,25 +147,31 @@ rather than starting from a blank.
 
 ## The three surfaces
 
-**1 · My requests** (ops) — the screen ops lands on at login. Only what is
-assigned to them, oldest first, each row carrying its own answer. One price, one
-date, one reason, one copy button. Unassigned work is visible to a supervisor,
-never silently orphaned.
+**1 · Requests** (ops) — the screen ops lands on at login. **One shared open
+queue**, everything visible to everyone, no assignment. Ordered so that the top
+of the list is the right thing to work on next — oldest first, with anything
+already quoted or expired filtered out by default. Each row carries its own
+answer: one price, one date, one reason, one copy button.
+
+Ordering does the job assignment would have done. With one person working the
+queue, a good sort order is the entire prioritisation system, and it costs
+nothing to build.
 
 **2 · Network bucket** (network) — one row per open commitment, sorted by
 days-left ascending, breaching rows at the top:
 
-| Request | Pincode | Promised | Days left | Suggested labs | Ask | Owner |
-|---|---|---|---|---|---|---|
-| #28594 | 414001 | Mon 24 Aug | **2** | Suburban Diagnostics *(network)* · 2 web leads | Activate LSP10262 @ ≤₹1,870 | Suraj |
-| #28611 | 412105 | Wed 26 Aug | 4 | *discovery running* | — | unassigned |
+| Request | Pincode | Promised | Days left | Suggested labs | Ask |
+|---|---|---|---|---|---|
+| #28594 | 414001 | Mon 24 Aug | **2** | Suburban Diagnostics *(network)* · 2 web leads | Activate LSP10262 @ ≤₹1,870 |
+| #28611 | 412105 | Wed 26 Aug | 4 | *discovery running* | — |
 
 Suggestions come from the existing network and from web search, **shown
 together but labelled apart** — an onboarded partner and an unverified search
 result are not the same kind of thing, and the row must never blur them.
 
-Assignment is explicit. A commitment with no owner is the failure mode this
-whole design exists to prevent, so it is surfaced as an alert, not a blank cell.
+No owner column, for the same reason: one shared list, sorted by urgency. What
+prevents a commitment being dropped is the days-left sort and the breach
+escalation, not an assignee.
 
 **3 · Pincode planning** (network, strategic) — beneath both. When four open
 commitments share pincode 414001, that is **one** negotiation, not four, and the
@@ -279,13 +289,13 @@ either computes or detects. Keeping that ratio is what "smooth" means here.
 |---|---|---|
 | 1 | FDW + snapshot: `_PackageToRequest`, `_MasterToRequest`, `Request` | Requested items queryable in Atlas; nightly refresh covers them |
 | 2 | Four-state classification | Every request with a pincode gets exactly one; unknown is visible, never defaulted |
-| 3 | **My-requests queue** — per-assignee, with verdict + price + date + reason + copy block | Ops logs in and sees only their work; one answer per request, or an explicit "no basis — escalate" |
+| 3 | **Requests queue** — one shared open list, verdict + price + date + reason + copy block | Ops logs in and the top of the list is the right next thing; one answer per request, or an explicit "no basis — escalate" |
 | 4 | Quote engine with recorded basis | ≥70% of package-gap requests quote on a strong basis |
 | 5 | Date engine with `atlas.slot_policy` | No date is ever emitted for supply-gap-unknown |
 | 6 | **`atlas.commitment`** — promised date, target lab, ask, outcome, allocated lab | The allocation LabStack never records is captured in Atlas |
-| 6b | **Network bucket** — days-left, suggested labs from network + web, explicit owner | Every booked commitment appears same-day; no row is ownerless |
+| 6b | **Network bucket** — days-left sort, suggested labs from network + web | Every booked commitment appears same-day; breaching rows surface without anyone looking for them |
 | 6c | **Placeholder-transition detection** — targeted poll of open commitments | Order leaving lab 1 closes the commitment without anyone reporting it |
-| 6d | **CRM auto-population and attribution** | Onboarded lab lands in `atlas.crm_providers`, assigned to the member who held the commitment |
+| 6d | **CRM auto-population** | Onboarded lab lands in `atlas.crm_providers` with `attributed_to` set |
 | 7 | Promise-kept + handover-latency instrumentation | Promised vs actual per state, and dwell time at each of the four handovers |
 | 8 | Console divergence check | Quoted price/date in console ≠ Atlas's → flagged |
 | 9 | Notes parser (Star Health template) | ≥80% of the 17,924 yield ≥1 test |
@@ -298,7 +308,8 @@ LLM fallback for unparsed notes · per-store commitment reporting · saved views
 
 ### P2
 
-Write-back to `Request.quotedPrice` · learned lead times replacing config ·
+Write-back to `Request.quotedPrice` · self-service claim on a commitment, once
+more than one person works the queue · learned lead times replacing config ·
 alerting when a pincode crosses a demand threshold · resolved supply gaps
 feeding `/readiness` as demand-weighted signal.
 
@@ -350,9 +361,9 @@ Set the first promise-kept target only after a month of real data.
 2. **When a commitment is at risk, who tells the store, and how early?** (you)
    The difference between a managed handover and a broken promise. Needs an
    owner before launch, not after the first miss.
-2b. **Who assigns requests to ops, and on what basis?** (you) Round-robin, by
-   city, by store? The my-requests queue is the first screen of the day, so
-   this decides whether the day starts organised.
+2b. **What is the right default sort for the shared queue?** (ops) With no
+   assignment, sort order *is* the prioritisation. Oldest-first is the obvious
+   start, but store urgency or preferred-appointment date may beat it.
 3. **What does `UNREACHABLE` mean?** (ops) 10,936 rows, 10,612 also flagged
    unserviceable. If ops marks a request unreachable when they already know we
    can't serve it, this feature's scope roughly doubles.
