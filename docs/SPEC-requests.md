@@ -49,40 +49,69 @@ usable; an invented number that fails at step 5 is not.
 
 ---
 
-## The finding that should worry you most
+## The LS lab: this flow already runs, and it fails twice as often
 
-**The quote path in your flow has essentially never run.**
+"LS lab" is **lab id 1, "LabStack Networks - Lab"**, and it is not theoretical —
+**1,788 orders and 1,346 requests are already parked on it.** Steps 3–5 are
+happening today, just unmanaged. So we are not designing a new flow; we are
+instrumenting one that already exists and currently runs badly:
 
-| | count |
-|---|---|
-| Requests ever given a `Quoted Price` | 384 (1.4%) |
-| Status `QUOTED` | 56 |
-| Status `QUOTATION_ACCEPTED` | **3** |
+| | on the placeholder | every other lab |
+|---|---|---|
+| Orders | 1,788 | 44,400 |
+| Delivered | 68.8% | 84.1% |
+| **Cancelled** | **31.2%** | **15.3%** |
 
-Meanwhile, requests that *do* convert convert almost immediately — median 0.13
-days, 88% same-day, 98% within three days. But that is survivorship: those are
-the requests where supply **already existed**. They tell us nothing about how
-long it takes to *acquire* supply.
+**A commitment made before supply exists is cancelled at roughly twice the rate
+of a normal order.** 558 cancelled placeholder orders are 558 promises broken to
+a store. That number — not quote coverage, not adoption — is the baseline this
+feature has to move.
 
-So: **there is no historical evidence that a lab can be negotiated or onboarded
-in 2–3 days, because it has never been done at volume.** Neither the request
-data nor the CRM (`atlas.crm_thread_providers` keeps a current `stage_key` but
-no stage history) can tell us the cycle time.
+### The real answer on "2 to 3 days"
 
-That is not a reason to abandon the flow. It is a reason to build v1 so that:
+Measured across every commitment ever parked on the placeholder, from order
+creation to final status:
 
-1. The promised date is **rule-based and deliberately conservative**, not
-   learned — we have nothing to learn from yet.
-2. **Promise-kept rate is instrumented from day one**, per gap class, so by
-   month two the date *is* evidence-based.
-3. Atlas **declines to promise** where it has no route, rather than defaulting
-   to three days because three days sounds reasonable.
+| Promised | Kept | | Promised | Kept |
+|---|---|---|---|---|
+| 1 day | 25% | | 6 days | 56% |
+| 2 days | 32% | | 7 days | **59%** |
+| **3 days** | **39%** | | 8 days | 61% |
+| 4 days | 45% | | 9 days | 62% |
+| 5 days | 51% | | 10 days | 63% |
 
-If we skip point 3, the failure mode is the expensive one: we quote, the store
-accepts, the network team can't deliver, and we've converted a serviceability
-problem into a broken commitment.
+Delivered orders land at a median of 2.2 days — which is why 2–3 days *feels*
+right — but the tail is long (p90 = 8.8 days) and 31% never arrive at all.
 
----
+So **a 3-day promise is kept 39% of the time.** Stretching to 7 days buys 20
+points and then the curve flattens, because the ceiling is the 69% that ever
+deliver. Past about a week, a longer promise buys nothing.
+
+That makes the date a stated policy choice rather than an instinct:
+
+- **Promise 3 days** — matches the store's expectation, breaks 6 times in 10.
+- **Promise 5–7 days** — keeps 51–59%, and sets an expectation we can meet.
+- **Either way, the lever that matters is the 31% cancellation, not the number
+  of days.** No promise length fixes supply that never arrives.
+
+My recommendation: **start at 5 days for package gap, 7 for supply-gap-known,
+and no promise at all for supply-gap-unknown** — then let measured keep rate
+pull it down. It is far easier to shorten a promise you are beating than to
+rebuild trust with a store you have missed six times.
+
+### The gap that makes this unmeasurable today
+
+`Order.assignedAt` is **NULL on all 46,202 orders** — the field is never
+written. Orders parked on lab 1 stay on lab 1 even after `REPORT_DELIVERED`, so
+**the real lab that fulfilled the order is never recorded anywhere.**
+
+The consequence is sharp: the network team's entire step-5 contribution is
+invisible in the data. We can see that 1,230 commitments were met; we cannot see
+who met them, how, or which negotiation worked.
+
+**So Atlas must own the allocation record.** `atlas.commitment` holds the
+promised date, the target lab, the ask, and the actual outcome — because
+LabStack does not capture it and we cannot wait for it to.
 
 ## The three states, and what each promises
 
@@ -170,27 +199,31 @@ see which input was wrong.
 
 ## The date engine
 
-Promised date = **today + lead time for the state**, adjusted for the store's
-preferred appointment where one exists (median lead time asked for today is 1.0
-days; 90% ask for ≤3).
+Promised date = **today + lead time for the state**, bounded by the store's
+preferred appointment where one exists (median lead time asked for is 1.0 days;
+90% ask for ≤3 — note this is already tighter than we reliably deliver).
 
-v1 lead times are **config, not inference** — starting values below, held in
-`atlas.slot_policy`, revised monthly against measured promise-kept rate:
+Lead times live in `atlas.slot_policy`. Starting values, set from the keep-rate
+curve above rather than from instinct:
 
-| State | Starting lead time |
-|---|---|
-| Package gap, partner reachable | 2 days |
-| Supply gap, known candidate | 3 days |
-| Supply gap, unknown | **no date — escalate** |
+| State | Lead time | Expected keep rate |
+|---|---|---|
+| Package gap, partner reachable | 5 days | ~51% initially |
+| Supply gap, known candidate | 7 days | ~59% initially |
+| Supply gap, unknown | **no date — escalate** | — |
+
+These are deliberately longer than the 2–3 days in the flow as described,
+because 3 days is measurably a 39% promise. Revise monthly against actual keep
+rate per state; the expectation is they come *down* as the commitment queue
+starts working.
 
 Three guards:
 
-- Never promise past the store's stated preferred date without flagging it.
-- Never promise into a pincode where the last two commitments were missed —
-  degrade to escalation until it recovers.
-- Working days, honouring the collection-day patterns already in the order data.
-
----
+- Never promise past the store's stated preferred date without flagging the
+  conflict to ops — this will happen often, since stores ask for ≤3 days.
+- Never promise into a pincode where the last two commitments were missed.
+  Degrade to escalation until it recovers.
+- Working days, honouring the collection-day patterns in the order data.
 
 ## Lab discovery
 
@@ -242,8 +275,9 @@ console's actual quoted price and date back, and flag divergence.
 | 3 | **Ops answer**: verdict + price + date + reason + copy block | One answer per request, or an explicit "no basis — escalate" |
 | 4 | Quote engine with recorded basis | ≥70% of package-gap requests quote on a strong basis |
 | 5 | Date engine with `atlas.slot_policy` | No date is ever emitted for supply-gap-unknown |
-| 6 | **Commitment queue** with days-left and named target | Every accepted quote appears within one refresh |
-| 7 | Promise-kept instrumentation | Promised vs actual serviced date, per state, from day one |
+| 6 | **`atlas.commitment`** — promised date, target lab, ask, outcome, allocated lab | The allocation LabStack never records is captured in Atlas |
+| 6b | **Commitment queue** with days-left and named target | Every accepted quote appears within one refresh |
+| 7 | Promise-kept instrumentation | Promised vs actual, per state, against the 39%/51%/59% baseline |
 | 8 | Console divergence check | Quoted price/date in console ≠ Atlas's → flagged |
 | 9 | Notes parser (Star Health template) | ≥80% of the 17,924 yield ≥1 test |
 | 10 | PII masking + audited export | Non-privileged roles never see patient identity |
@@ -283,10 +317,18 @@ decides whether this flow is viable) · escalation rate · console divergence ra
 from 50% · supply-gap pincodes resolved per quarter · repeat requests in a
 pincode after it is resolved.
 
-**Promise-kept rate is the one to watch.** If it sits below ~80% for
-package-gap, the lead times are wrong and Atlas is manufacturing broken
-commitments faster than the network team can absorb them. That should trigger a
-policy change, not a UI change.
+**The headline metric is the placeholder cancellation rate: 31.2% today,
+against 15.3% for normal orders.** Halving that gap is what success looks like.
+
+**Promise-kept rate is the operational one**, measured per state against the
+baseline curve — 39% at 3 days, 51% at 5, 59% at 7. If a state runs below its
+baseline, the lead time is wrong and Atlas is manufacturing broken commitments
+faster than the network team can absorb them. That triggers a policy change in
+`atlas.slot_policy`, not a UI change.
+
+A caution on targets: **the ceiling is ~69%**, because 31% of placeholder
+commitments never deliver at any horizon. Do not set a promise-kept target
+above that until the cancellation rate itself moves.
 
 ---
 
@@ -294,15 +336,22 @@ policy change, not a UI change.
 
 **Blocking:**
 
-1. **What is an "LS lab" in step 4?** (you) A LabStack-owned entity, or a
-   placeholder the order is parked against until a real lab is allocated? The
-   commitment queue's join back to the order depends on which.
-2. **What does `UNREACHABLE` mean?** (ops) 10,936 rows, 10,612 also flagged
+1. **Will the console record the lab that actually fulfils a placeholder
+   order?** (engineering / you) Today it does not — `assignedAt` is unused and
+   `labId` stays at 1 through delivery. Atlas can hold this itself, but then
+   the allocation is only as accurate as what the network team enters. Fixing
+   it at source is better if it is cheap.
+2. **Is 31.2% cancellation a supply failure or a price failure?** (ops) We
+   cannot tell them apart from the order record, and they need opposite fixes.
+   This decides whether the quote engine or the sourcing engine gets attention
+   first.
+3. **What does `UNREACHABLE` mean?** (ops) 10,936 rows, 10,612 also flagged
    unserviceable. If ops marks a request unreachable when they already know we
    can't serve it, this feature's scope roughly doubles.
-3. **Who owns the promise when it's missed?** (you) Does the commitment queue
-   escalate to a person, and does the store get told before the date, not after?
-4. **Can the console accept a deep link or an API write?** (engineering)
+4. **Who owns the promise when it's missed?** (you) Given a 39% keep rate at
+   3 days, this is not an edge case — it is the majority path. Does the store
+   get told before the date, not after?
+5. **Can the console accept a deep link or an API write?** (engineering)
    Determines whether the copy block is v1-only or permanent.
 
 **Non-blocking:** does `quotedPrice` mean the same across sources (STORE avg
@@ -346,6 +395,16 @@ Source: `requests_export (2).xlsx`, 27,956 rows, 366 days, 76/day.
 | `HOME_SAMPLE` | 27,446 (98%) |
 | Star Health share | 23,435 (84%) |
 | No package and no test | 20,374 (73%), of which 17,924 have parseable notes |
+
+**The LS placeholder (lab id 1, "LabStack Networks - Lab"):**
+
+| Fact | Value |
+|---|---|
+| Orders parked | 1,788 · requests 1,346 |
+| Delivered / cancelled | 68.8% / **31.2%** (vs 84.1% / 15.3% elsewhere) |
+| Delivered cycle time | p50 2.20d · p90 8.79d |
+| Keep rate at 3 / 5 / 7 days | **39% / 51% / 59%** (ceiling ~69%) |
+| `Order.assignedAt` populated | **0 of 46,202** — fulfilling lab never recorded |
 
 Atlas coverage cross-check (April `src_local` snapshot — four months stale,
 **re-run on prod before build**): source says unserviceable but Atlas has
