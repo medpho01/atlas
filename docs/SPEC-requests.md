@@ -9,26 +9,50 @@ and the LabStack schema. Numbers are measured; queries are in "Evidence".
 
 ## The flow this serves
 
-1. Ops opens a request in the **LabStack console**.
-2. **Serviceable** — lab and package both available → ops converts to order. Done.
-3. **Not serviceable** — Atlas supplies a **price and an earliest date**. Ops
-   marks it quoted in the console with those values.
-4. Store accepts → becomes an order, assigned to an existing lab or an LS lab.
-5. **Network team now has until that date** to negotiate the package with an
-   existing partner or onboard a new lab, and allocate it to the order.
+**Ops starts in Atlas.** That is the defining fact — Atlas is not a reference
+tool consulted when the console is confusing, it is where the work is picked up
+and where the day is organised.
 
-The defining property: **we commit before we have the supply.** Steps 3 and 4
-create an obligation; step 5 races to meet it. Everything below follows from
-that.
+| # | Where | Who | What happens |
+|---|---|---|---|
+| 1 | **Atlas** | Ops | Logs in, sees the requests assigned to them |
+| 2 | **Atlas** | Ops | Reads the price and ETA — no judgement required |
+| 3 | Atlas → console | Ops | Copies price + date into LS console, moves to *price quoted* |
+| 4 | Console | Store | Price accepted, order booked against an existing lab or the **LS placeholder** |
+| 5 | **Atlas** | Network | Request drops into the network bucket with Atlas's suggested labs — from the existing network, from web search, or both |
+| 6 | Console | Network | Lab and package onboarded; order moved off the LS lab onto the onboarded lab |
+| 7 | **Atlas** | — | Detects the move, closes the commitment, populates CRM with who onboarded and assigns it to that network member |
 
-Two consequences that shape the whole design:
+**We commit before we have the supply.** Steps 3–4 create an obligation; steps
+5–6 race to meet it. Everything below follows from that.
+
+Three consequences that shape the design:
 
 - **A quote is a promise, not an estimate.** The date matters more than the
   price — a wrong price costs margin, a missed date costs the account.
-- **Atlas is not where ops works.** The console is. Atlas is the second screen
-  that answers the question, and its output has to be copy-ready.
+- **Atlas owns the queue; the console owns the transaction.** Work is picked up,
+  prioritised and handed over in Atlas; state changes happen in the console.
+  Atlas has to be complete enough that ops never needs to hunt in the console to
+  decide *what* to do — only to record it.
+- **The loop closes by itself.** Step 6 happens in the console and Atlas detects
+  it rather than asking anyone to report it. Nobody writes a status update;
+  moving the order off the placeholder *is* the status update.
 
----
+### How step 7 works
+
+The order's `labId` moving off the placeholder is the completion signal. When
+Atlas sees that transition it closes the open commitment and records
+promised-vs-actual, writes the onboarded lab into `atlas.crm_providers` if it is
+new, attributes it to the network member who held the commitment, and assigns
+the resulting CRM record to them.
+
+Credit is therefore automatic rather than self-reported: Atlas already knows who
+held the commitment, and the console tells us when they finished.
+
+One engineering consequence: **open commitments must be polled far more often
+than the nightly refresh.** They are a small set — tens, not tens of thousands —
+so a frequent targeted poll of just those orders is cheap and keeps step 7
+same-day rather than next-day. The full snapshot stays nightly.
 
 ## What "zero mental dependence" means in practice
 
@@ -51,48 +75,47 @@ usable; an invented number that fails at step 5 is not.
 
 ## The handover chain
 
-This is a new process. The design problem is not predicting how it will perform
-— it is making sure nothing can be dropped between the five steps, and that each
-handover leaves a record.
-
-There are four handovers, and each one needs an owner, a trigger, a recorded
-artefact, and a stall rule:
+The design problem is not predicting how the process will perform — it is
+making sure nothing can be dropped between the steps, and that each handover
+leaves a record without anyone having to write one.
 
 | # | Handover | Trigger | Recorded | If it stalls |
 |---|---|---|---|---|
-| 1 | Atlas → ops | Request classified, price + date computed | The quote: price, date, basis, target lab | Unactioned requests age in the ops queue |
-| 2 | Ops → store | Ops marks quoted in console | Console quoted price + date, reconciled against Atlas | No store response by *n* days → back to ops |
-| 3 | Store → network | Store accepts; order created on the LS placeholder | **`atlas.commitment`** opens, clock starts | — |
-| 4 | Network → fulfilment | Real lab secured and allocated | Allocated lab + closure reason | Days-left hits zero → escalation, store told **before** the date |
+| A | Atlas → ops | Request classified, price + ETA computed | Quote: price, date, basis, target lab | Ages in the assignee's queue, visibly |
+| B | Ops → store | Ops quotes in console | Console values, reconciled against Atlas's | No store response by *n* days → back to ops |
+| C | Store → network | Order booked on the LS placeholder | **`atlas.commitment`** opens, clock starts, owner assigned | — |
+| D | Network → closed | Order moved off the placeholder | Allocated lab, CRM record, attribution | Days-left hits zero → escalation, store told **before** the date |
 
-Handover 3 is the one that carries risk, because it is where an obligation
-exists and supply does not. That is what the commitment queue exists to hold.
+Handover C carries the risk: an obligation exists and the supply does not. That
+is what the commitment queue holds.
 
-### The structural gap to fix in the new process
+Handover D is the one that usually rots in processes like this, because it
+depends on someone remembering to report completion. Here it does not —
+**Atlas detects it from the console.** That is the single most important
+property of the design.
 
-The placeholder is **lab id 1, "LabStack Networks - Lab"**. In the current
-system, an order parked on it *stays* on it — `Order.assignedAt` is unpopulated
-across the whole table, and `labId` is never updated to the lab that actually
-did the work.
+### What the placeholder gives us
 
-For the new process that is not an observation about the past, it is a
-requirement: **handover 4 must produce a record, and today there is nowhere for
-it to go.** So Atlas owns it. `atlas.commitment` holds the promised date, the
-target lab, the ask, the allocated lab and the closure reason — because without
-it the network team's work is invisible and nothing can be improved or handed
-over between people.
+The placeholder is **lab id 1, "LabStack Networks - Lab"**. An order sitting on
+it means: promised, not yet sourced. An order leaving it means: sourced, by
+whoever held the commitment.
+
+Two things follow. First, the open-commitment set is trivially queryable —
+orders currently on lab 1 — so the network bucket needs no separate bookkeeping
+to stay honest. Second, `Order.assignedAt` is unpopulated across the table, so
+Atlas cannot read *when* the move happened from a timestamp; it has to detect
+the `labId` transition by comparing against what it last saw. That is what makes
+the frequent targeted poll a requirement rather than an optimisation.
 
 ### Dates in a process with no track record
 
-Lead times start as a **stated policy**, not a prediction — there is no
-comparable history and we should not pretend otherwise. The commitment queue
+Lead times start as a **stated policy**, not a prediction. The commitment queue
 measures actual performance per state from day one, and the policy is revised
-against that at a fixed interval rather than by argument.
+against that on a schedule rather than by argument.
 
-Two design rules make that safe: Atlas **declines to promise** where it has no
-route to supply rather than defaulting to a plausible number, and a state whose
-measured performance falls below policy **stops being promised** until it
-recovers.
+Two rules keep it safe: Atlas **declines to promise** where it has no route to
+supply rather than defaulting to a plausible number, and a state whose measured
+performance falls below policy **stops being promised** until it recovers.
 
 ## The three states, and what each promises
 
@@ -118,29 +141,34 @@ rather than starting from a blank.
 
 ---
 
-## The two queues
+## The three surfaces
 
-**Ops queue** — per request, real time, one answer each. Feeds steps 2–3.
+**1 · My requests** (ops) — the screen ops lands on at login. Only what is
+assigned to them, oldest first, each row carrying its own answer. One price, one
+date, one reason, one copy button. Unassigned work is visible to a supervisor,
+never silently orphaned.
 
-**Commitment queue** — the network team's actual work, and the piece your flow
-needs that doesn't exist today. One row per open promise:
+**2 · Network bucket** (network) — one row per open commitment, sorted by
+days-left ascending, breaching rows at the top:
 
-| Request | Pincode | Promised | Days left | Target | Ask | Owner |
+| Request | Pincode | Promised | Days left | Suggested labs | Ask | Owner |
 |---|---|---|---|---|---|---|
-| #28594 | 414001 | Mon 24 Aug | **2** | Suburban Diagnostics *(existing)* | Activate LSP10262 @ ≤₹1,870 | Suraj |
-| #28611 | 412105 | Wed 26 Aug | 4 | *none — discovery running* | — | unassigned |
+| #28594 | 414001 | Mon 24 Aug | **2** | Suburban Diagnostics *(network)* · 2 web leads | Activate LSP10262 @ ≤₹1,870 | Suraj |
+| #28611 | 412105 | Wed 26 Aug | 4 | *discovery running* | — | unassigned |
 
-Sorted by days-left ascending. Breaching rows at the top, loudly. This is the
-screen that makes step 5 manageable, and it is the one thing here with a clock
-on it.
+Suggestions come from the existing network and from web search, **shown
+together but labelled apart** — an onboarded partner and an unverified search
+result are not the same kind of thing, and the row must never blur them.
 
-**Pincode ranking sits underneath both**, as the planning layer. When four open
-commitments share pincode 414001, that is **one** negotiation, not four — and
-the demand behind it (333 lost requests) is the argument the network team takes
-into the conversation. My v1 analysis stands: 13,918 requests never converted,
-across 2,108 pincodes, and the **top 200 pincodes hold 51% of the loss.**
+Assignment is explicit. A commitment with no owner is the failure mode this
+whole design exists to prevent, so it is surfaced as an alert, not a blank cell.
 
----
+**3 · Pincode planning** (network, strategic) — beneath both. When four open
+commitments share pincode 414001, that is **one** negotiation, not four, and the
+demand behind it is the argument the network team takes into the conversation.
+On current data 13,918 requests never converted across 2,108 pincodes, and the
+**top 200 pincodes hold 51% of the loss** — that concentration is what makes the
+bucket workable rather than endless.
 
 ## The quote engine
 
@@ -224,23 +252,24 @@ do properly.
 
 ## Console handoff
 
-Ops has to get Atlas's answer into the LabStack console. Three options, and I'd
-do them in this order:
+Ops reads the answer in Atlas and records it in the console. Three ways to
+bridge that, in the order I would build them:
 
 1. **v1 — copy block.** One button, exact strings for price and date. Zero
    integration risk, works day one.
-2. **v1.5 — deep link** into the console request with values pre-filled in the
-   URL, if the console supports it.
-3. **v2 — write-back** to `Request.quotedPrice` and status. This needs an
-   explicit decision: Atlas is read-only against LabStack today, and reversing
-   that is a bigger change than it looks.
+2. **v1.5 — deep link** into the console request with values pre-filled, if the
+   console supports it.
+3. **v2 — write-back** to `Request.quotedPrice` and status. Atlas is read-only
+   against LabStack today and reversing that is a bigger change than it looks.
 
-Worth being blunt: **every re-typed value is a chance to break the promise
-chain.** If ops types a different date into the console than Atlas promised,
-the commitment queue is tracking a fiction. v1 must reconcile — read the
-console's actual quoted price and date back, and flag divergence.
+**Every re-typed value is a chance to break the promise chain.** If ops enters a
+different date in the console than Atlas promised, the commitment queue is
+tracking a fiction. v1 reads the console's actual quoted price and date back and
+flags divergence — the same reconciliation habit that makes step 7 work.
 
----
+Note the asymmetry: steps 3 and 6 are the only points where a human retypes
+something, and both are recorded on the console side. Everything else Atlas
+either computes or detects. Keeping that ratio is what "smooth" means here.
 
 ## Requirements
 
@@ -250,11 +279,13 @@ console's actual quoted price and date back, and flag divergence.
 |---|---|---|
 | 1 | FDW + snapshot: `_PackageToRequest`, `_MasterToRequest`, `Request` | Requested items queryable in Atlas; nightly refresh covers them |
 | 2 | Four-state classification | Every request with a pincode gets exactly one; unknown is visible, never defaulted |
-| 3 | **Ops answer**: verdict + price + date + reason + copy block | One answer per request, or an explicit "no basis — escalate" |
+| 3 | **My-requests queue** — per-assignee, with verdict + price + date + reason + copy block | Ops logs in and sees only their work; one answer per request, or an explicit "no basis — escalate" |
 | 4 | Quote engine with recorded basis | ≥70% of package-gap requests quote on a strong basis |
 | 5 | Date engine with `atlas.slot_policy` | No date is ever emitted for supply-gap-unknown |
 | 6 | **`atlas.commitment`** — promised date, target lab, ask, outcome, allocated lab | The allocation LabStack never records is captured in Atlas |
-| 6b | **Commitment queue** with days-left and named target | Every accepted quote appears within one refresh |
+| 6b | **Network bucket** — days-left, suggested labs from network + web, explicit owner | Every booked commitment appears same-day; no row is ownerless |
+| 6c | **Placeholder-transition detection** — targeted poll of open commitments | Order leaving lab 1 closes the commitment without anyone reporting it |
+| 6d | **CRM auto-population and attribution** | Onboarded lab lands in `atlas.crm_providers`, assigned to the member who held the commitment |
 | 7 | Promise-kept + handover-latency instrumentation | Promised vs actual per state, and dwell time at each of the four handovers |
 | 8 | Console divergence check | Quoted price/date in console ≠ Atlas's → flagged |
 | 9 | Notes parser (Star Health template) | ≥80% of the 17,924 yield ≥1 test |
@@ -280,7 +311,8 @@ feeding `/readiness` as demand-weighted signal.
 - **Auto-accepting or auto-sending quotes.** Ops sends, a human decides.
 - **Auto-contacting discovered labs.** Ever.
 - **A second onboarding pipeline.** Reuse CRM threads.
-- **Write-back in v1.** Explicitly deferred, not forgotten.
+- **Write-back in v1.** Steps 3 and 6 stay manual in the console; Atlas reads
+  the result back rather than writing it. Deferred, not forgotten.
 
 ---
 
@@ -311,14 +343,16 @@ Set the first promise-kept target only after a month of real data.
 
 **Blocking:**
 
-1. **Will the console record the lab that actually fulfils a placeholder
-   order?** (engineering / you) Today it does not — `assignedAt` is unused and
-   `labId` stays at 1 through delivery. Atlas can hold this itself, but then
-   the allocation is only as accurate as what the network team enters. Fixing
-   it at source is better if it is cheap.
+1. **How often can Atlas poll open commitments?** (engineering) Step 7 is
+   same-day only if the targeted poll is frequent. The set is small, but it
+   reads the source replica — the same standby that has thrown recovery
+   conflicts before, so the polling shape needs deciding, not assuming.
 2. **When a commitment is at risk, who tells the store, and how early?** (you)
-   This is the difference between a managed handover and a broken promise, and
-   it needs an owner before launch, not after the first miss.
+   The difference between a managed handover and a broken promise. Needs an
+   owner before launch, not after the first miss.
+2b. **Who assigns requests to ops, and on what basis?** (you) Round-robin, by
+   city, by store? The my-requests queue is the first screen of the day, so
+   this decides whether the day starts organised.
 3. **What does `UNREACHABLE` mean?** (ops) 10,936 rows, 10,612 also flagged
    unserviceable. If ops marks a request unreachable when they already know we
    can't serve it, this feature's scope roughly doubles.
