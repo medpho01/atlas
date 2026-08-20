@@ -45,6 +45,14 @@ export const NAV: NavGroup[] = [
     ],
   },
   {
+    label: 'Fulfilment',
+    noun: 'demand',
+    items: [
+      { href: '/requests', label: 'Requests', feature: 'requests', alsoActiveOn: ['/request'] },
+      { href: '/commitments', label: 'Network bucket', feature: 'commitments' },
+    ],
+  },
+  {
     label: 'Directory',
     noun: 'providers',
     items: [

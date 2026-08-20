@@ -105,7 +105,7 @@ fi
 # bootstraps them: import the foreign tables if absent, create the src_local
 # snapshots if absent. Idempotent — no-ops once they exist.
 log "Phase 0.5/4 · ensure pricing-catalog foreign tables + snapshots exist"
-for t in DOS Master Package PackagesOnLab _MasterToPackage; do
+for t in DOS Master Package PackagesOnLab _MasterToPackage _PackageToRequest _MasterToRequest; do
   exists=$($PG -t -A -c "SELECT 1 FROM information_schema.foreign_tables
                           WHERE foreign_table_schema='src' AND foreign_table_name='$t';")
   if [ "$exists" != "1" ]; then
@@ -338,6 +338,18 @@ if $PG -t -A -c "SELECT to_regclass('analytics.mv_city_readiness')" | grep -q .;
 else
   log "  skip — run sql/init/13_readiness.sql"
 fi
+
+# ---- Phase 4.6: request pipeline ------------------------------------------
+# Order matters: items are parsed from the fresh snapshot, then the state MV is
+# rebuilt on top of them, then commitments are reconciled against the new order
+# rows. Running these out of order classifies against yesterday's items.
+log "Phase 4.6/5 · request classification + commitments"
+$PG -c "REFRESH MATERIALIZED VIEW analytics.mv_master_lookup;"    >>"$LOG" 2>&1 || log "  WARN: master lookup refresh failed"
+$PG -c "SELECT atlas.sync_request_items();"                        >>"$LOG" 2>&1 || log "  WARN: request item sync failed"
+$PG -c "REFRESH MATERIALIZED VIEW analytics.mv_lab_pincode_home;"  >>"$LOG" 2>&1 || log "  WARN: lab-pincode refresh failed"
+$PG -c "REFRESH MATERIALIZED VIEW analytics.mv_lab_offering;"      >>"$LOG" 2>&1 || log "  WARN: lab offering refresh failed"
+$PG -c "REFRESH MATERIALIZED VIEW analytics.mv_request_state;"     >>"$LOG" 2>&1 || log "  WARN: request state refresh failed"
+$PG -c "SELECT atlas.sync_commitments();"                          >>"$LOG" 2>&1 || log "  WARN: commitment sync failed"
 
 # ---- Phase 5: capture this week's network snapshot -------------------------
 #

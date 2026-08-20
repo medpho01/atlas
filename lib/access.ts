@@ -49,6 +49,8 @@ export type Feature =
   | 'catalogue'         // Growth › Catalogue (browse what we sell)
   | 'pricing'           // Growth › Packages & Pricing (rates and quotes)
   | 'providerPipeline'  // Growth › Provider onboarding
+  | 'requests'          // Fulfilment › Requests (ops: quote and date)
+  | 'commitments'       // Fulfilment › Network bucket (open promises)
   | 'admin';            // users & roles
 
 export type Capability = 'none' | 'view' | 'manage';
@@ -65,6 +67,10 @@ const REQUIRES: Partial<Record<Feature, Feature>> = {
   catalogue: 'directory',
   pricing: 'directory',
   accountHealth: 'coverage',
+  // Quoting needs the rate cards behind the number, and a commitment is only
+  // actionable if you can open the lab you're being told to negotiate with.
+  requests: 'pricing',
+  commitments: 'directory',
 };
 
 const MATRIX: Record<Feature, Record<Role, Capability>> = {
@@ -75,6 +81,10 @@ const MATRIX: Record<Feature, Record<Role, Capability>> = {
   catalogue:        { admin: 'manage', network: 'manage', accounts: 'view',   operations: 'none',   editor: 'manage', viewer: 'view' },
   pricing:          { admin: 'manage', network: 'manage', accounts: 'view',   operations: 'none',   editor: 'manage', viewer: 'view' },
   providerPipeline: { admin: 'manage', network: 'manage', accounts: 'view',   operations: 'none',   editor: 'manage', viewer: 'view' },
+  // Operations gets 'manage' on requests: quoting is their job, and this is
+  // the one screen where they act rather than read.
+  requests:         { admin: 'manage', network: 'manage', accounts: 'view',   operations: 'manage', editor: 'view',   viewer: 'none' },
+  commitments:      { admin: 'manage', network: 'manage', accounts: 'view',   operations: 'view',   editor: 'view',   viewer: 'none' },
   admin:            { admin: 'manage', network: 'none',   accounts: 'none',   operations: 'none',   editor: 'none',   viewer: 'none' },
 };
 
@@ -129,6 +139,8 @@ export const FEATURE_LABEL: Record<Feature, string> = {
   directory: 'Directory',
   accountHealth: 'Account health',
   catalogue: 'Catalogue',
+  requests: 'Requests',
+  commitments: 'Network bucket',
   pricing: 'Packages & Pricing',
   providerPipeline: 'Provider onboarding',
   admin: 'Users & roles',

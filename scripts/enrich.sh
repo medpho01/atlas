@@ -5,6 +5,7 @@
 #   ./scripts/enrich.sh tiers   [--dry-run] [--limit 50] [--reclassify]
 #   ./scripts/enrich.sh tests   [--reclassify]
 #   ./scripts/enrich.sh packages [--reclassify]
+#   ./scripts/enrich.sh labs    [--limit 20] [--pincode 414001] [--dry-run]
 #
 # The production VM runs Atlas only as a built image, so Node was never
 # installed there — and the runner image is a standalone Next build with
@@ -21,7 +22,7 @@
 set -e
 
 JOB="$1"
-[ -n "$JOB" ] || { echo "usage: $0 {cities|tiers|tests|packages} [flags...]" >&2; exit 2; }
+[ -n "$JOB" ] || { echo "usage: $0 {cities|tiers|tests|packages|labs} [flags...]" >&2; exit 2; }
 shift
 
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
@@ -57,7 +58,8 @@ case "$JOB" in
   tiers)    SCRIPT="scripts/enrich-provider-tiers.ts"; ARGS="$*" ;;
   tests)    SCRIPT="scripts/enrich-catalogue.ts";  ARGS="--stage tests $*" ;;
   packages) SCRIPT="scripts/enrich-catalogue.ts";  ARGS="--stage packages $*" ;;
-  *) echo "unknown job '$JOB' — expected cities, tiers, tests or packages" >&2; exit 2 ;;
+  labs)     SCRIPT="scripts/discover-labs.ts";     ARGS="$*" ;;
+  *) echo "unknown job '$JOB' — expected cities, tiers, tests, packages or labs" >&2; exit 2 ;;
 esac
 
 echo "Running $SCRIPT $ARGS"

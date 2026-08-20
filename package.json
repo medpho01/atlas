@@ -13,7 +13,9 @@
     "user:create": "tsx scripts/create-user.ts",
     "catalogue:enrich": "tsx scripts/enrich-catalogue.ts",
     "cities:enrich": "tsx scripts/enrich-city-tiers.ts",
-    "tiers:enrich": "tsx scripts/enrich-provider-tiers.ts"
+    "tiers:enrich": "tsx scripts/enrich-provider-tiers.ts",
+    "labs:discover": "tsx scripts/discover-labs.ts",
+    "commitments:sync": "./scripts/sync-commitments.sh"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.115.0",

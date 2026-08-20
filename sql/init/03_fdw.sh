@@ -69,7 +69,7 @@ fi
 # behind Master (LabDepartment, SampleType, Methodology) are needed by
 # Packages & Pricing. They were imported by hand on the first environments —
 # listing them here is what makes a fresh volume come up complete.
-TABLES='"Appointment","Chain","DOS","Lab","LabDepartment","Master","Methodology","Order","Package","PackagesOnLab","PharmaOrder","Pharmacy","PincodeToLatLong","Profile","Provider","ProviderType","Request","PackagesOnStore","SampleType","Store","User","_MasterToPackage","_OrderToPackage"'
+TABLES='"Appointment","Chain","DOS","Lab","LabDepartment","Master","Methodology","Order","Package","PackagesOnLab","PharmaOrder","Pharmacy","PincodeToLatLong","Profile","Provider","ProviderType","Request","PackagesOnStore","SampleType","Store","User","_MasterToPackage","_OrderToPackage","_PackageToRequest","_MasterToRequest"'
 
 psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<SQL
 CREATE EXTENSION IF NOT EXISTS postgres_fdw;
