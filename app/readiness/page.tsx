@@ -7,7 +7,7 @@ import { InfoTip } from '@/components/ui/InfoTip';
 import { ChipButton } from '@/components/ui/Toggle';
 import { CATEGORIES, CATEGORY_LABEL, type Category } from '@/lib/categories';
 import { getReadiness } from '@/lib/readinessQueries';
-import { readinessBand, gapsFor } from '@/lib/readiness';
+import { readinessBand, gapsFor, TONE_TEXT } from '@/lib/readiness';
 import { ReadinessTable } from './ReadinessTable';
 
 export const dynamic = 'force-dynamic';
@@ -47,7 +47,10 @@ export default async function ReadinessPage({
                 weighted and combined. A subscore with no data is left out and its weight
                 redistributed rather than counted as zero, so a gap in our records does not
                 read as a gap in the network. Integration, SLA and price are lab-derived and
-                therefore apply to diagnostics only.
+                therefore apply to diagnostics only. Diagnostics itself sums labs,
+                hospital labs and phlebos, so a city can score launch-ready on
+                centre-visit supply with no home collection at all — the centre/home
+                split is shown on every row, and a shortfall is raised as a gap.
               </>
             }
             drives={
@@ -87,7 +90,7 @@ export default async function ReadinessPage({
               const band = readinessBand(avg);
               return (
                 <div key={b}>
-                  <div className={`text-2xl font-bold num text-${band.tone}-600`}>{avg}</div>
+                  <div className={`text-2xl font-bold num ${TONE_TEXT[band.tone]}`}>{avg}</div>
                   <div className="text-[11px] text-ink-500 mt-0.5">
                     {b} average · {set.length} {set.length === 1 ? 'city' : 'cities'}
                   </div>

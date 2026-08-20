@@ -16,6 +16,10 @@ export type ReadinessRow = {
   providers: number;
   pincodes_covered: number;
   total_pincodes: number | null;
+  providers_center: number;
+  providers_home: number;
+  pincodes_center: number;
+  pincodes_home: number;
   tiers_present: number | null;
   min_providers: number;
   min_pincodes: number;
@@ -40,6 +44,25 @@ export const READINESS_BANDS = [
   { min: 50, label: 'Near-ready',   tone: 'warn'    as const },
   { min: 0,  label: 'Build',        tone: 'danger'  as const },
 ];
+
+/**
+ * Tailwind cannot see `text-${tone}-600` — it scans source text, so an
+ * interpolated class name is never generated. Two of the three happened to
+ * render only because those exact strings appear literally elsewhere in the
+ * app; `text-danger-600` did not, so every city below 50 was drawing its score
+ * with no colour at all. Written out in full so the scanner finds them.
+ */
+export const TONE_TEXT: Record<'success' | 'warn' | 'danger', string> = {
+  success: 'text-success-600',
+  warn: 'text-warn-600',
+  danger: 'text-danger-600',
+};
+
+export const TONE_FILL: Record<'success' | 'warn' | 'danger', string> = {
+  success: 'bg-success-500',
+  warn: 'bg-warn-500',
+  danger: 'bg-danger-500',
+};
 
 export const readinessBand = (score: number) =>
   READINESS_BANDS.find((b) => score >= b.min) ?? READINESS_BANDS[READINESS_BANDS.length - 1];
@@ -71,6 +94,27 @@ export function gapsFor(r: ReadinessRow): Gap[] {
       detail: `${r.providers} providers against a ${r.band} target of ${r.min_providers}`,
       severity: r.providers < r.min_providers / 2 ? 'high' : 'medium',
     });
+  }
+  // Delivery mode. DIAGNOSTICS sums labs, hospital labs and phlebos, so a city
+  // can score launch-ready on centre-visit supply alone — Bhopal scores 84 on
+  // 29 centres and zero home collection. The score is not split (density norms
+  // are per category, and per-modality targets would be invented), but the
+  // absence is stated rather than left to be inferred from a total.
+  if (r.category === 'DIAGNOSTICS' && r.providers_center > 0) {
+    const share = r.providers_home / r.providers_center;
+    if (r.providers_home === 0) {
+      gaps.push({
+        kind: 'Home collection',
+        detail: `No home-collection supply — all ${r.providers_center} providers are centre-visit only`,
+        severity: 'high',
+      });
+    } else if (share < 0.25) {
+      gaps.push({
+        kind: 'Home collection',
+        detail: `${r.providers_home} home-collection providers against ${r.providers_center} centres`,
+        severity: 'medium',
+      });
+    }
   }
   if (r.tiers_present != null && r.tiers_present < r.tiers_expected) {
     gaps.push({

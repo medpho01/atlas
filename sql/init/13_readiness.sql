@@ -117,9 +117,9 @@ END$$;
 DROP MATERIALIZED VIEW IF EXISTS analytics.mv_city_readiness CASCADE;
 CREATE MATERIALIZED VIEW analytics.mv_city_readiness AS
 WITH supply AS (
-  SELECT kind, city, pincode, active FROM analytics.mv_provider_unified
+  SELECT kind, city, pincode, active, modalities FROM analytics.mv_provider_unified
   UNION ALL
-  SELECT kind, city, pincode, active FROM atlas.wellness_provider
+  SELECT kind, city, pincode, active, modalities FROM atlas.wellness_provider
 ),
 categorised AS (
   SELECT atlas.city_key(s.city) AS city_key,
@@ -131,7 +131,7 @@ categorised AS (
            WHEN s.kind IN ('GYM','STUDIO','PHYSIO')   THEN 'WELLNESS_OFFLINE'
            WHEN s.kind = 'INSTRUCTOR'                 THEN 'WELLNESS_ONLINE'
          END AS category,
-         s.pincode, s.active, s.kind
+         s.pincode, s.active, s.kind, s.modalities
   FROM supply s
   WHERE NULLIF(TRIM(s.city), '') IS NOT NULL
 ),
@@ -178,6 +178,28 @@ per_cat AS (
   SELECT c.city_key, c.category,
          COUNT(*)::int                                              AS providers,
          COUNT(DISTINCT c.pincode) FILTER (WHERE c.pincode IS NOT NULL)::int AS pincodes_covered,
+         -- Delivery mode, split out rather than summed.
+         --
+         -- DIAGNOSTICS rolls up labs, hospital labs and phlebos, and those are
+         -- not interchangeable: a lab serves a centre visit, a phlebo serves a
+         -- home collection. Summed into one count, a city with 174 labs and no
+         -- phlebos reads as launch-ready for home collection, which it is not.
+         -- Not two scores — the density norms are calibrated per category and
+         -- inventing per-modality targets would be a guess — but the split is
+         -- carried so the number can be read for what it actually is.
+         --
+         -- A provider can be both (a lab doing centre visits and home
+         -- collection), so these two counts overlap and do not sum to
+         -- providers. That is the honest shape: it is capability, not a
+         -- partition of the supply.
+         COUNT(*) FILTER (WHERE 'CENTER_VISIT' = ANY(c.modalities))::int AS providers_center,
+         COUNT(*) FILTER (WHERE 'HOME_SAMPLE'  = ANY(c.modalities)
+                             OR 'HOME_VISIT'   = ANY(c.modalities))::int AS providers_home,
+         COUNT(DISTINCT c.pincode) FILTER (
+           WHERE c.pincode IS NOT NULL AND 'CENTER_VISIT' = ANY(c.modalities))::int AS pincodes_center,
+         COUNT(DISTINCT c.pincode) FILTER (
+           WHERE c.pincode IS NOT NULL AND ('HOME_SAMPLE' = ANY(c.modalities)
+                                         OR 'HOME_VISIT'  = ANY(c.modalities)))::int AS pincodes_home,
          -- Tier spread: how many distinct experience tiers a buyer can choose
          -- between here. Only diagnostics carries tiers today.
          -- Tier, integration and SLA all come from lab data, so they are only
@@ -209,6 +231,7 @@ per_cat AS (
 scored AS (
   SELECT b.city, b.city_key, b.band, p.category,
          p.providers, p.pincodes_covered, cp.total_pincodes,
+         p.providers_center, p.providers_home, p.pincodes_center, p.pincodes_home,
          p.tiers_present, n.min_providers, n.min_pincodes, n.tiers_expected,
          -- Guarded, not LEAST(...) alone: LEAST ignores NULLs in Postgres, so
          -- LEAST(NULL, 1) is 1. Without the guard a category with no data
@@ -241,6 +264,7 @@ weighted AS (
 )
 SELECT city, city_key, band, category,
        providers, pincodes_covered, total_pincodes,
+       providers_center, providers_home, pincodes_center, pincodes_home,
        tiers_present, min_providers, min_pincodes, tiers_expected,
        ROUND(coverage_score, 3)    AS coverage_score,
        ROUND(density_score, 3)     AS density_score,
