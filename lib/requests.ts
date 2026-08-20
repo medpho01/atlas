@@ -105,6 +105,15 @@ export type RequestRow = {
   markup_pct: string | null;
   reason: string;
   commitment_id: number | null;
+  // Carried on the row so the table needs no per-row lookup.
+  packages: string[] | null;
+  tests: string[] | null;
+  item_names: string[] | null;
+  unnamed: number | null;
+  labs_ready: string[] | null;
+  labs_covering: string[] | null;
+  missing_items: string | null;
+  store_name: string | null;
 };
 
 export type CommitmentRow = {

@@ -62,9 +62,11 @@ export function RequestsTable({ rows }: { rows: RequestRow[] }) {
       <thead>
         <tr className="text-[11px] uppercase tracking-wide text-ink-400 border-b border-ink-200">
           <th className="text-left font-medium px-5 py-2">Request</th>
+          <th className="text-left font-medium px-2 py-2">Store</th>
           <th className="text-left font-medium px-2 py-2">Where</th>
-          <th className="text-right font-medium px-2 py-2">Asked</th>
-          <th className="text-left font-medium px-2 py-2">State</th>
+          <th className="text-left font-medium px-2 py-2 min-w-[220px]">Asked for</th>
+          <th className="text-left font-medium px-2 py-2 w-[120px]">State</th>
+          <th className="text-left font-medium px-2 py-2 min-w-[200px]">Labs / what&apos;s missing</th>
           <th className="text-right font-medium px-2 py-2">Quote</th>
           <th className="text-left font-medium px-2 py-2">Earliest</th>
           <th className="text-left font-medium px-5 py-2 w-20">Console</th>
@@ -75,11 +77,14 @@ export function RequestsTable({ rows }: { rows: RequestRow[] }) {
           const isOpen = open === r.request_id;
           const tone = STATE_TONE[r.state] ?? 'ink';
           const owner = STATE_OWNER[r.state];
+          const items = r.item_names ?? [];
+          const ready = r.labs_ready ?? [];
+          const covering = r.labs_covering ?? [];
           return (
             <Fragment key={r.request_id}>
               <tr
                 onClick={() => setOpen(isOpen ? null : r.request_id)}
-                className="border-b border-ink-100 last:border-0 cursor-pointer hover:bg-ink-100/40"
+                className="border-b border-ink-100 last:border-0 cursor-pointer hover:bg-ink-100/40 align-top"
               >
                 <td className="px-5 py-2.5 font-medium text-ink-900 whitespace-nowrap">
                   <ChevronRight
@@ -91,29 +96,74 @@ export function RequestsTable({ rows }: { rows: RequestRow[] }) {
                     {' · '}{r.status.toLowerCase().replace(/_/g, ' ')}
                   </span>
                 </td>
+                <td className="px-2 py-2.5 text-ink-700 text-xs">
+                  {r.store_name ?? <span className="text-ink-400">—</span>}
+                </td>
                 <td className="px-2 py-2.5 text-ink-700">
                   {r.city ?? <span className="text-ink-400">—</span>}
-                  <span className="block text-[10px] text-ink-400">{r.pincode ?? 'no pincode'}</span>
+                  <span className="block text-[10px] text-ink-400">
+                    {r.pincode ?? 'no pincode'}
+                    {r.nearest_km && <> · lab {r.nearest_km} km</>}
+                  </span>
                 </td>
-                <td className="px-2 py-2.5 text-right text-ink-700">
-                  {r.items_resolvable}
-                  {r.items_unresolved > 0 && (
-                    <span className="text-[10px] text-warn-600"> +{r.items_unresolved}?</span>
+                {/* The ask, spelled out. "1 item" told nobody anything. */}
+                <td className="px-2 py-2.5 text-xs">
+                  {items.length === 0 ? (
+                    <span className="text-ink-400">nothing identifiable</span>
+                  ) : (
+                    <>
+                      <span className="text-ink-800">{items.slice(0, 2).join(', ')}</span>
+                      {items.length > 2 && (
+                        <span className="text-ink-400"> +{items.length - 2} more</span>
+                      )}
+                      {(r.unnamed ?? 0) > 0 && (
+                        <span className="block text-[10px] text-warn-600">
+                          {r.unnamed} not in catalogue
+                        </span>
+                      )}
+                    </>
                   )}
                 </td>
-                <td className="px-2 py-2.5">
+                <td className="px-2 py-2.5 whitespace-nowrap">
                   <span className={`inline-block rounded border px-1.5 py-0.5 text-[11px] ${TONE_CHIP[tone]}`}>
                     {STATE_SHORT[r.state] ?? r.state}
                   </span>
-                  {owner === 'console' && (
+                  {/* One sub-label at most. Stacking "convert in console" over
+                      "console disagrees" doubled every serviceable row's
+                      height for a note that repeats on thousands of rows. */}
+                  {!r.src_flag && r.state === 'SERVICEABLE' ? (
+                    <span className="block text-[10px] text-warn-600 mt-0.5">console disagrees</span>
+                  ) : owner === 'console' ? (
                     <span className="block text-[10px] text-ink-400 mt-0.5">convert in console</span>
+                  ) : null}
+                </td>
+                {/* Who can serve it and what they lack — the negotiation, in the row. */}
+                <td className="px-2 py-2.5 text-xs">
+                  {ready.length > 0 ? (
+                    <span className="text-success-600">{ready.slice(0, 2).join(', ')}</span>
+                  ) : covering.length > 0 ? (
+                    <>
+                      <span className="text-ink-700">{covering.slice(0, 2).join(', ')}</span>
+                      {r.missing_items && (
+                        <span className="block text-[10px] text-warn-600">
+                          missing: {r.missing_items.length > 60
+                            ? r.missing_items.slice(0, 60) + '…'
+                            : r.missing_items}
+                        </span>
+                      )}
+                    </>
+                  ) : (
+                    <span className="text-danger-500">no lab covers this pincode</span>
+                  )}
+                  {covering.length > 2 && (
+                    <span className="text-[10px] text-ink-400"> +{r.covering_labs - 2} more</span>
                   )}
                 </td>
                 <td className="px-2 py-2.5 text-right whitespace-nowrap">
                   {inr(r.quote_price)
                     ? <span className="font-semibold text-ink-900">{inr(r.quote_price)}</span>
                     : <span className="text-[11px] text-ink-400">—</span>}
-                  {r.markup_pct && (
+                  {r.quote_price && r.markup_pct && (
                     <span className="block text-[10px] text-ink-400">+{Number(r.markup_pct)}%</span>
                   )}
                 </td>
@@ -127,7 +177,7 @@ export function RequestsTable({ rows }: { rows: RequestRow[] }) {
 
               {isOpen && (
                 <tr className="border-b border-ink-100 bg-ink-100/30">
-                  <td colSpan={7} className="px-5 py-3">
+                  <td colSpan={9} className="px-5 py-3">
                     <p className="text-xs text-ink-700 mb-2">{r.reason}</p>
                     <div className="flex flex-wrap gap-x-8 gap-y-1 text-[11px] text-ink-600 mb-3">
                       <span>Covering labs: <b className="text-ink-900">{r.covering_labs}</b></span>

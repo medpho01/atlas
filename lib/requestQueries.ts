@@ -18,7 +18,13 @@ export type RequestFilters = {
   q?: string;
   /** false shows everything including settled history. */
   openOnly?: boolean;
-  sort?: 'oldest' | 'newest' | 'value';
+  sort?: 'newest' | 'oldest' | 'value' | 'value_asc' | 'soonest' | 'demand';
+  /** Only rows Atlas could price. */
+  priced?: boolean;
+  /** Only rows where the console and Atlas disagree on serviceability. */
+  disputed?: boolean;
+  /** Only rows with a lab already covering the pincode. */
+  hasLab?: boolean;
   limit?: number;
   offset?: number;
 };
@@ -36,10 +42,17 @@ function build(f: RequestFilters) {
   if (f.store)   add('store_id = ?', Number(f.store));
   if (f.city)    add('lower(city) = lower(?)', f.city);
   if (f.pincode) add('pincode = ?', f.pincode);
+  if (f.priced) where.push('quote_price IS NOT NULL');
+  if (f.hasLab) where.push('covering_labs > 0');
+  // The console flag disagreeing with Atlas is worth filtering on directly:
+  // these are requests someone may have already turned away.
+  if (f.disputed) where.push("NOT src_flag AND state = 'SERVICEABLE'");
   if (f.q) {
     params.push(`%${f.q}%`);
     const i = params.length;
-    where.push(`(pincode ILIKE $${i} OR city ILIKE $${i} OR request_id::text ILIKE $${i})`);
+    where.push(`(pincode ILIKE $${i} OR city ILIKE $${i} OR request_id::text ILIKE $${i}
+                 OR store_name ILIKE $${i}
+                 OR array_to_string(item_names, ' ') ILIKE $${i})`);
   }
   return { params, clause: where.length ? `WHERE ${where.join(' AND ')}` : '' };
 }
@@ -51,10 +64,20 @@ function build(f: RequestFilters) {
  */
 export async function getRequests(f: RequestFilters = {}) {
   const { params, clause } = build(f);
+  // Newest first by default: with no assignment, the queue is worked from the
+  // top, and a request that arrived today is the one a store is waiting on.
   const order =
-    f.sort === 'newest' ? 'created_at DESC'
-    : f.sort === 'value' ? 'quote_price DESC NULLS LAST, created_at ASC'
-    : 'created_at ASC';
+    f.sort === 'oldest'    ? 'created_at ASC'
+    : f.sort === 'value'     ? 'quote_price DESC NULLS LAST, created_at DESC'
+    : f.sort === 'value_asc' ? 'quote_price ASC NULLS LAST, created_at DESC'
+    : f.sort === 'soonest'   ? 'promised_date ASC NULLS LAST, created_at DESC'
+    // Demand: pincodes we keep failing in, so repeated failures surface as a
+    // block rather than scattered through a year of rows.
+    : f.sort === 'demand'
+      ? `(SELECT COUNT(*) FROM analytics.mv_request_state s2
+           WHERE s2.pincode = analytics.v_request_quote.pincode
+             AND s2.state <> 'SERVICEABLE') DESC NULLS LAST, created_at DESC`
+    : 'created_at DESC';
   const limit = Math.min(f.limit ?? 100, 500);
   params.push(limit, f.offset ?? 0);
   return query<RequestRow>(`

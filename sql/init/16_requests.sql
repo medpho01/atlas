@@ -279,13 +279,28 @@ BEGIN
     SELECT r.id AS request_id,
            TRIM(BOTH ' .;' FROM unnest(string_to_array(
              (regexp_match(r.notes,
-                'Tests?\s+to\s+be\s+done\s*:\s*(.*?)(?:Request\s+Received|Date\s+of\s+Admission|Diagnosis\s*:|$)',
+                'Tests?\s+to\s+be\s+done\s*:\s*(.*?)' ||
+                -- Every field name that has been seen following the test list.
+                -- Missing one leaks the rest of the note in as a "test":
+                -- "CRP Request Received Date: 2026-03-18 Hospital Code: ..."
+                -- arrived as a single item before Hospital Code and HRM were
+                -- added here.
+                '(?:Request\s+Received|Date\s+of\s+Admission|Hospital\s+Code|HRM\s*:|' ||
+                'Diagnosis\s*:|Patient\s+Name|Contact\s*:|$)',
                 'is'))[1], ','))) AS item
     FROM src_local."Request" r
     WHERE r.notes ~* 'Tests?\s+to\s+be\s+done\s*:'
   ) t
   LEFT JOIN analytics.mv_master_lookup ml ON ml.norm = lower(t.item)
-  WHERE NULLIF(t.item,'') IS NOT NULL AND length(t.item) BETWEEN 2 AND 120
+  WHERE NULLIF(t.item,'') IS NOT NULL
+    AND length(t.item) BETWEEN 2 AND 60
+    -- A test name has no colon, no date and no phone number in it. Whatever
+    -- the regex above lets through, this catches: better to lose an oddly
+    -- written test than to show a hospital code as the thing a patient asked
+    -- for.
+    AND t.item !~ ':'
+    AND t.item !~ '\d{4}-\d{2}-\d{2}'
+    AND t.item !~ '\d{10}'
   ON CONFLICT DO NOTHING;
   GET DIAGNOSTICS n = ROW_COUNT;
 
@@ -558,8 +573,69 @@ SELECT
     ELSE 'No lab within range — escalate rather than promise'
   END                                                          AS reason,
   c.id AS commitment_id, c.promised_date AS committed_date,
-  c.quoted_price AS committed_price, c.closed_at, c.outcome
+  c.quoted_price AS committed_price, c.closed_at, c.outcome,
+  -- Everything below exists so the row is readable without opening it. Ops
+  -- and the network team both said the same thing: if the answer needs a
+  -- click, the click is the work.
+  it.packages, it.tests, it.item_names, it.unnamed,
+  lb.labs_ready, lb.labs_covering, lb.missing_items,
+  st."storeName" AS store_name
 FROM analytics.mv_request_state s
+-- Item names, aggregated once per request rather than per render.
+LEFT JOIN LATERAL (
+  SELECT
+    ARRAY_REMOVE(ARRAY_AGG(DISTINCT p."packageName") FILTER (WHERE p.id IS NOT NULL), NULL) AS packages,
+    ARRAY_REMOVE(ARRAY_AGG(DISTINCT m.name)         FILTER (WHERE m.id IS NOT NULL), NULL) AS tests,
+    -- Catalogue-matched names first: an unresolved raw string is the least
+    -- useful thing in the list and should not win the two slots the row shows.
+    ARRAY_REMOVE(ARRAY_AGG(DISTINCT COALESCE(p."packageName", m.name, ri.raw_text)
+      ORDER BY COALESCE(p."packageName", m.name, ri.raw_text)) FILTER (
+        WHERE p.id IS NOT NULL OR m.id IS NOT NULL), NULL)
+    || ARRAY_REMOVE(ARRAY_AGG(DISTINCT ri.raw_text) FILTER (
+        WHERE p.id IS NULL AND m.id IS NULL), NULL) AS item_names,
+    COUNT(*) FILTER (WHERE p.id IS NULL AND m.id IS NULL)::int AS unnamed
+  FROM atlas.request_item ri
+  LEFT JOIN src_local."Package" p ON p.id = ri.package_id
+  LEFT JOIN src_local."Master"  m ON m.id = ri.master_id
+  WHERE ri.request_id = s.request_id
+) it ON true
+-- Who can serve it, and what the nearest-to-ready lab still lacks. Capped at
+-- three names: a row is a summary, and the detail page carries the full list.
+LEFT JOIN LATERAL (
+  SELECT
+    ARRAY_REMOVE((ARRAY_AGG(l."labName" ORDER BY x.missing ASC, l."labName")
+                  FILTER (WHERE x.missing = 0))[1:3], NULL) AS labs_ready,
+    ARRAY_REMOVE((ARRAY_AGG(l."labName" ORDER BY x.missing ASC, l."labName"))[1:3], NULL) AS labs_covering,
+    -- The nearest-to-ready lab's shortfall.
+    --
+    -- Taken from the row rather than aggregated: ARRAY_AGG over an array
+    -- column builds a 2-D array, and subscripting that with [1] returns NULL
+    -- silently rather than the first inner array.
+    (ARRAY_AGG(x.missing_names ORDER BY x.missing ASC)
+      FILTER (WHERE x.missing > 0))[1] AS missing_items
+  FROM (
+    SELECT lph.lab_id,
+           COUNT(*) FILTER (WHERE lo.lab_id IS NULL)::int AS missing,
+           STRING_AGG(DISTINCT
+             CASE WHEN lo.lab_id IS NULL
+                  THEN COALESCE(p2."packageName", m2.name) END, ', ') AS missing_names
+    FROM analytics.mv_lab_pincode_home lph
+    CROSS JOIN LATERAL (
+      SELECT DISTINCT ri.kind, COALESCE(ri.package_id, ri.master_id) AS item_id
+      FROM atlas.request_item ri
+      WHERE ri.request_id = s.request_id
+        AND (ri.package_id IS NOT NULL OR ri.master_id IS NOT NULL)
+    ) w
+    LEFT JOIN analytics.mv_lab_offering lo
+           ON lo.lab_id = lph.lab_id AND lo.kind = w.kind AND lo.item_id = w.item_id
+    LEFT JOIN src_local."Package" p2 ON w.kind = 'PACKAGE' AND p2.id = w.item_id
+    LEFT JOIN src_local."Master"  m2 ON w.kind = 'TEST'    AND m2.id = w.item_id
+    WHERE lph.pincode = s.pincode
+    GROUP BY lph.lab_id
+  ) x
+  JOIN src_local."Lab" l ON l.id = x.lab_id
+) lb ON true
+LEFT JOIN src_local."Store" st ON st.id = s.store_id
 LEFT JOIN atlas.slot_policy sp ON sp.state = s.state
 LEFT JOIN LATERAL (
   SELECT q.markup_pct, q.label FROM atlas.quote_markup q

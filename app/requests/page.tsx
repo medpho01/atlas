@@ -29,7 +29,10 @@ export default async function RequestsPage({
     store: searchParams.store,
     city: searchParams.city,
     q: searchParams.q,
-    sort: (searchParams.sort as 'oldest' | 'newest' | 'value') ?? 'oldest',
+    sort: (searchParams.sort as 'newest' | 'oldest' | 'value' | 'value_asc' | 'soonest' | 'demand') ?? 'newest',
+    priced: searchParams.priced === '1',
+    disputed: searchParams.disputed === '1',
+    hasLab: searchParams.haslab === '1',
     openOnly,
     limit: 150,
   };
@@ -80,25 +83,36 @@ export default async function RequestsPage({
         }
       />
 
+      {/* A grid, not a wrapping baseline row: with six tiles of uneven number
+          width the flex gaps collapsed differently on every filter change, so
+          the strip never sat still. Fixed columns keep it steady. */}
       <Card className="my-4">
         <CardBody>
-          <div className="flex flex-wrap items-baseline gap-x-8 gap-y-2">
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-x-6 gap-y-4">
             <div>
-              <div className="text-2xl font-bold text-ink-900 num">{total.toLocaleString('en-IN')}</div>
-              <div className="text-[11px] text-ink-500 mt-0.5">
+              <div className="text-2xl font-bold text-ink-900 num leading-tight">
+                {total.toLocaleString('en-IN')}
+              </div>
+              <div className="text-[11px] text-ink-500 mt-1 leading-snug">
                 {openOnly ? 'Open requests' : 'All requests'}
               </div>
             </div>
             <div>
-              <div className="text-2xl font-bold num text-warn-600">{needsWork.toLocaleString('en-IN')}</div>
-              <div className="text-[11px] text-ink-500 mt-0.5">Not serviceable as-is</div>
+              <div className="text-2xl font-bold num text-warn-600 leading-tight">
+                {needsWork.toLocaleString('en-IN')}
+              </div>
+              <div className="text-[11px] text-ink-500 mt-1 leading-snug">Not serviceable as-is</div>
             </div>
             {summary.slice(0, 4).map((s) => (
               <div key={s.state}>
-                <div className="text-lg font-semibold num text-ink-700">{s.n.toLocaleString('en-IN')}</div>
-                <div className="text-[11px] text-ink-500 mt-0.5">
+                <div className="text-2xl font-bold num text-ink-700 leading-tight">
+                  {s.n.toLocaleString('en-IN')}
+                </div>
+                <div className="text-[11px] text-ink-500 mt-1 leading-snug">
                   {STATE_SHORT[s.state as RequestState] ?? s.state}
-                  {s.quoted > 0 && <span className="text-ink-400"> · {s.quoted} priced</span>}
+                  {s.quoted > 0 && (
+                    <span className="block text-ink-400">{s.quoted.toLocaleString('en-IN')} priced</span>
+                  )}
                 </div>
               </div>
             ))}
@@ -129,19 +143,42 @@ export default async function RequestsPage({
             {s.name} <span className="text-ink-400">{s.n}</span>
           </ChipButton>
         ))}
-        <span className="w-px h-4 bg-ink-200 mx-2" />
+      </div>
+
+      <div className="flex flex-wrap items-center gap-1.5 mb-4">
         <span className="text-[11px] uppercase tracking-wide text-ink-400 mr-1">Sort</span>
-        {(['oldest', 'newest', 'value'] as const).map((s) => (
-          <ChipButton key={s} href={keep('sort', s)} active={(searchParams.sort ?? 'oldest') === s}>
-            {s === 'value' ? 'Largest quote' : s === 'oldest' ? 'Oldest first' : 'Newest first'}
+        {([
+          ['newest', 'Newest first'],
+          ['oldest', 'Oldest first'],
+          ['value', 'Largest quote'],
+          ['value_asc', 'Smallest quote'],
+          ['soonest', 'Date soonest'],
+          ['demand', 'Busiest pincode'],
+        ] as const).map(([k, label]) => (
+          <ChipButton key={k} href={keep('sort', k)} active={(searchParams.sort ?? 'newest') === k}>
+            {label}
           </ChipButton>
         ))}
+        <span className="w-px h-4 bg-ink-200 mx-2" />
+        <span className="text-[11px] uppercase tracking-wide text-ink-400 mr-1">Only</span>
+        <ChipButton href={keep('priced', searchParams.priced === '1' ? undefined : '1')}
+                    active={searchParams.priced === '1'}>
+          Priced
+        </ChipButton>
+        <ChipButton href={keep('haslab', searchParams.haslab === '1' ? undefined : '1')}
+                    active={searchParams.haslab === '1'}>
+          Has a covering lab
+        </ChipButton>
+        <ChipButton href={keep('disputed', searchParams.disputed === '1' ? undefined : '1')}
+                    active={searchParams.disputed === '1'}>
+          Console disagrees
+        </ChipButton>
       </div>
 
       <Card>
         <CardHeader
           title={`${rows.length.toLocaleString('en-IN')} shown${total > rows.length ? ` of ${total.toLocaleString('en-IN')}` : ''}`}
-          subtitle="Oldest first by default — with no assignment, sort order is the prioritisation."
+          subtitle="Newest first by default — with no assignment, sort order is the prioritisation."
           icon={<Inbox className="w-4 h-4" strokeWidth={2.25} />}
         />
         <CardBody className="pt-0">
