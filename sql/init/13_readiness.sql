@@ -135,6 +135,32 @@ categorised AS (
   FROM supply s
   WHERE NULLIF(TRIM(s.city), '') IS NOT NULL
 ),
+-- Lab is a foreign table on a hot standby. The tier and integration subscores
+-- used to be correlated subqueries joining src."Lab" once per city, which is
+-- ~1,200 remote scans in a single statement — long enough that the standby
+-- kills the query with "conflict with recovery" partway through the refresh.
+--
+-- Scanned once here, aggregated locally, joined below. Same numbers, one trip.
+lab_city AS (
+  SELECT l.id AS lab_id, atlas.city_key(l.city) AS city_key
+  FROM src."Lab" l
+  WHERE NULLIF(TRIM(l.city), '') IS NOT NULL
+),
+tier_by_city AS (
+  SELECT lc.city_key, COUNT(DISTINCT pt.tier)::int AS tiers_present
+  FROM lab_city lc
+  JOIN atlas.provider_tier pt ON pt.lab_id = lc.lab_id
+  WHERE pt.tier <> 'Unknown'
+  GROUP BY lc.city_key
+),
+integration_by_city AS (
+  SELECT lc.city_key,
+         NULLIF(COUNT(*) FILTER (WHERE pi.f_level >= 3), 0)::numeric
+           / NULLIF(COUNT(*), 0) AS ratio
+  FROM lab_city lc
+  JOIN atlas.provider_integration pi ON pi.lab_id = lc.lab_id
+  GROUP BY lc.city_key
+),
 city_pincodes AS (
   SELECT atlas.city_key(city) AS city_key,
          COUNT(DISTINCT pincode)::int AS total_pincodes
@@ -153,20 +179,13 @@ per_cat AS (
          -- would silently borrow the diagnostics network's maturity and score
          -- a city as consult-ready on the strength of its labs. NULL instead,
          -- and the weight redistributes to what is actually measured.
-         CASE WHEN c.category = 'DIAGNOSTICS' THEN
-           (SELECT COUNT(DISTINCT pt.tier) FROM atlas.provider_tier pt
-            JOIN src."Lab" l2 ON l2.id = pt.lab_id
-            WHERE atlas.city_key(l2.city) = c.city_key
-              AND pt.tier <> 'Unknown')::int
+         CASE WHEN c.category = 'DIAGNOSTICS'
+              THEN (SELECT t.tiers_present FROM tier_by_city t WHERE t.city_key = c.city_key)
          END                                                        AS tiers_present,
          -- Integration: share of this city's labs wired in at F3 or better.
          -- NULL when nothing is recorded, so the weight redistributes.
-         CASE WHEN c.category = 'DIAGNOSTICS' THEN
-           (SELECT NULLIF(COUNT(*) FILTER (WHERE pi.f_level >= 3), 0)::numeric
-                   / NULLIF(COUNT(*), 0)
-            FROM atlas.provider_integration pi
-            JOIN src."Lab" l3 ON l3.id = pi.lab_id
-            WHERE atlas.city_key(l3.city) = c.city_key)
+         CASE WHEN c.category = 'DIAGNOSTICS'
+              THEN (SELECT i.ratio FROM integration_by_city i WHERE i.city_key = c.city_key)
          END                                                        AS integration_ratio,
          -- SLA: delivered-vs-target across this city's labs.
          CASE WHEN c.category = 'DIAGNOSTICS' THEN
