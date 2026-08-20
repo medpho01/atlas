@@ -9,6 +9,7 @@ import { Leaderboard } from '@/components/Leaderboard';
 import { getNetworkKpis, getMapPoints, getMapCoverage, getQualityList } from '@/lib/queries';
 import { getLeaderboard, getMapPointsByKindModality, getPlatformLeaderboardTotal, getGapTriples } from '@/lib/coverageQueries';
 import { parseLens, LENS_OPTIONS, KIND_SHORT, MODALITY_LABEL } from '@/lib/coverage';
+import { getRequestSummary, getCommitmentStats } from '@/lib/requestQueries';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -20,7 +21,8 @@ export default async function HomePage({ searchParams }: { searchParams: { lb_mo
   const { kinds, modality } = parseLens(lensKey);
   const isLensed = lensKey !== 'ANY';
 
-  const [kpis, leaderboard, platformTotal, points, mapCoverage, gaps, redLabs] = await Promise.all([
+  const [kpis, leaderboard, platformTotal, points, mapCoverage, gaps, redLabs,
+         reqSummary, commitStats] = await Promise.all([
     getNetworkKpis(),
     getLeaderboard({ mode, kinds, modality, limit: 12 }),
     getPlatformLeaderboardTotal({ mode, kinds, modality }),
@@ -31,6 +33,8 @@ export default async function HomePage({ searchParams }: { searchParams: { lb_mo
     // Lens-aware gap triples — when a lens is active, show only matching needs
     getGapTriples({ kinds, modality, limit: 8 }),
     getQualityList({ health: 'red', limit: 6 }),
+      getRequestSummary(),
+    getCommitmentStats(),
   ]);
 
   const lensLabel = LENS_OPTIONS.find((o) => o.key === lensKey)?.label ?? 'Any provider · any modality';
@@ -118,6 +122,22 @@ export default async function HomePage({ searchParams }: { searchParams: { lb_mo
               shows="Pincodes that received at least one order in the last 30 days — your current live demand surface."
               computed={<>Distinct pincodes with <code className="font-mono text-[10px]">orders_l30d &gt; 0</code> from unified demand (Order + Appointment + PharmaOrder).</>}
               drives="Compare to Active pincodes to see utilisation. Large gap = many pincodes have supply but no recent demand → marketing/partner-activation problem."
+            />
+          }
+        />
+        <KpiTile
+          label="Unserved requests"
+          value={reqSummary
+            .filter((r) => r.state !== 'SERVICEABLE')
+            .reduce((n, r) => n + r.n, 0)
+            .toLocaleString('en-IN')}
+          sub={`${commitStats?.open ?? 0} promised, awaiting supply`}
+          info={
+            <InfoTip
+              title="Unserved requests"
+              shows="Requests no lab in the network can fulfil as they stand — the demand we are turning away."
+              computed={<>Requests classified anything other than <code className="font-mono text-[10px]">SERVICEABLE</code>, plus the count of open commitments: orders already promised to a store and sitting on the placeholder lab.</>}
+              drives="Each one is either a package to activate at an existing partner or a lab to onboard. Open commitments have a date attached and are the urgent half."
             />
           }
         />

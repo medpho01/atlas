@@ -14,7 +14,8 @@ RUN apk add --no-cache postgresql16-client bash tzdata coreutils \
 
 COPY scripts/refresh-data.sh /refresh.sh
 COPY scripts/refresh-loop.sh /loop.sh
-RUN chmod +x /refresh.sh /loop.sh \
+COPY scripts/commitment-loop.sh /commitment-loop.sh
+RUN chmod +x /refresh.sh /loop.sh /commitment-loop.sh \
  && mkdir -p /var/log \
  && touch /var/log/atlas-refresh.log
 

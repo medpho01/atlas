@@ -126,6 +126,33 @@ services:
     volumes:
       - atlas-refresh-logs:/var/log
 
+  atlas-commitments:
+    # Commitment poller — every few minutes, not nightly.
+    #
+    # The nightly refresh rebuilds the whole request pipeline; this does one
+    # narrow thing between those runs: notice that an order has moved off the
+    # placeholder lab, close the commitment, and write the CRM record. Sharing
+    # the refresh image because it needs exactly the same thing — psql and a
+    # loop.
+    #
+    #   docker compose logs atlas-commitments -f
+    #   docker compose exec atlas-commitments /commitment-loop.sh   # one-off
+    build:
+      context: .
+      dockerfile: Dockerfile.refresh
+    container_name: atlas-commitments
+    restart: unless-stopped
+    depends_on:
+      atlas-db:
+        condition: service_healthy
+    env_file:
+      - .env.production
+    environment:
+      PGPASSWORD: ${ATLAS_DB_PASSWORD:-atlas}
+      TZ: Asia/Kolkata
+      COMMITMENT_INTERVAL_MIN: "${COMMITMENT_INTERVAL_MIN:-5}"
+    entrypoint: ["/commitment-loop.sh"]
+
 volumes:
   atlas-data:
     name: atlas-data

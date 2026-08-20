@@ -12,6 +12,7 @@ import {
   STATE_SHORT, STATE_TONE, TONE_CHIP, BASIS_LABEL, BASIS_STRENGTH,
 } from '@/lib/requests';
 import { QuoteCard } from '../QuoteCard';
+import { LeadActions } from '../LeadActions';
 
 export const dynamic = 'force-dynamic';
 
@@ -143,9 +144,9 @@ export default async function RequestDetail({ params }: { params: { id: string }
                                          border border-warn-100 bg-warn-50 rounded px-1">
                           unverified
                         </span>
-                        {l.crm_provider_id && (
-                          <span className="text-[10px] text-success-600">in CRM</span>
-                        )}
+                        <span className="ml-auto">
+                          <LeadActions leadId={l.id} promoted={!!l.crm_provider_id} />
+                        </span>
                       </div>
                       <div className="text-xs text-ink-600">{l.address}</div>
                       {l.phone && <div className="text-xs text-ink-700 num">{l.phone}</div>}

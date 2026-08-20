@@ -577,3 +577,94 @@ LEFT JOIN atlas.slot_policy sp ON sp.state = cm.state
 LEFT JOIN src_local."Lab" tl ON tl.id = cm.target_lab_id
 LEFT JOIN atlas.users u ON u.id = cm.attributed_to
 WHERE cm.closed_at IS NULL;
+-- ---------------------------------------------------------------------------
+-- Step 7: closing a commitment writes the CRM record.
+--
+-- The network team onboards a lab in the console and moves the order onto it.
+-- That move is the only trace of their work anywhere in the system, so closing
+-- the commitment is also when the lab enters CRM and gets attributed. If this
+-- were a separate manual step it would be the step that never happens.
+--
+-- source='commitment' marks these apart from labs added by hand, so it stays
+-- visible which relationships came out of a promise under time pressure.
+-- ---------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION atlas.close_commitment_to_crm()
+RETURNS int LANGUAGE plpgsql AS $$
+DECLARE n int;
+BEGIN
+  WITH allocated AS (
+    SELECT cm.id, cm.allocated_lab_id, cm.attributed_to, cm.request_id,
+           l."labName", l.city, l.state, l.pincode
+    FROM atlas.commitment cm
+    JOIN src_local."Lab" l ON l.id = cm.allocated_lab_id
+    WHERE cm.outcome = 'allocated'
+      AND cm.allocated_lab_id IS NOT NULL
+      -- Not already represented in CRM by this lab id.
+      AND NOT EXISTS (
+        SELECT 1 FROM atlas.crm_providers cp WHERE cp.source_lab_id = cm.allocated_lab_id
+      )
+  ),
+  ins AS (
+    INSERT INTO atlas.crm_providers
+      (name, kind, city, state, pincode, source, source_lab_id, created_by, notes)
+    SELECT a."labName", 'LAB', a.city, a.state, a.pincode,
+           'commitment', a.allocated_lab_id, a.attributed_to,
+           'Onboarded to fulfil request #' || a.request_id
+    FROM allocated a
+    ON CONFLICT DO NOTHING
+    RETURNING source_lab_id
+  )
+  SELECT COUNT(*)::int INTO n FROM ins;
+
+  -- Link the commitment to whatever CRM row now represents that lab, whether
+  -- we just created it or it already existed.
+  UPDATE atlas.commitment cm
+     SET notes = COALESCE(cm.notes, '') ||
+                 CASE WHEN cm.notes IS NULL THEN '' ELSE ' · ' END ||
+                 'CRM provider #' || cp.id,
+         updated_at = now()
+  FROM atlas.crm_providers cp
+  WHERE cp.source_lab_id = cm.allocated_lab_id
+    AND cm.outcome = 'allocated'
+    AND COALESCE(cm.notes, '') NOT LIKE '%CRM provider #%';
+
+  RETURN n;
+END $$;
+
+-- Fold it into the poller so there is one entry point, not two to remember.
+CREATE OR REPLACE FUNCTION atlas.sync_commitments_full()
+RETURNS TABLE (opened int, closed int, expired int, crm_created int)
+LANGUAGE plpgsql AS $$
+DECLARE r record; c int;
+BEGIN
+  SELECT * INTO r FROM atlas.sync_commitments();
+  SELECT atlas.close_commitment_to_crm() INTO c;
+  RETURN QUERY SELECT r.opened, r.closed, r.expired, c;
+END $$;
+
+-- ---------------------------------------------------------------------------
+-- Promote a web lead into CRM. A human act — this only records the decision.
+-- ---------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION atlas.promote_discovered_lab(lead_id int, by_user int)
+RETURNS int LANGUAGE plpgsql AS $$
+DECLARE new_id int; d record;
+BEGIN
+  SELECT * INTO d FROM atlas.discovered_lab WHERE id = lead_id;
+  IF d IS NULL THEN RAISE EXCEPTION 'No discovered lab %', lead_id; END IF;
+  IF d.crm_provider_id IS NOT NULL THEN RETURN d.crm_provider_id; END IF;
+
+  INSERT INTO atlas.crm_providers
+    (name, kind, city, state, pincode, phone, source, created_by, notes)
+  VALUES (d.name, 'LAB', d.city, d.state, d.pincode, d.phone,
+          'discovered', by_user,
+          'Found by web search on ' || d.retrieved_at::date ||
+          COALESCE(' · ' || d.source_url, '') ||
+          ' · UNVERIFIED at promotion — confirm before relying on it')
+  RETURNING id INTO new_id;
+
+  UPDATE atlas.discovered_lab
+     SET crm_provider_id = new_id, verified_by = by_user, verified_at = now()
+   WHERE id = lead_id;
+
+  RETURN new_id;
+END $$;

@@ -6,7 +6,8 @@ import { Card, CardHeader, CardBody } from '@/components/ui/Card';
 import { PageHeader } from '@/components/ui/PageHeader';
 import { InfoTip } from '@/components/ui/InfoTip';
 import { getCommitments, getCommitmentStats, getPincodeDemand } from '@/lib/requestQueries';
-import { STATE_SHORT, STATE_TONE, TONE_CHIP, type RequestState } from '@/lib/requests';
+import { STATE_SHORT, STATE_TONE, TONE_CHIP } from '@/lib/requests';
+import { SyncButton } from './SyncButton';
 
 export const dynamic = 'force-dynamic';
 
@@ -30,7 +31,9 @@ export default async function CommitmentsPage() {
         title="Network bucket"
         subtitle="Promises made before we had the supply. Most urgent first."
         actions={
-          <InfoTip
+          <div className="flex items-center gap-2">
+            <SyncButton />
+            <InfoTip
             title="Network bucket"
             shows="Every open commitment — a booked order sitting on the placeholder lab, waiting for a real one."
             computed={
@@ -49,7 +52,8 @@ export default async function CommitmentsPage() {
                 ledger, not from anyone&apos;s report.
               </>
             }
-          />
+            />
+          </div>
         }
       />
 
