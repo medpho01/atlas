@@ -489,6 +489,79 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_request_state_id ON analytics.mv_request_s
 CREATE INDEX IF NOT EXISTS idx_request_state_state ON analytics.mv_request_state (state);
 CREATE INDEX IF NOT EXISTS idx_request_state_pin ON analytics.mv_request_state (pincode);
 CREATE INDEX IF NOT EXISTS idx_request_state_created ON analytics.mv_request_state (created_at DESC);
+
+-- Working days: a two-day promise made on Friday means Tuesday, not Sunday.
+-- Deliberately simple — no public-holiday calendar, because a wrong holiday
+-- list would quietly move dates and nobody would notice for weeks.
+CREATE OR REPLACE FUNCTION atlas.add_working_days(from_date date, n int)
+RETURNS date LANGUAGE plpgsql IMMUTABLE AS $$
+DECLARE d date := from_date; left_ int := GREATEST(n, 0);
+BEGIN
+  IF n IS NULL THEN RETURN NULL; END IF;
+  WHILE left_ > 0 LOOP
+    d := d + 1;
+    IF EXTRACT(isodow FROM d) < 7 THEN left_ := left_ - 1; END IF;
+  END LOOP;
+  RETURN d;
+END $$;
+
+-- ---------------------------------------------------------------------------
+-- The answer ops reads: state, price, date, and why.
+--
+-- A view rather than a materialized one on purpose. Markup bands and lead
+-- times are config, and a pricing change that needs a refresh before it takes
+-- effect is a pricing change someone will forget to apply.
+-- ---------------------------------------------------------------------------
+CREATE OR REPLACE VIEW analytics.v_request_quote AS
+SELECT
+  s.*,
+  sp.label      AS state_label,
+  sp.lead_days,
+  -- Reference cost, strongest basis first. A covering lab that can do the
+  -- whole job is a real local price; the national median is an inference.
+  CASE WHEN s.best_lab_cost IS NOT NULL THEN s.best_lab_cost
+       WHEN s.reference_missing = 0     THEN s.reference_cost
+       ELSE NULL END                                          AS basis_cost,
+  CASE WHEN s.best_lab_cost IS NOT NULL THEN 'covering_lab'
+       WHEN s.reference_missing = 0     THEN 'network_median'
+       WHEN s.reference_cost IS NOT NULL THEN 'partial'
+       ELSE 'none' END                                        AS price_basis,
+  qm.markup_pct,
+  qm.label AS markup_label,
+  -- The quote itself. NULL whenever any input is missing — a confidently
+  -- wrong number is worse than a blank with a reason, because ops will send it.
+  CASE
+    WHEN s.state = 'SERVICEABLE' THEN NULL      -- console converts it directly
+    WHEN qm.markup_pct IS NULL   THEN NULL      -- beyond the bands: price by hand
+    WHEN s.reference_missing > 0 THEN NULL      -- we cannot price part of the ask
+    WHEN COALESCE(s.best_lab_cost, s.reference_cost) IS NULL THEN NULL
+    ELSE ROUND(COALESCE(s.best_lab_cost, s.reference_cost) * (1 + qm.markup_pct/100.0), 0)
+  END                                                          AS quote_price,
+  -- Promised date. Bounded below by the policy lead time; NULL where policy
+  -- says do not promise. Working days only.
+  CASE WHEN sp.lead_days IS NULL THEN NULL
+       ELSE atlas.add_working_days(CURRENT_DATE, sp.lead_days) END AS promised_date,
+  CASE
+    WHEN s.state = 'SERVICEABLE'        THEN 'Convert in console — a covering lab already offers this'
+    WHEN s.state = 'NO_ITEMS'           THEN 'Cannot tell what was requested — no package, test or parseable note'
+    WHEN s.state = 'NO_PINCODE'         THEN 'No pincode on the request, so it cannot be placed'
+    WHEN s.state = 'PACKAGE_GAP'        THEN
+      s.covering_labs || ' lab(s) cover this pincode; none carry the full request'
+    WHEN s.state = 'SUPPLY_GAP_KNOWN'   THEN
+      'No covering lab; nearest is ' || s.nearest_km || ' km away and onboardable'
+    ELSE 'No lab within range — escalate rather than promise'
+  END                                                          AS reason,
+  c.id AS commitment_id, c.promised_date AS committed_date,
+  c.quoted_price AS committed_price, c.closed_at, c.outcome
+FROM analytics.mv_request_state s
+LEFT JOIN atlas.slot_policy sp ON sp.state = s.state
+LEFT JOIN LATERAL (
+  SELECT q.markup_pct, q.label FROM atlas.quote_markup q
+  WHERE s.nearest_km IS NOT NULL AND s.nearest_km <= q.max_km
+  ORDER BY q.max_km LIMIT 1
+) qm ON true
+LEFT JOIN atlas.commitment c ON c.request_id = s.request_id;
+
 -- ---------------------------------------------------------------------------
 -- Commitment lifecycle.
 --
