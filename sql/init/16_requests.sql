@@ -241,11 +241,17 @@ BEGIN
   -- The join tables arrive via the refresh's self-bootstrap, which may not
   -- have run yet on a freshly deployed host. Missing snapshots are a "not
   -- yet", not a failure: parse what is available and report zero for the rest.
-  IF to_regclass('src_local._PackageToRequest') IS NULL
-     OR to_regclass('src_local._MasterToRequest') IS NULL THEN
-    RAISE NOTICE 'Request join tables not snapshotted yet — run the refresh first.';
-    RETURN QUERY SELECT 0, 0, 0;
-    RETURN;
+  -- Quote the identifiers. to_regclass folds an unquoted name to lower case,
+  -- so to_regclass('src_local._PackageToRequest') looks for
+  -- src_local._packagetorequest, never finds it, and the guard fires every
+  -- time — which is how this function silently did nothing at all on its first
+  -- production run while reporting success.
+  IF to_regclass('src_local."_PackageToRequest"') IS NULL
+     OR to_regclass('src_local."_MasterToRequest"') IS NULL THEN
+    -- Loud, not a notice. A missing prerequisite that returns zeros looks
+    -- identical to "there was nothing to do", and the whole queue reads
+    -- "nothing identifiable requested" with no clue why.
+    RAISE EXCEPTION 'Request join tables not snapshotted yet — import _PackageToRequest and _MasterToRequest first (see docs/RUNBOOK-requests.md).';
   END IF;
 
   INSERT INTO atlas.request_item (request_id, kind, package_id, source)
