@@ -105,7 +105,7 @@ fi
 # bootstraps them: import the foreign tables if absent, create the src_local
 # snapshots if absent. Idempotent — no-ops once they exist.
 log "Phase 0.5/4 · ensure pricing-catalog foreign tables + snapshots exist"
-for t in DOS Master Package PackagesOnLab _MasterToPackage _PackageToRequest _MasterToRequest; do
+for t in DOS Master Package PackagesOnLab _MasterToPackage _PackageToRequest _MasterToRequest PackagesOnStore; do
   exists=$($PG -t -A -c "SELECT 1 FROM information_schema.foreign_tables
                           WHERE foreign_table_schema='src' AND foreign_table_name='$t';")
   if [ "$exists" != "1" ]; then
@@ -172,12 +172,13 @@ TRUNCATE
   src_local."Request", src_local."Order", src_local."Appointment",
   src_local."PharmaOrder", src_local."DOS", src_local."Master",
   src_local."Package", src_local."PackagesOnLab", src_local."_MasterToPackage",
-  src_local."_PackageToRequest", src_local."_MasterToRequest";
+  src_local."_PackageToRequest", src_local."_MasterToRequest",
+  src_local."PackagesOnStore";
 SQL
 
 # ---- Phase 2a: small tables (full copy, retried) ---------------------------
 log "Phase 2a/4 · copying small tables in full"
-for t in Chain ProviderType Pharmacy Store PincodeToLatLong Lab Provider Profile User Request Master DOS Package PackagesOnLab _MasterToPackage _PackageToRequest _MasterToRequest; do
+for t in Chain ProviderType Pharmacy Store PincodeToLatLong Lab Provider Profile User Request Master DOS Package PackagesOnLab _MasterToPackage _PackageToRequest _MasterToRequest PackagesOnStore; do
   # Explicit column list from the FOREIGN table — the snapshot may carry
   # extra locally-added columns (e.g. Master.aliases on drifted schemas),
   # which would break a bare INSERT ... SELECT *.
@@ -200,7 +201,7 @@ done
 
 # Loud alert for any snapshot that ended the phase empty while its source
 # has rows — a silent version of this emptied /accounts for days.
-for t in Chain ProviderType Pharmacy Store PincodeToLatLong Lab Provider Profile User Request Master DOS Package PackagesOnLab _MasterToPackage _PackageToRequest _MasterToRequest; do
+for t in Chain ProviderType Pharmacy Store PincodeToLatLong Lab Provider Profile User Request Master DOS Package PackagesOnLab _MasterToPackage _PackageToRequest _MasterToRequest PackagesOnStore; do
   local_n=$($PG -t -A -c "SELECT COUNT(*) FROM src_local.\"$t\";" 2>/dev/null || echo 0)
   if [ "${local_n:-0}" = "0" ]; then
     src_n=$($PG -t -A -c "SELECT COUNT(*) FROM (SELECT 1 FROM src.\"$t\" LIMIT 1) x;" 2>/dev/null || echo 0)

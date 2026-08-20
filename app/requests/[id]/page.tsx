@@ -6,13 +6,16 @@ import { FileText, ArrowLeft } from 'lucide-react';
 import { Card, CardHeader, CardBody } from '@/components/ui/Card';
 import { PageHeader } from '@/components/ui/PageHeader';
 import {
-  getRequest, getRequestItems, getCoveringLabs, getDiscoveredLabs,
+  getRequest, getRequestItems, getCoveringLabs, getDiscoveredLabs, getPackageTests,
 } from '@/lib/requestQueries';
+import { lastDiscoveryRun } from '@/lib/discoverLabs';
 import {
   STATE_SHORT, STATE_TONE, TONE_CHIP, BASIS_LABEL, BASIS_STRENGTH,
 } from '@/lib/requests';
 import { QuoteCard } from '../QuoteCard';
 import { LeadActions } from '../LeadActions';
+import { PriceBreakdown } from '../PriceBreakdown';
+import { FindLabs } from '../FindLabs';
 
 export const dynamic = 'force-dynamic';
 
@@ -29,11 +32,18 @@ export default async function RequestDetail({ params }: { params: { id: string }
   const r = await getRequest(id);
   if (!r) notFound();
 
-  const [items, labs, leads] = await Promise.all([
+  const [items, labs, leads, packs, lastRun] = await Promise.all([
     getRequestItems(id),
     getCoveringLabs(id),
     r.pincode ? getDiscoveredLabs(r.pincode) : Promise.resolve([]),
+    getPackageTests(id),
+    r.pincode ? lastDiscoveryRun(r.pincode) : Promise.resolve(null),
   ]);
+
+  // Web leads belong on a request the network cannot serve. Where a covering
+  // lab exists there is a real relationship to use, and an unverified search
+  // result would only compete with it.
+  const noLabHere = labs.length === 0 || labs.every((l) => l.missing > 0);
 
   const tone = STATE_TONE[r.state] ?? 'ink';
 
@@ -83,6 +93,42 @@ export default async function RequestDetail({ params }: { params: { id: string }
             </CardBody>
           </Card>
 
+          {packs.length > 0 && (
+            <Card>
+              <CardHeader
+                title="What's inside the package"
+                subtitle="A package name does not tell you what is being collected — a 56-test panel and a 3-test panel are different conversations with a lab."
+              />
+              <CardBody className="pt-0 space-y-3">
+                {packs.map((pk) => (
+                  <div key={pk.package_id}>
+                    <div className="text-sm font-medium text-ink-900">
+                      {pk.package_name}
+                      <span className="ml-2 text-[11px] font-normal text-ink-500">
+                        {pk.n} test{pk.n === 1 ? '' : 's'}
+                      </span>
+                    </div>
+                    {pk.tests.length === 0 ? (
+                      <p className="text-xs text-ink-400 mt-1">
+                        No composition recorded for this package at source.
+                      </p>
+                    ) : (
+                      <div className="flex flex-wrap gap-1 mt-1.5">
+                        {pk.tests.map((t) => (
+                          <span key={t}
+                                className="rounded border border-ink-200 bg-ink-100/60 px-1.5 py-0.5
+                                           text-[11px] text-ink-700">
+                            {t}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </CardBody>
+            </Card>
+          )}
+
           <Card>
             <CardHeader
               title="Labs that can collect here"
@@ -129,12 +175,26 @@ export default async function RequestDetail({ params }: { params: { id: string }
             </CardBody>
           </Card>
 
-          {leads.length > 0 && (
+          {(noLabHere || leads.length > 0) && r.pincode && (
             <Card>
               <CardHeader
                 title="Labs found on the open web"
                 subtitle="Unverified search results — leads to call, not network records." />
               <CardBody className="pt-0">
+                <div className="mb-3">
+                  <FindLabs pincode={r.pincode} city={r.city} state={r.state_name}
+                            lastRun={lastRun?.ran_at ?? null} found={lastRun?.found ?? null} />
+                  {lastRun?.error && (
+                    <p className="text-[11px] text-danger-500 mt-1">Last search failed: {lastRun.error}</p>
+                  )}
+                </div>
+                {leads.length === 0 && (
+                  <p className="text-xs text-ink-500">
+                    Nothing found yet for {r.pincode}. Searching costs a few seconds and the
+                    results are cached, so it is worth doing once per pincode rather than once
+                    per request.
+                  </p>
+                )}
                 <ul className="text-sm divide-y divide-ink-100">
                   {leads.map((l) => (
                     <li key={l.id} className="py-2">
@@ -163,6 +223,8 @@ export default async function RequestDetail({ params }: { params: { id: string }
 
         <div className="space-y-4">
           <QuoteCard row={r} />
+
+          <PriceBreakdown row={r} />
 
           <Card>
             <CardHeader title="How this was decided" />

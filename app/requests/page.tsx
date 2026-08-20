@@ -88,7 +88,7 @@ export default async function RequestsPage({
           the strip never sat still. Fixed columns keep it steady. */}
       <Card className="my-4">
         <CardBody>
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-x-6 gap-y-4">
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-x-6 gap-y-5 items-start">
             <div>
               <div className="text-2xl font-bold text-ink-900 num leading-tight">
                 {total.toLocaleString('en-IN')}
@@ -108,10 +108,13 @@ export default async function RequestsPage({
                 <div className="text-2xl font-bold num text-ink-700 leading-tight">
                   {s.n.toLocaleString('en-IN')}
                 </div>
-                <div className="text-[11px] text-ink-500 mt-1 leading-snug">
+                {/* One line, always. A second line on only the tiles that had a
+                    priced count made those tiles taller, and the card sized to
+                    the tallest — leaving the others looking bottom-padded. */}
+                <div className="text-[11px] text-ink-500 mt-1 leading-snug truncate">
                   {STATE_SHORT[s.state as RequestState] ?? s.state}
                   {s.quoted > 0 && (
-                    <span className="block text-ink-400">{s.quoted.toLocaleString('en-IN')} priced</span>
+                    <span className="text-ink-400"> · {s.quoted.toLocaleString('en-IN')} priced</span>
                   )}
                 </div>
               </div>

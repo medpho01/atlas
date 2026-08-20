@@ -1,11 +1,11 @@
 'use client';
 
-import { Fragment, useState } from 'react';
-import Link from 'next/link';
-import { ChevronRight, Copy, Check } from 'lucide-react';
+import { useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { Copy, Check, ChevronRight } from 'lucide-react';
 import {
-  STATE_SHORT, STATE_TONE, STATE_OWNER, TONE_CHIP, BASIS_LABEL, BASIS_STRENGTH,
-  quoteBlock, type RequestRow, type RequestState,
+  STATE_SHORT, STATE_TONE, STATE_OWNER, TONE_CHIP,
+  quoteBlock, type RequestRow,
 } from '@/lib/requests';
 
 const inr = (v: string | null) =>
@@ -47,7 +47,7 @@ function CopyQuote({ row }: { row: RequestRow }) {
 }
 
 export function RequestsTable({ rows }: { rows: RequestRow[] }) {
-  const [open, setOpen] = useState<number | null>(null);
+  const router = useRouter();
 
   if (!rows.length) {
     return (
@@ -74,22 +74,19 @@ export function RequestsTable({ rows }: { rows: RequestRow[] }) {
       </thead>
       <tbody>
         {rows.map((r) => {
-          const isOpen = open === r.request_id;
           const tone = STATE_TONE[r.state] ?? 'ink';
           const owner = STATE_OWNER[r.state];
           const items = r.item_names ?? [];
           const ready = r.labs_ready ?? [];
           const covering = r.labs_covering ?? [];
           return (
-            <Fragment key={r.request_id}>
               <tr
-                onClick={() => setOpen(isOpen ? null : r.request_id)}
+                key={r.request_id}
+                onClick={() => router.push(`/requests/${r.request_id}`)}
                 className="border-b border-ink-100 last:border-0 cursor-pointer hover:bg-ink-100/40 align-top"
               >
                 <td className="px-5 py-2.5 font-medium text-ink-900 whitespace-nowrap">
-                  <ChevronRight
-                    className={`inline w-3.5 h-3.5 mr-1 text-ink-400 transition ${isOpen ? 'rotate-90' : ''}`}
-                  />
+                  <ChevronRight className="inline w-3.5 h-3.5 mr-1 text-ink-400" />
                   #{r.request_id}
                   <span className="block text-[10px] text-ink-400 font-normal ml-4.5">
                     {new Date(r.created_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}
@@ -174,42 +171,6 @@ export function RequestsTable({ rows }: { rows: RequestRow[] }) {
                   <CopyQuote row={r} />
                 </td>
               </tr>
-
-              {isOpen && (
-                <tr className="border-b border-ink-100 bg-ink-100/30">
-                  <td colSpan={9} className="px-5 py-3">
-                    <p className="text-xs text-ink-700 mb-2">{r.reason}</p>
-                    <div className="flex flex-wrap gap-x-8 gap-y-1 text-[11px] text-ink-600 mb-3">
-                      <span>Covering labs: <b className="text-ink-900">{r.covering_labs}</b></span>
-                      <span>Can do the whole ask: <b className="text-ink-900">{r.full_labs}</b></span>
-                      {r.nearest_km && <span>Nearest lab: <b className="text-ink-900">{r.nearest_km} km</b></span>}
-                      <span>
-                        Price basis:{' '}
-                        <b className={BASIS_STRENGTH[r.price_basis] === 'strong' ? 'text-success-600'
-                          : BASIS_STRENGTH[r.price_basis] === 'moderate' ? 'text-warn-600' : 'text-danger-500'}>
-                          {BASIS_LABEL[r.price_basis] ?? r.price_basis}
-                        </b>
-                      </span>
-                      {!r.src_flag && r.state === 'SERVICEABLE' && (
-                        <span className="text-warn-600">
-                          Console says not serviceable — Atlas disagrees
-                        </span>
-                      )}
-                    </div>
-                    <div className="flex flex-wrap gap-3 text-xs">
-                      <Link href={`/requests/${r.request_id}`} className="text-brand-600 hover:underline">
-                        Open the full request →
-                      </Link>
-                      {r.pincode && (
-                        <Link href={`/pincode/${r.pincode}`} className="text-brand-600 hover:underline">
-                          Coverage in {r.pincode} →
-                        </Link>
-                      )}
-                    </div>
-                  </td>
-                </tr>
-              )}
-            </Fragment>
           );
         })}
       </tbody>

@@ -96,6 +96,9 @@ export type RequestRow = {
   covering_labs: number;
   full_labs: number;
   best_lab_id: number | null;
+  best_lab_cost: string | null;
+  reference_cost: string | null;
+  reference_n: number | null;
   nearest_km: string | null;
   state: RequestState;
   state_label: string | null;
@@ -114,6 +117,12 @@ export type RequestRow = {
   labs_covering: string[] | null;
   missing_items: string | null;
   store_name: string | null;
+  store_price: string | null;
+  store_mrp: string | null;
+  cost_min: string | null;
+  cost_avg: string | null;
+  cost_max: string | null;
+  cost_labs: number | null;
 };
 
 export type CommitmentRow = {

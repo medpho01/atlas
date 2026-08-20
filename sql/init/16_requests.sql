@@ -579,8 +579,44 @@ SELECT
   -- click, the click is the work.
   it.packages, it.tests, it.item_names, it.unnamed,
   lb.labs_ready, lb.labs_covering, lb.missing_items,
-  st."storeName" AS store_name
+  st."storeName" AS store_name,
+  -- Pricing, shown as a chain rather than a single number. A quote is only
+  -- defensible if you can see what it was built from: what the store already
+  -- pays, what the network actually charges, and what we added on top.
+  spr.store_price, spr.store_mrp,
+  cs.cost_min, cs.cost_avg, cs.cost_max, cs.cost_labs
 FROM analytics.mv_request_state s
+-- What this store already pays us for the same package, where such a rate
+-- exists. It is the strongest sanity check on a quote we have: a number far
+-- from it needs a reason.
+LEFT JOIN LATERAL (
+  SELECT MAX(pos."storePrice")::numeric AS store_price,
+         MAX(pos."storeMrp")::numeric   AS store_mrp
+  FROM atlas.request_item ri
+  JOIN src_local."PackagesOnStore" pos
+    ON pos."packageId" = ri.package_id AND pos."storeId" = s.store_id
+  WHERE ri.request_id = s.request_id AND ri.package_id IS NOT NULL
+) spr ON true
+-- The spread of what labs charge for this ask across the whole network. The
+-- median drives the quote; the range is what tells you whether the median
+-- means anything.
+LEFT JOIN LATERAL (
+  SELECT ROUND(MIN(m.lo)::numeric, 0)  AS cost_min,
+         ROUND(AVG(m.avg)::numeric, 0) AS cost_avg,
+         ROUND(MAX(m.hi)::numeric, 0)  AS cost_max,
+         MIN(m.n)::int                 AS cost_labs
+  FROM (
+    SELECT DISTINCT ri.kind, COALESCE(ri.package_id, ri.master_id) AS item_id
+    FROM atlas.request_item ri
+    WHERE ri.request_id = s.request_id
+      AND (ri.package_id IS NOT NULL OR ri.master_id IS NOT NULL)
+  ) w
+  CROSS JOIN LATERAL (
+    SELECT MIN(lo.cost) AS lo, AVG(lo.cost) AS avg, MAX(lo.cost) AS hi, COUNT(*) AS n
+    FROM analytics.mv_lab_offering lo
+    WHERE lo.kind = w.kind AND lo.item_id = w.item_id
+  ) m
+) cs ON true
 -- Item names, aggregated once per request rather than per render.
 LEFT JOIN LATERAL (
   SELECT

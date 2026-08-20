@@ -168,6 +168,27 @@ export async function getCoveringLabs(id: number) {
   `, [id]);
 }
 
+/**
+ * The tests inside each requested package.
+ *
+ * A package name alone tells ops nothing about what is being collected — and a
+ * 56-test panel and a 3-test panel are very different conversations with a lab.
+ */
+export async function getPackageTests(id: number) {
+  return query<{ package_id: number; package_name: string; tests: string[]; n: number }>(`
+    SELECT p.id AS package_id, p."packageName" AS package_name,
+           ARRAY_REMOVE(ARRAY_AGG(m.name ORDER BY m.name), NULL) AS tests,
+           COUNT(m.id)::int AS n
+    FROM atlas.request_item ri
+    JOIN src_local."Package" p ON p.id = ri.package_id
+    LEFT JOIN src_local."_MasterToPackage" mp ON mp."B" = p.id
+    LEFT JOIN src_local."Master" m ON m.id = mp."A"
+    WHERE ri.request_id = $1 AND ri.package_id IS NOT NULL
+    GROUP BY p.id, p."packageName"
+    ORDER BY p."packageName"
+  `, [id]);
+}
+
 /** Unverified web leads for a pincode. Never mixed into the lab list above. */
 export async function getDiscoveredLabs(pincode: string) {
   return query<{
