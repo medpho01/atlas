@@ -117,15 +117,33 @@ async function targets(): Promise<Target[]> {
   return rows;
 }
 
+const EXTRACT_SYSTEM = `You convert notes about Indian diagnostic labs into structured records.
+
+Copy only what the notes state. Do not add labs, invent phone numbers, or fill a
+missing field from general knowledge — an empty list is correct when the notes
+found nothing. confidence is how strongly the notes support that entry being a
+real, currently-operating lab in the pincode.`;
+
+const textOf = (content: { type: string; text?: string }[]) =>
+  content.filter((b) => b.type === 'text').map((b) => b.text ?? '').join('\n').trim();
+
+/**
+ * Search, then structure — two calls on purpose.
+ *
+ * Web search results carry citations, and citations are incompatible with
+ * output_config.format: asking for both in one request returns a 400. The
+ * search call runs with tools and no schema; the extraction call runs with a
+ * schema and no tools, so there are no citations to conflict with it.
+ */
 async function search(t: Target) {
-  const response = await client().messages.create({
+  const found = await client().messages.create({
     model: MODEL,
     max_tokens: 4000,
     system: [{ type: 'text', text: SYSTEM, cache_control: { type: 'ephemeral' } }],
     tools: [{ type: 'web_search_20260209', name: 'web_search', max_uses: 6 }],
     // Verifying that a business exists and is currently operating is a
     // judgement over messy sources, not a lookup — worth the effort.
-    output_config: { effort: 'medium', format: { type: 'json_schema', schema: SCHEMA } },
+    output_config: { effort: 'medium' },
     messages: [{
       role: 'user',
       content: `Find diagnostic labs serving pincode ${t.pincode}` +
@@ -133,12 +151,26 @@ async function search(t: Target) {
     }],
   } as never);
 
-  if (response.stop_reason === 'refusal') {
-    throw new Error(`Model declined (${response.stop_details?.category ?? 'no category'})`);
+  if (found.stop_reason === 'refusal') {
+    throw new Error(`Model declined the search (${found.stop_details?.category ?? 'no category'})`);
   }
-  const text = response.content.filter((b: { type: string }) => b.type === 'text').pop();
-  if (!text || text.type !== 'text') throw new Error('No text block in response');
-  return JSON.parse(text.text).labs as {
+  const findings = textOf(found.content);
+  if (!findings) return [];
+
+  const shaped = await client().messages.create({
+    model: MODEL,
+    max_tokens: 4000,
+    system: [{ type: 'text', text: EXTRACT_SYSTEM, cache_control: { type: 'ephemeral' } }],
+    output_config: { effort: 'low', format: { type: 'json_schema', schema: SCHEMA } },
+    messages: [{ role: 'user', content: findings }],
+  } as never);
+
+  if (shaped.stop_reason === 'refusal') {
+    throw new Error(`Model declined to structure the findings (${shaped.stop_details?.category ?? 'no category'})`);
+  }
+  const json = textOf(shaped.content);
+  if (!json) throw new Error('No text block in the extraction response');
+  return JSON.parse(json).labs as {
     name: string; address?: string; phone?: string;
     source_url: string; note?: string; confidence: number;
   }[];
