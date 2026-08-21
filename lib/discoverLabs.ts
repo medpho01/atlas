@@ -73,14 +73,26 @@ const SCHEMA = {
 function describe(e: unknown): string {
   const err = e as { status?: number; message?: string; error?: { error?: { message?: string } } };
   const detail = err?.error?.error?.message ?? err?.message ?? String(e);
-  return err?.status ? `HTTP ${err.status}: ${detail}` : detail;
+  const base = err?.status ? `HTTP ${err.status}: ${detail}` : detail;
+  // Which key hit this. The container loads .env.production while the shell
+  // scripts also read .env, so the app and a working curl can easily be using
+  // two different keys — as they were when a topped-up key tested fine from
+  // the command line while the app kept reporting an exhausted balance.
+  // Last four characters only: enough to match against the Console, not
+  // enough to be a credential.
+  const key = process.env.ANTHROPIC_API_KEY ?? process.env.ANTHROPIC_AUTH_TOKEN;
+  return key ? `${base} (key …${key.slice(-4)})` : base;
 }
 
 export async function discoverForPincode(
   pincode: string, city?: string | null, state?: string | null,
 ): Promise<{ found: number; error?: string }> {
   if (!process.env.ANTHROPIC_API_KEY && !process.env.ANTHROPIC_AUTH_TOKEN) {
-    return { found: 0, error: 'No Anthropic credential configured on this host' };
+    return {
+      found: 0,
+      error: 'No Anthropic credential in this container. The app loads .env.production, ' +
+             'not .env — the key has to be in the file compose actually reads.',
+    };
   }
 
   const anthropic = new Anthropic();
