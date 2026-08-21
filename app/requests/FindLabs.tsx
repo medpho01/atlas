@@ -31,9 +31,9 @@ export function FindLabs({
             ? (r.found ? `${r.found} lead${r.found === 1 ? '' : 's'} found` : 'nothing found')
             : (r.error ?? 'search failed'));
         })}
-        className="inline-flex items-center gap-1.5 rounded-md border border-brand-200 bg-brand-50
-                   text-brand-700 px-2.5 py-1.5 text-xs font-medium hover:bg-brand-100
-                   disabled:opacity-50"
+        className="inline-flex items-center gap-1.5 rounded-md border border-brand-200 dark:border-brand-100
+                   bg-brand-50 text-brand-700 dark:text-brand-400 px-2.5 py-1.5 text-xs font-medium
+                   hover:bg-brand-100 disabled:opacity-50"
       >
         {pending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Search className="w-3.5 h-3.5" />}
         {pending ? 'Searching the web…' : 'Find labs on the web'}

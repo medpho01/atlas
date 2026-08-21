@@ -26,8 +26,9 @@ export function LeadActions({ leadId, promoted }: { leadId: number; promoted: bo
           const r = await promoteDiscoveredLab(leadId);
           setMsg(r.ok ? null : r.error ?? 'failed');
         })}
-        className="inline-flex items-center gap-1 rounded border border-brand-200 bg-brand-50
-                   text-brand-700 px-1.5 py-0.5 text-[11px] hover:bg-brand-100 disabled:opacity-50"
+        className="inline-flex items-center gap-1 rounded border border-brand-200 dark:border-brand-100
+                   bg-brand-50 text-brand-700 dark:text-brand-400 px-1.5 py-0.5 text-[11px]
+                   hover:bg-brand-100 disabled:opacity-50"
       >
         {pending ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />}
         Add to CRM
