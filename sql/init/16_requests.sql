@@ -38,6 +38,41 @@ INSERT INTO atlas.request_settings (key, value, note) VALUES
    'A lab this close to an uncovered pincode counts as a known candidate rather than an unknown supply gap.')
 ON CONFLICT (key) DO NOTHING;
 
+-- ---------------------------------------------------------------------------
+-- Snapshot prerequisites.
+--
+-- v_request_quote reads src_local."PackagesOnStore" for the store-price half
+-- of the pricing chain. On a host that has not run the refresh since that
+-- table was added to the copy list, it does not exist yet and the whole file
+-- aborts at the view — which is exactly how this failed on production, for the
+-- second time, from the same cause: a schema file assuming a prerequisite
+-- rather than guaranteeing one.
+--
+-- Bootstrap it here instead. Identifiers are quoted: to_regclass folds an
+-- unquoted name to lower case and would never match "PackagesOnStore".
+-- ---------------------------------------------------------------------------
+DO $bootstrap$
+BEGIN
+  IF to_regclass('src_local."PackagesOnStore"') IS NOT NULL THEN
+    RETURN;
+  END IF;
+
+  IF to_regclass('src."PackagesOnStore"') IS NOT NULL THEN
+    EXECUTE 'CREATE TABLE src_local."PackagesOnStore" (LIKE src."PackagesOnStore")';
+    EXECUTE 'INSERT INTO src_local."PackagesOnStore" SELECT * FROM src."PackagesOnStore"';
+    RAISE NOTICE 'Bootstrapped src_local."PackagesOnStore" from the foreign table.';
+  ELSE
+    -- No FDW import either. An empty table of the right shape keeps the view
+    -- valid and leaves store price simply blank, which is honest — better than
+    -- refusing to build the entire request pipeline over one optional column.
+    EXECUTE 'CREATE TABLE src_local."PackagesOnStore" (
+               "storeId" integer, "packageId" integer,
+               "storePrice" integer, "storeMrp" integer)';
+    RAISE NOTICE 'src."PackagesOnStore" not imported — created an empty snapshot; store price will be blank until the next refresh.';
+  END IF;
+END
+$bootstrap$;
+
 CREATE OR REPLACE FUNCTION atlas.request_setting(k text)
 RETURNS text LANGUAGE sql STABLE AS $$
   SELECT value FROM atlas.request_settings WHERE key = k
