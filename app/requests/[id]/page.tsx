@@ -189,9 +189,12 @@ export default async function RequestDetail({ params }: { params: { id: string }
               <CardBody className="pt-0">
                 <div className="mb-3">
                   <FindLabs pincode={r.pincode} city={r.city} state={r.state_name}
-                            lastRun={lastRun?.ran_at ?? null} found={lastRun?.found ?? null} />
+                            lastRun={lastRun?.ran_at ?? null} found={lastRun?.found ?? null}
+                            error={lastRun?.error ?? null} />
                   {lastRun?.error && (
-                    <p className="text-[11px] text-danger-500 mt-1">Last search failed: {lastRun.error}</p>
+                    <p className="text-[11px] text-ink-500 mt-1">
+                      <span className="text-danger-500">{lastRun.error}</span>
+                    </p>
                   )}
                 </div>
                 {leads.length === 0 && (

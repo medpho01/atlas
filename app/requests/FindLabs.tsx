@@ -12,10 +12,10 @@ import { findLabsForPincode } from './actions';
  * a distraction.
  */
 export function FindLabs({
-  pincode, city, state, lastRun, found,
+  pincode, city, state, lastRun, found, error,
 }: {
   pincode: string; city: string | null; state: string | null;
-  lastRun: string | null; found: number | null;
+  lastRun: string | null; found: number | null; error?: string | null;
 }) {
   const [pending, start] = useTransition();
   const [msg, setMsg] = useState<string | null>(null);
@@ -41,8 +41,20 @@ export function FindLabs({
       {msg && <span className="text-[11px] text-ink-600">{msg}</span>}
       {!msg && lastRun && (
         <span className="text-[11px] text-ink-400">
-          Last searched {new Date(lastRun).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}
+          Last searched {new Date(lastRun).toLocaleString('en-IN',
+            { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' })}
           {found != null && ` · ${found} found`}
+        </span>
+      )}
+      {/* A stored failure with no date reads as current. This one sent an
+          afternoon chasing an API error that had already been fixed by adding
+          credits — the search just had not been retried. */}
+      {!msg && error && (
+        <span className="text-[11px] text-ink-500">
+          Previous attempt failed
+          {lastRun && ` on ${new Date(lastRun).toLocaleString('en-IN',
+            { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' })}`}
+          {' — try again, it may be resolved.'}
         </span>
       )}
     </div>
