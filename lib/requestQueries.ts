@@ -257,6 +257,67 @@ export async function getPackageTests(id: number) {
   `, [id]);
 }
 
+/**
+ * What Atlas knows about the pincode itself.
+ *
+ * A supply gap is a decision about a place, and "533220" is not a place anyone
+ * can picture. Area, district and tier turn it into somewhere the network team
+ * can reason about — and the demand figures answer the question that actually
+ * decides it: is this one stranded request, or somewhere we keep failing?
+ */
+export async function getPincodeIntel(pincode: string) {
+  return queryOne<{
+    pincode: string; area: string | null; city: string | null; district: string | null;
+    state: string | null; tier: string | null; tier_rationale: string | null;
+    labs_local: number | null; providers_total: number | null;
+    orders_all_time: number | null; orders_l90d: number | null;
+    requests_total: number; requests_unserved: number; open_commitments: number;
+    nearest_lab_km: string | null; nearest_lab_name: string | null;
+  }>(`
+    WITH d AS (
+      -- One row per delivery office; the largest is the recognisable name.
+      SELECT MIN(office_name) AS area, MIN(city) AS city,
+             MIN(district) AS district, MIN(state) AS state,
+             MIN(latitude) AS lat, MIN(longitude) AS lng
+      FROM atlas.pincode_directory WHERE pincode = $1
+    ),
+    r AS (
+      SELECT COUNT(*)::int AS requests_total,
+             COUNT(*) FILTER (WHERE state <> 'SERVICEABLE')::int AS requests_unserved
+      FROM analytics.mv_request_state WHERE pincode = $1
+    ),
+    c AS (
+      SELECT COUNT(*)::int AS open_commitments
+      FROM analytics.v_commitment_queue WHERE pincode = $1
+    ),
+    n AS (
+      SELECT l."labName" AS nearest_lab_name,
+             ROUND((6371 * acos(GREATEST(-1, LEAST(1,
+               cos(radians(d.lat)) * cos(radians(pu.latitude)) *
+               cos(radians(pu.longitude) - radians(d.lng)) +
+               sin(radians(d.lat)) * sin(radians(pu.latitude))))))::numeric, 1) AS nearest_lab_km
+      FROM d
+      JOIN analytics.mv_provider_unified pu
+        ON pu.kind IN ('LAB','HOSPITAL') AND pu.latitude IS NOT NULL
+       AND pu.latitude BETWEEN d.lat - 1.5 AND d.lat + 1.5
+       AND pu.longitude BETWEEN d.lng - 1.5 AND d.lng + 1.5
+      JOIN src_local."Lab" l ON l.id = pu.source_id
+      WHERE d.lat IS NOT NULL
+      ORDER BY 2 ASC LIMIT 1
+    )
+    SELECT $1::text AS pincode, d.area, d.city, d.district, d.state,
+           ct.tier, ct.rationale AS tier_rationale,
+           ps.labs_local, ps.providers_total, ps.orders_all_time, ps.orders_l90d,
+           r.requests_total, r.requests_unserved, c.open_commitments,
+           n.nearest_lab_km, n.nearest_lab_name
+    FROM d
+    CROSS JOIN r CROSS JOIN c
+    LEFT JOIN n ON true
+    LEFT JOIN analytics.mv_pincode_summary ps ON ps.pincode = $1
+    LEFT JOIN atlas.city_tier ct ON ct.city_key = atlas.city_key(d.city)
+  `, [pincode]);
+}
+
 /** Unverified web leads for a pincode. Never mixed into the lab list above. */
 export async function getDiscoveredLabs(pincode: string) {
   return query<{

@@ -613,6 +613,7 @@ SELECT
   -- and the network team both said the same thing: if the answer needs a
   -- click, the click is the work.
   it.packages, it.tests, it.item_names, it.unnamed,
+  (SELECT ARRAY_AGG(DISTINCT d ORDER BY d) FROM unnest(it.disciplines_raw) d) AS disciplines,
   lb.labs_ready, lb.labs_covering, lb.missing_items,
   st."storeName" AS store_name,
   -- Pricing, shown as a chain rather than a single number. A quote is only
@@ -664,6 +665,18 @@ LEFT JOIN LATERAL (
         WHERE p.id IS NOT NULL OR m.id IS NOT NULL), NULL)
     || ARRAY_REMOVE(ARRAY_AGG(DISTINCT ri.raw_text) FILTER (
         WHERE p.id IS NULL AND m.id IS NULL), NULL) AS item_names,
+    -- What kind of centre this request needs. A package is judged by its
+    -- components, not its name: "Full Body Checkup" says nothing about whether
+    -- an ultrasound is inside it.
+    ARRAY_REMOVE(ARRAY_AGG(DISTINCT atlas.test_discipline(
+      COALESCE(m.name, ri.raw_text))) FILTER (WHERE m.id IS NOT NULL OR ri.raw_text IS NOT NULL), NULL)
+    || COALESCE((
+        SELECT ARRAY_AGG(DISTINCT atlas.test_discipline(m2.name))
+        FROM atlas.request_item ri2
+        JOIN src_local."_MasterToPackage" mp2 ON mp2."B" = ri2.package_id
+        JOIN src_local."Master" m2 ON m2.id = mp2."A"
+        WHERE ri2.request_id = s.request_id AND ri2.package_id IS NOT NULL
+      ), ARRAY[]::text[]) AS disciplines_raw,
     COUNT(*) FILTER (WHERE p.id IS NULL AND m.id IS NULL)::int AS unnamed
   FROM atlas.request_item ri
   LEFT JOIN src_local."Package" p ON p.id = ri.package_id
@@ -948,3 +961,39 @@ BEGIN
 
   RETURN QUERY SELECT p, t, i;
 END $$;
+
+-- ---------------------------------------------------------------------------
+-- What kind of place can actually do this test.
+--
+-- LabStack's own taxonomy cannot answer this: testCategory is only
+-- ROUTINE/NON_ROUTINE, and LabDepartment lists nine pathology disciplines with
+-- no imaging among them. Yet 1,913 catalogue entries are X-rays, ultrasounds,
+-- CT and MRI — work no pathology lab can take, however well equipped.
+--
+-- So it is inferred from the name, which is the only signal there is. Kept
+-- deliberately narrow: a false RADIOLOGY sends the network team looking for an
+-- imaging centre that was never needed, which wastes a call, while a missed one
+-- just leaves the default. Bare "scan" is excluded for that reason — it appears
+-- in plenty of pathology names.
+-- ---------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION atlas.test_discipline(test_name text)
+RETURNS text LANGUAGE sql IMMUTABLE AS $$
+  SELECT CASE
+    WHEN test_name IS NULL THEN 'PATHOLOGY'
+    WHEN test_name ~* '(x-?ray|ultraso|\musg\M|sonograph|\mmri\M|\mct\M|ct scan|mammogra|doppler|\mopg\M|radiolog|imaging|fluorosco|angiograph|\mdexa\M|bone densito)'
+      THEN 'RADIOLOGY'
+    WHEN test_name ~* '(\mecg\M|\mekg\M|echocardio|\mtmt\M|holter|spirometr|\mpft\M|\meeg\M|\memg\M|audiometr)'
+      THEN 'CARDIO_DIAGNOSTIC'
+    ELSE 'PATHOLOGY'
+  END
+$$;
+
+-- Human wording for each, used in the UI and in the search prompt.
+CREATE OR REPLACE FUNCTION atlas.discipline_label(d text)
+RETURNS text LANGUAGE sql IMMUTABLE AS $$
+  SELECT CASE d
+    WHEN 'RADIOLOGY'         THEN 'Radiology / imaging'
+    WHEN 'CARDIO_DIAGNOSTIC' THEN 'Cardiac & functional testing'
+    ELSE 'Pathology'
+  END
+$$;

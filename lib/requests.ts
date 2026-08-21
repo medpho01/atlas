@@ -117,6 +117,7 @@ export type RequestRow = {
   labs_covering: string[] | null;
   missing_items: string | null;
   store_name: string | null;
+  disciplines: string[] | null;
   store_price: string | null;
   store_mrp: string | null;
   cost_min: string | null;
@@ -162,3 +163,22 @@ export function quoteBlock(r: {
   const date = r.promised_date ?? '—';
   return `Request #${r.request_id}\nQuoted price: ${price}\nEarliest date: ${date}`;
 }
+
+/**
+ * What kind of centre a test needs. Inferred from the test name in
+ * atlas.test_discipline, because LabStack has no field for it — its
+ * LabDepartment list is nine pathology disciplines with no imaging among them,
+ * while 1,907 catalogue entries are X-rays, ultrasounds, CT and MRI.
+ */
+export const DISCIPLINE_LABEL: Record<string, string> = {
+  PATHOLOGY: 'pathology',
+  RADIOLOGY: 'radiology / imaging',
+  CARDIO_DIAGNOSTIC: 'cardiac & functional testing',
+};
+
+/** What to go looking for, in words a search prompt can use. */
+export const DISCIPLINE_SEARCH: Record<string, string> = {
+  PATHOLOGY: 'diagnostic laboratories and sample-collection centres',
+  RADIOLOGY: 'radiology and imaging centres (X-ray, ultrasound, CT, MRI)',
+  CARDIO_DIAGNOSTIC: 'centres offering ECG, echocardiography and similar functional tests',
+};

@@ -23,6 +23,19 @@ import Anthropic from '@anthropic-ai/sdk';
 
 const MODEL = 'claude-opus-5';
 
+const DISCIPLINE_SEARCH: Record<string, string> = {
+  PATHOLOGY: 'diagnostic laboratories and sample-collection centres',
+  RADIOLOGY: 'radiology and imaging centres (X-ray, ultrasound, CT, MRI)',
+  CARDIO_DIAGNOSTIC: 'centres offering ECG, echocardiography and similar functional tests',
+};
+
+/** Search for the kind of centre the stranded requests actually need. */
+function wanted(disciplines?: string[] | null): string {
+  const kinds = (disciplines?.length ? disciplines : ['PATHOLOGY'])
+    .map((d) => DISCIPLINE_SEARCH[d] ?? DISCIPLINE_SEARCH.PATHOLOGY);
+  return Array.from(new Set(kinds)).join(', and separately, ');
+}
+
 const connectionString =
   process.env.APP_DATABASE_URL ?? process.env.DATABASE_URL ?? process.env.SOURCE_DATABASE_URL;
 if (!connectionString) throw new Error('No database URL — set APP_DATABASE_URL.');
@@ -94,7 +107,8 @@ const SCHEMA = {
   additionalProperties: false,
 } as const;
 
-type Target = { pincode: string; city: string | null; state_name: string | null; requests: number };
+type Target = { pincode: string; city: string | null; state_name: string | null;
+                requests: number; disciplines: string[] | null };
 
 async function targets(): Promise<Target[]> {
   if (ONE) {
@@ -104,7 +118,14 @@ async function targets(): Promise<Target[]> {
     return rows;
   }
   const { rows } = await pool.query<Target>(`
-    SELECT s.pincode, MIN(s.city) AS city, MIN(s.state_name) AS state_name, COUNT(*)::int AS requests
+    SELECT s.pincode, MIN(s.city) AS city, MIN(s.state_name) AS state_name, COUNT(*)::int AS requests,
+           -- Every kind of centre this pincode's stranded requests need, so one
+           -- search covers the pathology and the imaging asks together.
+           (SELECT ARRAY_AGG(DISTINCT atlas.test_discipline(m.name))
+              FROM analytics.mv_request_state s3
+              JOIN atlas.request_item ri ON ri.request_id = s3.request_id
+              LEFT JOIN src_local."Master" m ON m.id = ri.master_id
+             WHERE s3.pincode = s.pincode) AS disciplines
     FROM analytics.mv_request_state s
     LEFT JOIN atlas.discovery_run dr ON dr.pincode = s.pincode
     WHERE s.pincode IS NOT NULL
@@ -135,7 +156,7 @@ async function search(t: Target) {
     output_config: { effort: 'medium', format: { type: 'json_schema', schema: SCHEMA } },
     messages: [{
       role: 'user',
-      content: `Find diagnostic labs serving pincode ${t.pincode}` +
+      content: `Find ${wanted(t.disciplines)} serving pincode ${t.pincode}` +
                `${t.city ? `, ${t.city}` : ''}${t.state_name ? `, ${t.state_name}` : ''}, India.`,
     }],
   } as never);

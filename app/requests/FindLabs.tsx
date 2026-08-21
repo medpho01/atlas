@@ -12,9 +12,10 @@ import { findLabsForPincode } from './actions';
  * a distraction.
  */
 export function FindLabs({
-  pincode, city, state, lastRun, found, error,
+  pincode, city, state, lastRun, found, error, disciplines,
 }: {
   pincode: string; city: string | null; state: string | null;
+  disciplines?: string[] | null;
   lastRun: string | null; found: number | null; error?: string | null;
 }) {
   const [pending, start] = useTransition();
@@ -26,7 +27,7 @@ export function FindLabs({
         type="button"
         disabled={pending}
         onClick={() => start(async () => {
-          const r = await findLabsForPincode(pincode, city, state);
+          const r = await findLabsForPincode(pincode, city, state, disciplines);
           setMsg(r.ok
             ? (r.found ? `${r.found} lead${r.found === 1 ? '' : 's'} found` : 'nothing found')
             : (r.error ?? 'search failed'));

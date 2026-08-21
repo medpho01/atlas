@@ -7,15 +7,17 @@ import { Card, CardHeader, CardBody } from '@/components/ui/Card';
 import { PageHeader } from '@/components/ui/PageHeader';
 import {
   getRequest, getRequestItems, getCoveringLabs, getDiscoveredLabs, getPackageTests,
+  getPincodeIntel,
 } from '@/lib/requestQueries';
 import { lastDiscoveryRun } from '@/lib/discoverLabs';
 import {
-  STATE_SHORT, STATE_TONE, TONE_CHIP, BASIS_LABEL, BASIS_STRENGTH,
+  STATE_SHORT, STATE_TONE, TONE_CHIP, BASIS_LABEL, BASIS_STRENGTH, DISCIPLINE_LABEL,
 } from '@/lib/requests';
 import { QuoteCard } from '../QuoteCard';
 import { LeadActions } from '../LeadActions';
 import { PriceBreakdown } from '../PriceBreakdown';
 import { FindLabs } from '../FindLabs';
+import { PincodeIntel } from '../PincodeIntel';
 
 export const dynamic = 'force-dynamic';
 
@@ -32,12 +34,13 @@ export default async function RequestDetail({ params }: { params: { id: string }
   const r = await getRequest(id);
   if (!r) notFound();
 
-  const [items, labs, leads, packs, lastRun] = await Promise.all([
+  const [items, labs, leads, packs, lastRun, intel] = await Promise.all([
     getRequestItems(id),
     getCoveringLabs(id),
     r.pincode ? getDiscoveredLabs(r.pincode) : Promise.resolve([]),
     getPackageTests(id),
     r.pincode ? lastDiscoveryRun(r.pincode) : Promise.resolve(null),
+    r.pincode ? getPincodeIntel(r.pincode) : Promise.resolve(null),
   ]);
 
   // Web leads belong on a request the network cannot serve. Where a covering
@@ -92,6 +95,19 @@ export default async function RequestDetail({ params }: { params: { id: string }
               )}
             </CardBody>
           </Card>
+
+          {(r.disciplines?.length ?? 0) > 1 && (
+            <Card>
+              <CardBody>
+                <div className="text-xs text-ink-600">
+                  <span className="text-ink-500">This request needs more than one kind of centre — </span>
+                  {r.disciplines!.map((d: string) => DISCIPLINE_LABEL[d] ?? d).join(' and ')}.
+                  {' '}A pathology lab cannot take the imaging work, so the pincode may need
+                  two onboardings rather than one.
+                </div>
+              </CardBody>
+            </Card>
+          )}
 
           {packs.length > 0 && (
             <Card>
@@ -190,7 +206,8 @@ export default async function RequestDetail({ params }: { params: { id: string }
                 <div className="mb-3">
                   <FindLabs pincode={r.pincode} city={r.city} state={r.state_name}
                             lastRun={lastRun?.ran_at ?? null} found={lastRun?.found ?? null}
-                            error={lastRun?.error ?? null} />
+                            error={lastRun?.error ?? null}
+                            disciplines={r.disciplines} />
                   {lastRun?.error && (
                     <p className="text-[11px] text-ink-500 mt-1">
                       <span className="text-danger-500">{lastRun.error}</span>
@@ -234,6 +251,8 @@ export default async function RequestDetail({ params }: { params: { id: string }
           <QuoteCard row={r} />
 
           <PriceBreakdown row={r} />
+
+          {intel && <PincodeIntel intel={intel} />}
 
           <Card>
             <CardHeader title="How this was decided" />

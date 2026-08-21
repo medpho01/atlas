@@ -1,6 +1,7 @@
 import 'server-only';
 import Anthropic from '@anthropic-ai/sdk';
 import { query, queryOne } from './db';
+import { DISCIPLINE_SEARCH } from './requests';
 
 /**
  * Find labs on the open web for a pincode the network cannot reach.
@@ -18,10 +19,28 @@ import { query, queryOne } from './db';
 
 const MODEL = 'claude-opus-5';
 
-const SYSTEM = `You find diagnostic laboratories and sample-collection centres in a specific Indian pincode.
+/**
+ * What to ask the search for.
+ *
+ * Driven by the disciplines the request actually needs. Searching for
+ * "diagnostic labs" when the ask is an MRI produces a page of collection
+ * centres, none of which can do the work — the leads look fine and waste a
+ * morning on the phone.
+ */
+function wanted(disciplines?: string[] | null): string {
+  const kinds = (disciplines?.length ? disciplines : ['PATHOLOGY'])
+    .map((d) => DISCIPLINE_SEARCH[d] ?? DISCIPLINE_SEARCH.PATHOLOGY);
+  return Array.from(new Set(kinds)).join(', and separately, ');
+}
 
-Use web search to find real, currently-operating labs, collection centres or
-diagnostic chains that serve the pincode you are given.
+const SYSTEM = `You find diagnostic providers in a specific Indian pincode.
+
+Use web search to find real, currently-operating providers of the kind asked
+for that serve the pincode you are given.
+
+The kind matters. A pathology lab cannot perform an ultrasound and an imaging
+centre does not run blood panels — if the request names radiology, a list of
+collection centres is the wrong answer however good the labs are.
 
 Rules:
 - Return only businesses you found evidence for. An empty list is a correct and
@@ -86,6 +105,7 @@ function describe(e: unknown): string {
 
 export async function discoverForPincode(
   pincode: string, city?: string | null, state?: string | null,
+  disciplines?: string[] | null,
 ): Promise<{ found: number; error?: string }> {
   if (!process.env.ANTHROPIC_API_KEY && !process.env.ANTHROPIC_AUTH_TOKEN) {
     return {
@@ -105,7 +125,7 @@ export async function discoverForPincode(
       output_config: { effort: 'medium', format: { type: 'json_schema', schema: SCHEMA } },
       messages: [{
         role: 'user',
-        content: `Find diagnostic labs serving pincode ${pincode}` +
+        content: `Find ${wanted(disciplines)} serving pincode ${pincode}` +
                  `${city ? `, ${city}` : ''}${state ? `, ${state}` : ''}, India.`,
       }],
     } as never);

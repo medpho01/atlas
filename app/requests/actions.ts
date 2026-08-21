@@ -75,6 +75,7 @@ export async function syncCommitments(): Promise<R & { opened?: number; closed?:
  */
 export async function findLabsForPincode(
   pincode: string, city?: string | null, state?: string | null,
+  disciplines?: string[] | null,
 ): Promise<R & { found?: number }> {
   const me = await getSessionUser();
   if (!me) return { ok: false, error: 'unauthenticated' };
@@ -83,7 +84,7 @@ export async function findLabsForPincode(
   }
   if (!/^\d{6}$/.test(pincode)) return { ok: false, error: 'Bad pincode' };
 
-  const r = await discoverForPincode(pincode, city, state);
+  const r = await discoverForPincode(pincode, city, state, disciplines);
   revalidatePath(`/requests`);
   return r.error ? { ok: false, error: r.error, found: 0 } : { ok: true, found: r.found };
 }
