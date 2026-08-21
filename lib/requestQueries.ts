@@ -195,7 +195,7 @@ export async function getRequestItems(id: number) {
 export async function getCoveringLabs(id: number) {
   return query<{
     lab_id: number; lab_name: string; city: string | null;
-    missing: number; missing_items: string[]; cost: string | null;
+    missing: number | null; missing_items: string[]; cost: string | null;
   }>(`
     WITH want AS (
       SELECT DISTINCT kind, COALESCE(package_id, master_id) AS item_id
@@ -209,13 +209,22 @@ export async function getCoveringLabs(id: number) {
       WHERE s.request_id = $1
     )
     SELECT l.lab_id, lb."labName" AS lab_name, lb.city,
-           COUNT(*) FILTER (WHERE lo.lab_id IS NULL)::int AS missing,
+           -- NULL, not 0, when nothing identifiable was requested: we cannot
+           -- say a lab is missing something when we do not know what was
+           -- asked for, and 0 would read as "can serve this today".
+           CASE WHEN COUNT(w.item_id) = 0 THEN NULL
+                ELSE COUNT(*) FILTER (WHERE w.item_id IS NOT NULL AND lo.lab_id IS NULL)::int
+           END AS missing,
            ARRAY_REMOVE(ARRAY_AGG(
-             CASE WHEN lo.lab_id IS NULL
+             CASE WHEN w.item_id IS NOT NULL AND lo.lab_id IS NULL
                   THEN COALESCE(p."packageName", m.name, '#' || w.item_id) END), NULL) AS missing_items,
            ROUND(SUM(lo.cost)::numeric, 2) AS cost
     FROM labs l
-    CROSS JOIN want w
+    -- LEFT, not CROSS. A request with no identifiable items has an empty
+    -- want-list, and a cross join against it returned no labs at all -- so the
+    -- page said "no lab reaches this pincode" while the sidebar, reading the
+    -- same data a different way, said seven do.
+    LEFT JOIN want w ON true
     LEFT JOIN analytics.mv_lab_offering lo
            ON lo.lab_id = l.lab_id AND lo.kind = w.kind AND lo.item_id = w.item_id
     LEFT JOIN src_local."Package" p ON w.kind = 'PACKAGE' AND p.id = w.item_id

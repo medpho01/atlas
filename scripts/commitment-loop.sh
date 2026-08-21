@@ -24,14 +24,22 @@ log() { echo "[commitments $(date -Iseconds)] $*"; }
 log "Commitment poller started — every ${INTERVAL_MIN} min against ${PGHOST}"
 
 while true; do
+  # Two jobs on the same tick, for the same reason: both exist so that what a
+  # person did in the console shows up in Atlas within minutes rather than
+  # overnight. The item top-up is what stops a request created this morning
+  # reading as "nothing identifiable was requested".
   out=$(psql -h "$PGHOST" -U atlas -d atlas -tA \
         -c "SELECT opened || ' opened, ' || closed || ' closed, ' || expired ||
                    ' expired, ' || crm_created || ' CRM rows'
-              FROM atlas.sync_commitments_full();" 2>&1)
+              FROM atlas.sync_commitments_full();" \
+        -c "SELECT CASE WHEN pkg_links + test_links + items = 0 THEN ''
+                        ELSE pkg_links || ' pkg links, ' || test_links ||
+                             ' test links, ' || items || ' items' END
+              FROM atlas.topup_request_items();" 2>&1)
   status=$?
   if [ $status -ne 0 ]; then
     log "FAILED: $out"
-  elif [ "$out" != "0 opened, 0 closed, 0 expired, 0 CRM rows" ]; then
+  elif [ "$(echo "$out" | tr -d '[:space:]')" != "0opened,0closed,0expired,0CRMrows" ]; then
     # Quiet when nothing changed — a poller that logs every five minutes is a
     # poller nobody reads.
     log "$out"

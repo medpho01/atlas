@@ -43,7 +43,7 @@ export default async function RequestDetail({ params }: { params: { id: string }
   // Web leads belong on a request the network cannot serve. Where a covering
   // lab exists there is a real relationship to use, and an unverified search
   // result would only compete with it.
-  const noLabHere = labs.length === 0 || labs.every((l) => l.missing > 0);
+  const noLabHere = labs.length === 0 || labs.every((l) => (l.missing ?? 1) > 0);
 
   const tone = STATE_TONE[r.state] ?? 'ink';
 
@@ -133,7 +133,9 @@ export default async function RequestDetail({ params }: { params: { id: string }
             <CardHeader
               title="Labs that can collect here"
               subtitle={labs.length
-                ? 'What each one is missing is the negotiation.'
+                ? (r.items_resolvable > 0
+                    ? 'What each one is missing is the negotiation.'
+                    : 'These labs reach the pincode. What was requested is unknown, so we cannot say whether they can serve it.')
                 : 'No lab in the network reaches this pincode for home collection.'} />
             <CardBody className="pt-0">
               {labs.length === 0 ? (
@@ -161,10 +163,14 @@ export default async function RequestDetail({ params }: { params: { id: string }
                           <span className="block text-[10px] text-ink-400">{l.city}</span>
                         </td>
                         <td className="py-1.5 text-xs">
-                          {l.missing === 0
-                            ? <span className="text-success-600">Nothing — can serve today</span>
-                            : <span className="text-warn-600">{l.missing_items.slice(0, 3).join(', ')}
-                                {l.missing_items.length > 3 && ` +${l.missing_items.length - 3}`}</span>}
+                          {/* null means we never knew what was asked for, which
+                              is not the same as "missing nothing". */}
+                          {l.missing == null
+                            ? <span className="text-ink-400">Unknown — nothing identifiable was requested</span>
+                            : l.missing === 0
+                              ? <span className="text-success-600">Nothing — can serve today</span>
+                              : <span className="text-warn-600">{l.missing_items.slice(0, 3).join(', ')}
+                                  {l.missing_items.length > 3 && ` +${l.missing_items.length - 3}`}</span>}
                         </td>
                         <td className="py-1.5 text-right num text-ink-700">{inr(l.cost)}</td>
                       </tr>

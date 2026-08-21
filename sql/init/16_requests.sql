@@ -909,3 +909,42 @@ BEGIN
 
   RETURN new_id;
 END $$;
+
+-- ---------------------------------------------------------------------------
+-- Keep the newest requests answerable.
+--
+-- The item links live in the nightly src_local snapshot, but the queue is
+-- worked newest-first — so without this, a request created this morning shows
+-- "nothing identifiable was requested" until 3 AM tomorrow, which is precisely
+-- backwards. The requests ops care about most were the ones Atlas knew least
+-- about.
+--
+-- Pulls only the rows above the high-water mark already snapshotted, so the
+-- read against the standby is a small indexed range rather than a table scan.
+-- Cheap enough for the five-minute poller.
+-- ---------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION atlas.topup_request_items()
+RETURNS TABLE (pkg_links int, test_links int, items int)
+LANGUAGE plpgsql AS $$
+DECLARE p int := 0; t int := 0; i int := 0; hw int;
+BEGIN
+  -- Packages
+  SELECT COALESCE(MAX("B"), 0) INTO hw FROM src_local."_PackageToRequest";
+  INSERT INTO src_local."_PackageToRequest"
+  SELECT * FROM src."_PackageToRequest" WHERE "B" > hw;
+  GET DIAGNOSTICS p = ROW_COUNT;
+
+  -- Tests
+  SELECT COALESCE(MAX("B"), 0) INTO hw FROM src_local."_MasterToRequest";
+  INSERT INTO src_local."_MasterToRequest"
+  SELECT * FROM src."_MasterToRequest" WHERE "B" > hw;
+  GET DIAGNOSTICS t = ROW_COUNT;
+
+  -- Then fold the new links, and any notes on requests that arrived with them,
+  -- into request_item. sync_request_items is idempotent, so this is safe to
+  -- run as often as we like.
+  SELECT (from_packages + from_masters + from_notes) INTO i
+  FROM atlas.sync_request_items();
+
+  RETURN QUERY SELECT p, t, i;
+END $$;
