@@ -25,6 +25,10 @@ export type RequestFilters = {
   disputed?: boolean;
   /** Only rows with a lab already covering the pincode. */
   hasLab?: boolean;
+  /** Created-date window: today | week | month | all. */
+  window?: 'today' | 'week' | 'month' | 'all';
+  /** Preferred appointment: today | tomorrow | soon (<=3d) | overdue | none. */
+  appt?: 'today' | 'tomorrow' | 'soon' | 'overdue' | 'none';
   limit?: number;
   offset?: number;
 };
@@ -42,6 +46,20 @@ function build(f: RequestFilters) {
   if (f.store)   add('store_id = ?', Number(f.store));
   if (f.city)    add('lower(city) = lower(?)', f.city);
   if (f.pincode) add('pincode = ?', f.pincode);
+  // Created-date window. A queue worked daily is mostly about what arrived
+  // today; the all-time view is the exception, not the default.
+  if (f.window === 'today') where.push("created_at >= date_trunc('day', now())");
+  if (f.window === 'week')  where.push("created_at >= date_trunc('week', now())");
+  if (f.window === 'month') where.push("created_at >= date_trunc('month', now())");
+
+  // What the store asked for, which is the real clock on a request — a
+  // collection wanted tomorrow cannot wait behind one wanted next week.
+  if (f.appt === 'today')    where.push("preferred_at::date = CURRENT_DATE");
+  if (f.appt === 'tomorrow') where.push("preferred_at::date = CURRENT_DATE + 1");
+  if (f.appt === 'soon')     where.push("preferred_at::date BETWEEN CURRENT_DATE AND CURRENT_DATE + 3");
+  if (f.appt === 'overdue')  where.push("preferred_at::date < CURRENT_DATE");
+  if (f.appt === 'none')     where.push('preferred_at IS NULL');
+
   if (f.priced) where.push('quote_price IS NOT NULL');
   if (f.hasLab) where.push('covering_labs > 0');
   // The console flag disagreeing with Atlas is worth filtering on directly:
@@ -105,6 +123,47 @@ export async function getRequestSummary(f: RequestFilters = {}) {
     FROM analytics.v_request_quote ${clause}
     GROUP BY 1 ORDER BY 2 DESC
   `, params);
+}
+
+/**
+ * The funnel, for a window of arrivals.
+ *
+ * Stages are cumulative and monotonic — each is a subset of the one above — so
+ * the drop between two bars is a real loss rather than an artefact of two
+ * unrelated counts sitting next to each other.
+ *
+ * Deliberately scoped to a window. "11,396 open requests" is a fact about a
+ * year of history and tells nobody what to do this morning; "of the 84 that
+ * arrived today, 61 have a price and 12 became orders" does.
+ */
+export async function getRequestFunnel(f: RequestFilters = {}) {
+  const { params, clause } = build({ ...f, state: undefined, openOnly: false });
+  const row = await queryOne<{
+    received: number; answerable: number; priced: number;
+    quoted: number; ordered: number; sourced: number;
+    no_ask: number; no_pincode: number; supply_gap: number; awaiting: number;
+  }>(`
+    SELECT
+      COUNT(*)::int AS received,
+      COUNT(*) FILTER (WHERE state NOT IN ('NO_ITEMS','NO_PINCODE'))::int AS answerable,
+      COUNT(*) FILTER (WHERE state = 'SERVICEABLE' OR quote_price IS NOT NULL)::int AS priced,
+      COUNT(*) FILTER (WHERE src_quoted_price IS NOT NULL OR is_converted)::int AS quoted,
+      COUNT(*) FILTER (WHERE is_converted)::int AS ordered,
+      -- Sourced = ordered and not still waiting on a lab. An order booked
+      -- straight onto a real lab never needed securing, so counting only
+      -- closed commitments read as a total loss of every order ever placed.
+      COUNT(*) FILTER (WHERE is_converted
+                         AND (commitment_id IS NULL OR closed_at IS NOT NULL))::int AS sourced,
+      COUNT(*) FILTER (WHERE state = 'NO_ITEMS')::int   AS no_ask,
+      COUNT(*) FILTER (WHERE state = 'NO_PINCODE')::int AS no_pincode,
+      COUNT(*) FILTER (WHERE state LIKE 'SUPPLY_GAP%')::int AS supply_gap,
+      COUNT(*) FILTER (WHERE commitment_id IS NOT NULL AND closed_at IS NULL)::int AS awaiting
+    FROM analytics.v_request_quote ${clause}
+  `, params);
+  return row ?? {
+    received: 0, answerable: 0, priced: 0, quoted: 0, ordered: 0, sourced: 0,
+    no_ask: 0, no_pincode: 0, supply_gap: 0, awaiting: 0,
+  };
 }
 
 export async function getRequest(id: number) {

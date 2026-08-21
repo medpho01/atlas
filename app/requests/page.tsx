@@ -6,12 +6,17 @@ import { PageHeader } from '@/components/ui/PageHeader';
 import { InfoTip } from '@/components/ui/InfoTip';
 import { ChipButton } from '@/components/ui/Toggle';
 import {
-  getRequests, countRequests, getRequestSummary, getFacets,
+  getRequests, countRequests, getRequestFunnel, getFacets,
 } from '@/lib/requestQueries';
 import { REQUEST_STATES, STATE_SHORT, type RequestState } from '@/lib/requests';
 import { RequestsTable } from './RequestsTable';
+import { RequestFunnel } from './RequestFunnel';
 
 export const dynamic = 'force-dynamic';
+
+const WINDOW_LABEL = {
+  today: 'today', week: 'this week', month: 'this month', all: 'all time',
+} as const;
 
 export default async function RequestsPage({
   searchParams,
@@ -33,12 +38,17 @@ export default async function RequestsPage({
     priced: searchParams.priced === '1',
     disputed: searchParams.disputed === '1',
     hasLab: searchParams.haslab === '1',
+    // Default to this week. An all-time queue is a year of history and tells
+    // nobody what to do this morning.
+    window: (searchParams.window as 'today' | 'week' | 'month' | 'all') ?? 'week',
+    appt: searchParams.appt as 'today' | 'tomorrow' | 'soon' | 'overdue' | 'none' | undefined,
     openOnly,
     limit: 150,
   };
 
-  const [rows, total, summary, facets] = await Promise.all([
-    getRequests(f), countRequests(f), getRequestSummary({ ...f, state: undefined }), getFacets(),
+  const [rows, total, facets, funnel] = await Promise.all([
+    getRequests(f), countRequests(f), getFacets(),
+    getRequestFunnel({ ...f, state: undefined }),
   ]);
 
   const keep = (k: string, v?: string) => {
@@ -47,10 +57,6 @@ export default async function RequestsPage({
     if (v) p.set(k, v);
     return `/requests?${p.toString()}`;
   };
-
-  const needsWork = summary
-    .filter((s) => s.state !== 'SERVICEABLE')
-    .reduce((n, s) => n + s.n, 0);
 
   return (
     <div className="px-6 lg:px-8 py-6 max-w-[1700px] mx-auto">
@@ -83,45 +89,33 @@ export default async function RequestsPage({
         }
       />
 
-      {/* A grid, not a wrapping baseline row: with six tiles of uneven number
-          width the flex gaps collapsed differently on every filter change, so
-          the strip never sat still. Fixed columns keep it steady. */}
-      <Card className="my-4">
-        <CardBody>
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-x-6 gap-y-5 items-start">
-            <div>
-              <div className="text-2xl font-bold text-ink-900 num leading-tight">
-                {total.toLocaleString('en-IN')}
-              </div>
-              <div className="text-[11px] text-ink-500 mt-1 leading-snug">
-                {openOnly ? 'Open requests' : 'All requests'}
-              </div>
-            </div>
-            <div>
-              <div className="text-2xl font-bold num text-warn-600 leading-tight">
-                {needsWork.toLocaleString('en-IN')}
-              </div>
-              <div className="text-[11px] text-ink-500 mt-1 leading-snug">Not serviceable as-is</div>
-            </div>
-            {summary.slice(0, 4).map((s) => (
-              <div key={s.state}>
-                <div className="text-2xl font-bold num text-ink-700 leading-tight">
-                  {s.n.toLocaleString('en-IN')}
-                </div>
-                {/* One line, always. A second line on only the tiles that had a
-                    priced count made those tiles taller, and the card sized to
-                    the tallest — leaving the others looking bottom-padded. */}
-                <div className="text-[11px] text-ink-500 mt-1 leading-snug truncate">
-                  {STATE_SHORT[s.state as RequestState] ?? s.state}
-                  {s.quoted > 0 && (
-                    <span className="text-ink-400"> · {s.quoted.toLocaleString('en-IN')} priced</span>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
-        </CardBody>
-      </Card>
+      <div className="flex flex-wrap items-center gap-1.5 my-4">
+        <span className="text-[11px] uppercase tracking-wide text-ink-400 mr-1">Arrived</span>
+        {([
+          ['today', 'Today'], ['week', 'This week'], ['month', 'This month'], ['all', 'All time'],
+        ] as const).map(([k, label]) => (
+          <ChipButton key={k} href={keep('window', k)} active={(searchParams.window ?? 'week') === k}>
+            {label}
+          </ChipButton>
+        ))}
+        <span className="w-px h-4 bg-ink-200 mx-2" />
+        <span className="text-[11px] uppercase tracking-wide text-ink-400 mr-1">Wanted</span>
+        {([
+          ['overdue', 'Date passed'], ['today', 'Today'], ['tomorrow', 'Tomorrow'],
+          ['soon', 'Within 3 days'], ['none', 'No date given'],
+        ] as const).map(([k, label]) => (
+          <ChipButton key={k} href={keep('appt', searchParams.appt === k ? undefined : k)}
+                      active={searchParams.appt === k}>
+            {label}
+          </ChipButton>
+        ))}
+      </div>
+
+      <RequestFunnel
+        funnel={funnel}
+        windowLabel={WINDOW_LABEL[(searchParams.window ?? 'week') as keyof typeof WINDOW_LABEL]}
+        hrefFor={(k, v) => keep(k, v)}
+      />
 
       <div className="flex flex-wrap items-center gap-1.5 mb-3">
         <span className="text-[11px] uppercase tracking-wide text-ink-400 mr-1">State</span>
