@@ -1073,3 +1073,27 @@ BEGIN
   PERFORM atlas.sync_request_items();
   RETURN QUERY SELECT r, p, m;
 END $$;
+
+-- ---------------------------------------------------------------------------
+-- Day boundaries in IST, not UTC.
+--
+-- The container runs UTC, so date_trunc('day', now()) put the start of "today"
+-- at 05:30 IST — every request from an Indian midnight to half past five in the
+-- morning fell outside it — and after 18:30 UTC the window silently meant
+-- yesterday. For a queue an Indian ops team works by the day, that is wrong for
+-- roughly a quarter of every day.
+--
+-- Returns a naive timestamp in UTC, matching the source columns, which Prisma
+-- writes as `timestamp without time zone`.
+-- ---------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION atlas.ist_midnight(days_ago int DEFAULT 0)
+RETURNS timestamp LANGUAGE sql STABLE AS $$
+  SELECT (date_trunc('day', (now() AT TIME ZONE 'Asia/Kolkata')) - make_interval(days => days_ago))
+           AT TIME ZONE 'Asia/Kolkata' AT TIME ZONE 'UTC'
+$$;
+
+/** Today's date as an Indian ops person means it. */
+CREATE OR REPLACE FUNCTION atlas.ist_today()
+RETURNS date LANGUAGE sql STABLE AS $$
+  SELECT (now() AT TIME ZONE 'Asia/Kolkata')::date
+$$;

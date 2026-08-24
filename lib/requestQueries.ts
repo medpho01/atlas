@@ -52,16 +52,19 @@ function build(f: RequestFilters) {
   // was empty every Monday morning until the first request of the week landed
   // — which is exactly when someone opens it. "Last 7 days" is what an ops
   // person means by the phrase anyway.
-  if (f.window === 'today') where.push("created_at >= date_trunc('day', now())");
+  if (f.window === 'today') where.push('created_at >= atlas.ist_midnight()');
   if (f.window === 'week')  where.push("created_at >= now() - interval '7 days'");
   if (f.window === 'month') where.push("created_at >= now() - interval '30 days'");
 
   // What the store asked for, which is the real clock on a request — a
   // collection wanted tomorrow cannot wait behind one wanted next week.
-  if (f.appt === 'today')    where.push("preferred_at::date = CURRENT_DATE");
-  if (f.appt === 'tomorrow') where.push("preferred_at::date = CURRENT_DATE + 1");
-  if (f.appt === 'soon')     where.push("preferred_at::date BETWEEN CURRENT_DATE AND CURRENT_DATE + 3");
-  if (f.appt === 'overdue')  where.push("preferred_at::date < CURRENT_DATE");
+  //
+  // IST, not CURRENT_DATE: the container runs UTC, so "tomorrow" changed over
+  // at half past five in the morning India time.
+  if (f.appt === 'today')    where.push('preferred_at::date = atlas.ist_today()');
+  if (f.appt === 'tomorrow') where.push('preferred_at::date = atlas.ist_today() + 1');
+  if (f.appt === 'soon')     where.push('preferred_at::date BETWEEN atlas.ist_today() AND atlas.ist_today() + 3');
+  if (f.appt === 'overdue')  where.push('preferred_at::date < atlas.ist_today()');
   if (f.appt === 'none')     where.push('preferred_at IS NULL');
 
   if (f.priced) where.push('quote_price IS NOT NULL');
