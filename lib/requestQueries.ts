@@ -46,11 +46,15 @@ function build(f: RequestFilters) {
   if (f.store)   add('store_id = ?', Number(f.store));
   if (f.city)    add('lower(city) = lower(?)', f.city);
   if (f.pincode) add('pincode = ?', f.pincode);
-  // Created-date window. A queue worked daily is mostly about what arrived
-  // today; the all-time view is the exception, not the default.
+  // Rolling windows, not calendar ones.
+  //
+  // date_trunc('week') resets on Monday, so a queue defaulting to "this week"
+  // was empty every Monday morning until the first request of the week landed
+  // — which is exactly when someone opens it. "Last 7 days" is what an ops
+  // person means by the phrase anyway.
   if (f.window === 'today') where.push("created_at >= date_trunc('day', now())");
-  if (f.window === 'week')  where.push("created_at >= date_trunc('week', now())");
-  if (f.window === 'month') where.push("created_at >= date_trunc('month', now())");
+  if (f.window === 'week')  where.push("created_at >= now() - interval '7 days'");
+  if (f.window === 'month') where.push("created_at >= now() - interval '30 days'");
 
   // What the store asked for, which is the real clock on a request — a
   // collection wanted tomorrow cannot wait behind one wanted next week.
@@ -164,6 +168,23 @@ export async function getRequestFunnel(f: RequestFilters = {}) {
     received: 0, answerable: 0, priced: 0, quoted: 0, ordered: 0, sourced: 0,
     no_ask: 0, no_pincode: 0, supply_gap: 0, awaiting: 0,
   };
+}
+
+/**
+ * How current the request snapshot is.
+ *
+ * An empty window has two very different causes — genuinely nothing arrived,
+ * or the nightly refresh has not run and Atlas is looking at old data. The
+ * page cannot tell them apart without this, and the second one is a broken
+ * pipeline masquerading as a quiet day.
+ */
+export async function getRequestFreshness() {
+  return queryOne<{ newest: string | null; age_hours: number | null; total: number }>(`
+    SELECT MAX(created_at) AS newest,
+           ROUND(EXTRACT(epoch FROM (now() - MAX(created_at))) / 3600)::int AS age_hours,
+           COUNT(*)::int AS total
+    FROM analytics.mv_request_state
+  `);
 }
 
 export async function getRequest(id: number) {

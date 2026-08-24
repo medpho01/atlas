@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Copy, Check, ChevronRight } from 'lucide-react';
 import {
@@ -46,14 +47,38 @@ function CopyQuote({ row }: { row: RequestRow }) {
   );
 }
 
-export function RequestsTable({ rows }: { rows: RequestRow[] }) {
+export function RequestsTable({
+  rows, windowLabel, widenHref,
+}: {
+  rows: RequestRow[];
+  /** The active arrival window, so an empty result can name what hid the rows. */
+  windowLabel?: string;
+  /** One click to the same filters over all time. */
+  widenHref?: string;
+}) {
   const router = useRouter();
 
   if (!rows.length) {
     return (
-      <p className="px-5 py-10 text-sm text-ink-500 text-center">
-        Nothing matches these filters. Clear a filter, or include settled requests.
-      </p>
+      <div className="px-5 py-10 text-sm text-ink-500 text-center">
+        <p>Nothing matches these filters.</p>
+        {/* The arrival window is applied even when it is not in the URL, so a
+            filter that looks like it returned nothing may just be intersecting
+            an empty window. Say so, and offer the way out — this read as
+            "the filters are broken" otherwise. */}
+        {windowLabel && widenHref && (
+          <p className="mt-2 text-ink-600">
+            The <b>Arrived</b> filter is set to <b>{windowLabel}</b> and applies on top of
+            everything else.{' '}
+            <Link href={widenHref} className="text-brand-600 hover:underline">
+              Search all time instead →
+            </Link>
+          </p>
+        )}
+        <p className="mt-2 text-[11px] text-ink-400">
+          Settled requests are hidden by default — use “Include settled” to see them.
+        </p>
+      </div>
     );
   }
 

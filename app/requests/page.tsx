@@ -6,7 +6,7 @@ import { PageHeader } from '@/components/ui/PageHeader';
 import { InfoTip } from '@/components/ui/InfoTip';
 import { ChipButton } from '@/components/ui/Toggle';
 import {
-  getRequests, countRequests, getRequestFunnel, getFacets,
+  getRequests, countRequests, getRequestFunnel, getFacets, getRequestFreshness,
 } from '@/lib/requestQueries';
 import { REQUEST_STATES, STATE_SHORT, type RequestState } from '@/lib/requests';
 import { RequestsTable } from './RequestsTable';
@@ -15,7 +15,7 @@ import { RequestFunnel } from './RequestFunnel';
 export const dynamic = 'force-dynamic';
 
 const WINDOW_LABEL = {
-  today: 'today', week: 'this week', month: 'this month', all: 'all time',
+  today: 'today', week: 'last 7 days', month: 'last 30 days', all: 'all time',
 } as const;
 
 export default async function RequestsPage({
@@ -46,9 +46,10 @@ export default async function RequestsPage({
     limit: 150,
   };
 
-  const [rows, total, facets, funnel] = await Promise.all([
+  const [rows, total, facets, funnel, fresh] = await Promise.all([
     getRequests(f), countRequests(f), getFacets(),
     getRequestFunnel({ ...f, state: undefined }),
+    getRequestFreshness(),
   ]);
 
   const keep = (k: string, v?: string) => {
@@ -92,7 +93,7 @@ export default async function RequestsPage({
       <div className="flex flex-wrap items-center gap-1.5 my-4">
         <span className="text-[11px] uppercase tracking-wide text-ink-400 mr-1">Arrived</span>
         {([
-          ['today', 'Today'], ['week', 'This week'], ['month', 'This month'], ['all', 'All time'],
+          ['today', 'Today'], ['week', 'Last 7 days'], ['month', 'Last 30 days'], ['all', 'All time'],
         ] as const).map(([k, label]) => (
           <ChipButton key={k} href={keep('window', k)} active={(searchParams.window ?? 'week') === k}>
             {label}
@@ -110,6 +111,19 @@ export default async function RequestsPage({
           </ChipButton>
         ))}
       </div>
+
+      {/* A stale snapshot looks exactly like a quiet day. Say which it is. */}
+      {funnel.received === 0 && (fresh?.age_hours ?? 0) > 36 && (
+        <div className="mb-4 rounded-lg border border-warn-100 bg-warn-50 px-4 py-3 text-sm text-ink-700">
+          <span className="font-medium text-warn-600">Nothing here may mean stale data.</span>{' '}
+          The newest request Atlas holds arrived{' '}
+          <b>{Math.round((fresh!.age_hours ?? 0) / 24)} days ago</b>
+          {fresh?.newest && ` (${new Date(fresh.newest).toLocaleDateString('en-IN',
+            { day: 'numeric', month: 'short' })})`}
+          , so the nightly refresh has probably not run. Widen the window to see
+          what is there, and check <code className="font-mono text-[11px]">docker compose logs atlas-refresh</code>.
+        </div>
+      )}
 
       <RequestFunnel
         funnel={funnel}
@@ -180,7 +194,11 @@ export default async function RequestsPage({
         />
         <CardBody className="pt-0">
           <div className="-mx-5">
-            <RequestsTable rows={rows} />
+            <RequestsTable
+              rows={rows}
+              windowLabel={WINDOW_LABEL[(searchParams.window ?? 'week') as keyof typeof WINDOW_LABEL]}
+              widenHref={keep('window', 'all')}
+            />
           </div>
         </CardBody>
       </Card>
