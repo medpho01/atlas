@@ -151,6 +151,11 @@ services:
       PGPASSWORD: ${ATLAS_DB_PASSWORD:-atlas}
       TZ: Asia/Kolkata
       COMMITMENT_INTERVAL_MIN: "${COMMITMENT_INTERVAL_MIN:-5}"
+      # Requests sync every 2nd cycle (10 min) over a 48-hour lookback. The
+      # nightly refresh is far too slow for a queue worked in real time — a
+      # request created at 08:28 was invisible in Atlas until the next morning.
+      REQUEST_SYNC_EVERY_CYCLES: "${REQUEST_SYNC_EVERY_CYCLES:-2}"
+      REQUEST_SYNC_HOURS: "${REQUEST_SYNC_HOURS:-48}"
     entrypoint: ["/commitment-loop.sh"]
 
 volumes:

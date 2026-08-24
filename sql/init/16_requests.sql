@@ -997,3 +997,79 @@ RETURNS text LANGUAGE sql IMMUTABLE AS $$
     ELSE 'Pathology'
   END
 $$;
+
+-- ---------------------------------------------------------------------------
+-- Incremental request sync.
+--
+-- mv_request_state reads src_local."Request", which the nightly job rebuilds at
+-- 03:00. That is fine for coverage and pricing, which change slowly, and wrong
+-- for a queue: a request created at 08:28 did not appear in Atlas until the
+-- following morning, so the ops screen was always a day behind the console it
+-- sits next to.
+--
+-- This pulls only what changed recently. Two things make it cheap enough to run
+-- every few minutes against a hot standby:
+--
+--   * The cutoff is interpolated as a literal, not now(). postgres_fdw only
+--     pushes down immutable expressions — with now() the whole remote table is
+--     scanned and shipped, which is what caused the recovery conflicts that
+--     killed the readiness refresh twice.
+--   * Only rows at or after the cutoff move, so the transfer is minutes of
+--     traffic rather than a year of it.
+-- ---------------------------------------------------------------------------
+
+-- The delete-then-insert below matches on id; without this it is a sequential
+-- scan of the whole snapshot on every run.
+CREATE INDEX IF NOT EXISTS idx_src_local_request_id ON src_local."Request" (id);
+
+CREATE OR REPLACE FUNCTION atlas.sync_recent_requests(hours int DEFAULT 48)
+RETURNS TABLE (requests int, pkg_links int, test_links int)
+LANGUAGE plpgsql AS $$
+DECLARE
+  cutoff   timestamp := now() - make_interval(hours => hours);
+  cols     text;
+  r int := 0; p int := 0; m int := 0;
+BEGIN
+  -- Column list from the foreign table, intersected with the snapshot, so a
+  -- column added at source does not break the copy.
+  SELECT string_agg(quote_ident(c.column_name), ', ' ORDER BY c.ordinal_position)
+    INTO cols
+  FROM information_schema.columns c
+  WHERE c.table_schema = 'src' AND c.table_name = 'Request'
+    AND EXISTS (SELECT 1 FROM information_schema.columns c2
+                 WHERE c2.table_schema = 'src_local' AND c2.table_name = 'Request'
+                   AND c2.column_name = c.column_name);
+
+  -- Replace rather than upsert: the snapshot carries no primary key, and a
+  -- request's status changes constantly, so the newest copy always wins.
+  EXECUTE format(
+    'DELETE FROM src_local."Request" WHERE id IN (SELECT id FROM src."Request" WHERE "createdAt" >= %L OR "updatedAt" >= %L)',
+    cutoff, cutoff);
+  EXECUTE format(
+    'INSERT INTO src_local."Request" (%s) SELECT %s FROM src."Request" WHERE "createdAt" >= %L OR "updatedAt" >= %L',
+    cols, cols, cutoff, cutoff);
+  GET DIAGNOSTICS r = ROW_COUNT;
+
+  -- The join tables carry no timestamps, so they are refreshed for exactly the
+  -- requests that just moved.
+  EXECUTE format(
+    'DELETE FROM src_local."_PackageToRequest" WHERE "B" IN
+       (SELECT id FROM src_local."Request" WHERE "createdAt" >= %L OR "updatedAt" >= %L)', cutoff, cutoff);
+  EXECUTE format(
+    'INSERT INTO src_local."_PackageToRequest" SELECT pr.* FROM src."_PackageToRequest" pr
+      WHERE pr."B" IN (SELECT id FROM src_local."Request" WHERE "createdAt" >= %L OR "updatedAt" >= %L)',
+    cutoff, cutoff);
+  GET DIAGNOSTICS p = ROW_COUNT;
+
+  EXECUTE format(
+    'DELETE FROM src_local."_MasterToRequest" WHERE "B" IN
+       (SELECT id FROM src_local."Request" WHERE "createdAt" >= %L OR "updatedAt" >= %L)', cutoff, cutoff);
+  EXECUTE format(
+    'INSERT INTO src_local."_MasterToRequest" SELECT mr.* FROM src."_MasterToRequest" mr
+      WHERE mr."B" IN (SELECT id FROM src_local."Request" WHERE "createdAt" >= %L OR "updatedAt" >= %L)',
+    cutoff, cutoff);
+  GET DIAGNOSTICS m = ROW_COUNT;
+
+  PERFORM atlas.sync_request_items();
+  RETURN QUERY SELECT r, p, m;
+END $$;

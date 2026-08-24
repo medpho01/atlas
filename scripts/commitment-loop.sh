@@ -18,11 +18,17 @@
 set -u
 
 INTERVAL_MIN="${COMMITMENT_INTERVAL_MIN:-5}"
+# The request sync copies rows over the FDW and rebuilds mv_request_state,
+# which takes tens of seconds — far heavier than the commitment check, so it
+# runs every Nth cycle rather than every one.
+REQUEST_EVERY="${REQUEST_SYNC_EVERY_CYCLES:-2}"
+REQUEST_HOURS="${REQUEST_SYNC_HOURS:-48}"
 PGHOST="${PGHOST:-atlas-db}"
 
-log() { echo "[commitments $(date -Iseconds)] $*"; }
-log "Commitment poller started — every ${INTERVAL_MIN} min against ${PGHOST}"
+log() { echo "[sync $(date -Iseconds)] $*"; }
+log "Poller started — commitments every ${INTERVAL_MIN} min, requests every $(( INTERVAL_MIN * REQUEST_EVERY )) min, against ${PGHOST}"
 
+cycle=0
 while true; do
   # Two jobs on the same tick, for the same reason: both exist so that what a
   # person did in the console shows up in Atlas within minutes rather than
@@ -44,5 +50,35 @@ while true; do
     # poller nobody reads.
     log "$out"
   fi
+
+  # The request rows themselves.
+  #
+  # topup_request_items above only fills in what was asked for, for requests
+  # already in the snapshot. A request created this morning is not in the
+  # snapshot at all — src_local."Request" is rebuilt nightly — so without this
+  # the queue simply did not contain today's work, and no amount of topping up
+  # items would put it there.
+  if [ $(( cycle % REQUEST_EVERY )) -eq 0 ]; then
+    req=$(psql -h "$PGHOST" -U atlas -d atlas -tA \
+          -c "SELECT requests || ' requests, ' || pkg_links || ' pkg links, ' ||
+                     test_links || ' test links'
+                FROM atlas.sync_recent_requests(${REQUEST_HOURS});" 2>&1)
+    if [ $? -ne 0 ]; then
+      log "request sync FAILED: $req"
+    else
+      # Refresh even when no rows moved: a request's status changes without a
+      # new row appearing, and the queue keys off status. CONCURRENTLY so
+      # nobody's page blocks for the duration.
+      ref=$(psql -h "$PGHOST" -U atlas -d atlas -tA \
+            -c "REFRESH MATERIALIZED VIEW CONCURRENTLY analytics.mv_request_state;" 2>&1)
+      if [ $? -ne 0 ]; then
+        log "request refresh FAILED: $ref"
+      elif [ "${req%% requests*}" != "0" ]; then
+        log "requests · $req"
+      fi
+    fi
+  fi
+
+  cycle=$(( cycle + 1 ))
   sleep $(( INTERVAL_MIN * 60 ))
 done
