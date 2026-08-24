@@ -405,18 +405,59 @@ export async function getPincodeDemand(limit = 50) {
   `, [limit]);
 }
 
-export async function getFacets() {
+/**
+ * Facet counts for the filter chips, under the filters that are already on.
+ *
+ * These used to be all-time totals read straight from mv_request_state,
+ * ignoring the window, the state, and even the settled-request exclusion. So a
+ * chip could advertise "Star Health 23,435" beside a list showing zero rows,
+ * and clicking it led to another empty page. A count next to a filter is a
+ * promise about what that filter will return — it has to be counted the same
+ * way the list is.
+ *
+ * Each facet excludes its own dimension, so the store counts show what
+ * switching store would give rather than collapsing to the current one.
+ */
+export async function getFacets(f: RequestFilters = {}) {
+  const forStores = build({ ...f, store: undefined });
+  const forCities = build({ ...f, city: undefined });
+  // The chip list is chosen by all-time volume so it stays put as filters
+  // change — a row of chips that empties out reads as a broken page. The
+  // count on each chip is the filtered one, including zero, so it is a
+  // truthful preview of what clicking it returns.
   const [stores, cities] = await Promise.all([
     query<{ store_id: number; name: string; n: number }>(`
-      SELECT s.store_id, COALESCE(st."storeName", 'Store ' || s.store_id) AS name, COUNT(*)::int AS n
-      FROM analytics.mv_request_state s
-      LEFT JOIN src_local."Store" st ON st.id = s.store_id
-      WHERE s.store_id IS NOT NULL
-      GROUP BY 1,2 ORDER BY 3 DESC LIMIT 25`),
+      WITH top AS (
+        SELECT store_id, COUNT(*) AS all_time
+        FROM analytics.mv_request_state
+        WHERE store_id IS NOT NULL GROUP BY 1 ORDER BY 2 DESC LIMIT 25
+      ),
+      filtered AS (
+        SELECT store_id, COUNT(*)::int AS n
+        FROM analytics.v_request_quote ${forStores.clause}
+        GROUP BY 1
+      )
+      SELECT t.store_id,
+             COALESCE(st."storeName", 'Store ' || t.store_id) AS name,
+             COALESCE(f.n, 0) AS n
+      FROM top t
+      LEFT JOIN filtered f ON f.store_id = t.store_id
+      LEFT JOIN src_local."Store" st ON st.id = t.store_id
+      ORDER BY COALESCE(f.n, 0) DESC, t.all_time DESC`, forStores.params),
     query<{ city: string; n: number }>(`
-      SELECT city, COUNT(*)::int AS n FROM analytics.mv_request_state
-      WHERE NULLIF(TRIM(city),'') IS NOT NULL
-      GROUP BY 1 ORDER BY 2 DESC LIMIT 30`),
+      WITH top AS (
+        SELECT city, COUNT(*) AS all_time
+        FROM analytics.mv_request_state
+        WHERE NULLIF(TRIM(city),'') IS NOT NULL GROUP BY 1 ORDER BY 2 DESC LIMIT 30
+      ),
+      filtered AS (
+        SELECT city, COUNT(*)::int AS n
+        FROM analytics.v_request_quote ${forCities.clause}
+        GROUP BY 1
+      )
+      SELECT t.city, COALESCE(f.n, 0) AS n
+      FROM top t LEFT JOIN filtered f ON lower(f.city) = lower(t.city)
+      ORDER BY COALESCE(f.n, 0) DESC, t.all_time DESC`, forCities.params),
   ]);
   return { stores, cities };
 }

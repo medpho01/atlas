@@ -47,7 +47,7 @@ export default async function RequestsPage({
   };
 
   const [rows, total, facets, funnel, fresh] = await Promise.all([
-    getRequests(f), countRequests(f), getFacets(),
+    getRequests(f), countRequests(f), getFacets(f),
     getRequestFunnel({ ...f, state: undefined }),
     getRequestFreshness(),
   ]);
@@ -148,10 +148,13 @@ export default async function RequestsPage({
       <div className="flex flex-wrap items-center gap-1.5 mb-4">
         <span className="text-[11px] uppercase tracking-wide text-ink-400 mr-1">Store</span>
         <ChipButton href={keep('store')} active={!searchParams.store}>All</ChipButton>
+        {/* Zero-count chips stay visible but muted: knowing a store has nothing
+            in this window is useful, and removing them makes the row jump. */}
         {facets.stores.slice(0, 6).map((s) => (
           <ChipButton key={s.store_id} href={keep('store', String(s.store_id))}
                       active={searchParams.store === String(s.store_id)}>
-            {s.name} <span className="text-ink-400">{s.n}</span>
+            {s.name}{' '}
+            <span className={s.n === 0 ? 'text-ink-300' : 'text-ink-400'}>{s.n}</span>
           </ChipButton>
         ))}
       </div>
