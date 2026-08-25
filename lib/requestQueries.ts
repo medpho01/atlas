@@ -235,6 +235,7 @@ export async function getCoveringLabs(id: number) {
       JOIN analytics.mv_lab_pincode_home lph ON lph.pincode = s.pincode
       WHERE s.request_id = $1
         AND (s.store_id IS NULL
+             OR NOT atlas.store_lab_gate_active()
              OR EXISTS (SELECT 1 FROM src_local."LabsOnStore" los
                          WHERE los."storeId" = s.store_id AND los."labId" = lph.lab_id))
     ),

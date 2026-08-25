@@ -440,6 +440,23 @@ $$;
 -- snapshots are there.
 
 -- ---------------------------------------------------------------------------
+-- Is the store-to-lab contract usable?
+--
+-- The gate below narrows coverage to labs a store is contracted with. If the
+-- mapping table is empty — not imported yet, or a refresh that has not run —
+-- an unguarded gate matches nothing and every request with a store silently
+-- becomes a supply gap. That is a worse failure than the one it fixes, because
+-- it looks like an answer rather than an error.
+--
+-- So the gate only applies when there is a contract to apply. Absent data
+-- means "we do not know", which has to fail open.
+-- ---------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION atlas.store_lab_gate_active()
+RETURNS boolean LANGUAGE sql STABLE AS $$
+  SELECT EXISTS (SELECT 1 FROM src_local."LabsOnStore")
+$$;
+
+-- ---------------------------------------------------------------------------
 -- Where a lab has actually collected, as opposed to where it says it will.
 --
 -- Lab."pincodesServiced" is the only serviceability signal Atlas has, and it is
@@ -572,6 +589,7 @@ covering AS (
   FROM req r
   JOIN analytics.mv_lab_pincode_home lph ON lph.pincode = r.pincode
   WHERE r."storeId" IS NULL
+     OR NOT atlas.store_lab_gate_active()
      OR EXISTS (SELECT 1 FROM src_local."LabsOnStore" los
                  WHERE los."storeId" = r."storeId" AND los."labId" = lph.lab_id)
 ),
@@ -859,6 +877,7 @@ LEFT JOIN LATERAL (
     LEFT JOIN src_local."Master"  m2 ON w.kind = 'TEST'    AND m2.id = w.item_id
     WHERE lph.pincode = s.pincode
       AND (s.store_id IS NULL
+           OR NOT atlas.store_lab_gate_active()
            OR EXISTS (SELECT 1 FROM src_local."LabsOnStore" los
                        WHERE los."storeId" = s.store_id AND los."labId" = lph.lab_id))
     GROUP BY lph.lab_id
