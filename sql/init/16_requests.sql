@@ -390,6 +390,32 @@ BEGIN
 
   RETURN QUERY SELECT p, m, n;
 END $$;
+
+-- ---------------------------------------------------------------------------
+-- Pincodes a lab does not actually serve, whatever its mapping says.
+--
+-- Serviceability in LabStack is Lab."pincodesServiced". Atlas reads it exactly.
+-- But the console applies something further that is not in the database — for
+-- Thyrocare in 509125 every field says yes (mapped, contracted, carries the
+-- package, home collection, active) and the console still refuses.
+--
+-- Until that rule is known, this is the way to be right: the network team marks
+-- what the console will not accept, and Atlas stops offering it. Not a guess at
+-- the missing rule — a record of where the mapping is wrong, which is useful
+-- whatever the rule turns out to be, and which becomes the evidence for fixing
+-- pincodesServiced at source.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS atlas.lab_pincode_block (
+  lab_id      int  NOT NULL,
+  pincode     text NOT NULL,
+  reason      text,
+  blocked_by  int REFERENCES atlas.users(id),
+  created_at  timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (lab_id, pincode)
+);
+
+CREATE INDEX IF NOT EXISTS idx_lab_pincode_block_pin ON atlas.lab_pincode_block (pincode);
+
 -- ===========================================================================
 -- Helper functions.
 --
@@ -542,6 +568,12 @@ CROSS JOIN LATERAL (
 WHERE pu.kind IN ('LAB','HOSPITAL')
   AND 'HOME_SAMPLE' = ANY(pu.modalities)
   AND NULLIF(TRIM(p.pincode),'') IS NOT NULL
+  -- Excluded by hand. See atlas.lab_pincode_block: the mapping says this lab
+  -- serves this pincode and the console disagrees, so somebody checked and
+  -- recorded the truth.
+  AND NOT EXISTS (
+    SELECT 1 FROM atlas.lab_pincode_block b
+     WHERE b.lab_id = pu.source_id AND b.pincode = p.pincode)
   -- Not the placeholder. Lab id 1 is where orders park when nobody has been
   -- found to serve them, so counting it as supply says the network can serve a
   -- pincode precisely because it could not. It claimed 623 pincodes and made 55

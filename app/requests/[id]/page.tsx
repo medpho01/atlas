@@ -18,6 +18,7 @@ import { LeadActions } from '../LeadActions';
 import { PriceBreakdown } from '../PriceBreakdown';
 import { FindLabs } from '../FindLabs';
 import { PincodeIntel } from '../PincodeIntel';
+import { BlockLab } from '../BlockLab';
 
 export const dynamic = 'force-dynamic';
 
@@ -189,6 +190,9 @@ export default async function RequestDetail({ params }: { params: { id: string }
                                   {l.missing_items.length > 3 && ` +${l.missing_items.length - 3}`}</span>}
                         </td>
                         <td className="py-1.5 text-right num text-ink-700">{inr(l.cost)}</td>
+                        <td className="py-1.5 text-right whitespace-nowrap pl-3">
+                          {r.pincode && <BlockLab labId={l.lab_id} pincode={r.pincode} />}
+                        </td>
                       </tr>
                     ))}
                   </tbody>

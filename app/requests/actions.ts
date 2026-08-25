@@ -88,3 +88,56 @@ export async function findLabsForPincode(
   revalidatePath(`/requests`);
   return r.error ? { ok: false, error: r.error, found: 0 } : { ok: true, found: r.found };
 }
+
+/**
+ * Record that a lab does not serve a pincode, whatever its mapping says.
+ *
+ * LabStack's serviceability is Lab."pincodesServiced", and Atlas reads it
+ * faithfully — but the console applies a further rule that is not in the
+ * database, so Atlas can offer a lab the console will refuse. Rather than
+ * guess at that rule, this lets the person who can see both systems record the
+ * truth once, for everyone.
+ *
+ * Takes effect on the labs list immediately; the state chip follows the next
+ * time mv_lab_pincode_home is refreshed, which the block does itself.
+ */
+export async function blockLabForPincode(
+  labId: number, pincode: string, reason?: string,
+): Promise<R> {
+  const me = await getSessionUser();
+  if (!me) return { ok: false, error: 'unauthenticated' };
+  if (!canManage(me, 'commitments')) {
+    return { ok: false, error: 'Marking a lab needs the network or admin role' };
+  }
+  if (!Number.isFinite(labId) || !/^\d{6}$/.test(pincode)) {
+    return { ok: false, error: 'Bad lab or pincode' };
+  }
+
+  try {
+    await queryOne(`
+      INSERT INTO atlas.lab_pincode_block (lab_id, pincode, reason, blocked_by)
+      VALUES ($1, $2, $3, $4)
+      ON CONFLICT (lab_id, pincode) DO UPDATE
+        SET reason = EXCLUDED.reason, blocked_by = EXCLUDED.blocked_by
+    `, [labId, pincode, reason ?? null, me.id]);
+    // Coverage is a materialized view, so the exclusion is not visible to the
+    // classification until it is rebuilt. Cheap enough to do inline.
+    await queryOne(`REFRESH MATERIALIZED VIEW analytics.mv_lab_pincode_home`);
+    revalidatePath(`/requests`);
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: (e as Error).message };
+  }
+}
+
+/** Undo a block, for when it was recorded in error. */
+export async function unblockLabForPincode(labId: number, pincode: string): Promise<R> {
+  const me = await getSessionUser();
+  if (!me) return { ok: false, error: 'unauthenticated' };
+  if (!canManage(me, 'commitments')) return { ok: false, error: 'Needs the network or admin role' };
+  await queryOne(`DELETE FROM atlas.lab_pincode_block WHERE lab_id = $1 AND pincode = $2`,
+                 [labId, pincode]);
+  await queryOne(`REFRESH MATERIALIZED VIEW analytics.mv_lab_pincode_home`);
+  revalidatePath(`/requests`);
+  return { ok: true };
+}
