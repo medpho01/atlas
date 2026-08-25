@@ -52,7 +52,7 @@ ON CONFLICT (key) DO NOTHING;
 -- unquoted name to lower case and would never match "PackagesOnStore".
 -- ---------------------------------------------------------------------------
 DO $bootstrap$
-DECLARE t text; has_rows boolean; local_cols int; src_cols int;
+DECLARE t text; has_rows boolean; shared_cols text;
 BEGIN
   -- Every source table this file's views read out of src_local. A snapshot is
   -- created on demand when it is missing, because the alternative is what has
@@ -60,40 +60,10 @@ BEGIN
   -- the top of a view has already run, and production is left worse than
   -- before. It is never caught locally, where the table was made by hand.
   FOREACH t IN ARRAY ARRAY['PackagesOnStore', 'LabsOnStore'] LOOP
-    -- If a snapshot exists, make sure it has the right shape before trusting
-    -- it. An earlier version of this block created LabsOnStore from a
-    -- hardcoded three-column guess when the foreign table was missing. Every
-    -- later INSERT ... SELECT * then failed with "more expressions than target
-    -- columns", the table stayed empty, the store gate stayed off, and nothing
-    -- upstream could tell — the gate fails open, so the app looked fine. A
-    -- guessed shape is worse than no table.
-    IF to_regclass(format('src_local.%I', t)) IS NOT NULL
-       AND to_regclass(format('src.%I', t)) IS NOT NULL THEN
-      SELECT COUNT(*) INTO local_cols
-        FROM information_schema.columns
-       WHERE table_schema = 'src_local' AND table_name = t;
-      SELECT COUNT(*) INTO src_cols
-        FROM information_schema.columns
-       WHERE table_schema = 'src' AND table_name = t;
-
-      IF local_cols <> src_cols THEN
-        EXECUTE format('DROP TABLE src_local.%I CASCADE', t);
-        RAISE WARNING 'src_local.% had % columns against % at source — rebuilt.',
-                      t, local_cols, src_cols;
-      END IF;
-    END IF;
-
-    -- Already populated and correctly shaped: nothing to do.
-    IF to_regclass(format('src_local.%I', t)) IS NOT NULL THEN
-      EXECUTE format('SELECT EXISTS (SELECT 1 FROM src_local.%I)', t) INTO has_rows;
-      IF has_rows THEN
-        CONTINUE;
-      END IF;
-    END IF;
-
-    -- Import the foreign table if it is absent. Adding a table to the FDW list
-    -- in 03_fdw.sh only helps a database created from scratch; an existing one
-    -- never receives it.
+    -- Import the foreign table if absent. Adding a table to the FDW list in
+    -- 03_fdw.sh only helps a database built from scratch; an existing one never
+    -- receives it, which is how production ran for days with the store gate
+    -- silently switched off.
     IF to_regclass(format('src.%I', t)) IS NULL THEN
       BEGIN
         EXECUTE format(
@@ -105,18 +75,44 @@ BEGIN
     END IF;
 
     IF to_regclass(format('src.%I', t)) IS NULL THEN
-      -- No source to copy from and no shape to trust. Leave it absent rather
-      -- than invent one; the view that reads it will fail loudly, which beats
-      -- a silently empty table that disables a rule nobody knows is off.
-      RAISE WARNING 'src.% unavailable — src_local.% not created.', t, t;
+      RAISE WARNING 'src.% unavailable — leaving src_local.% alone.', t, t;
       CONTINUE;
     END IF;
 
-    -- Shape always comes from the source, never from a literal.
+    -- Create from the source's own shape. Never from a literal: an earlier
+    -- version guessed three columns for LabsOnStore against seven at source,
+    -- and every INSERT ... SELECT * after that failed with "more expressions
+    -- than target columns" while the table sat empty and the gate stayed off.
     IF to_regclass(format('src_local.%I', t)) IS NULL THEN
       EXECUTE format('CREATE TABLE src_local.%I (LIKE src.%I)', t, t);
     END IF;
-    EXECUTE format('INSERT INTO src_local.%I SELECT * FROM src.%I', t, t);
+
+    EXECUTE format('SELECT EXISTS (SELECT 1 FROM src_local.%I)', t) INTO has_rows;
+    IF has_rows THEN
+      CONTINUE;
+    END IF;
+
+    -- Copy only the columns both sides share, by name.
+    --
+    -- Not SELECT *, and not a DROP-and-recreate: views depend on these
+    -- snapshots, so dropping one takes mv_request_state and both views with it.
+    -- An explicit intersection copies what it can into whatever shape is
+    -- already there, which is the same approach refresh-data.sh uses.
+    SELECT string_agg(quote_ident(c.column_name), ', ' ORDER BY c.ordinal_position)
+      INTO shared_cols
+    FROM information_schema.columns c
+    WHERE c.table_schema = 'src' AND c.table_name = t
+      AND EXISTS (SELECT 1 FROM information_schema.columns c2
+                   WHERE c2.table_schema = 'src_local' AND c2.table_name = t
+                     AND c2.column_name = c.column_name);
+
+    IF shared_cols IS NULL THEN
+      RAISE WARNING 'src_local.% shares no columns with src.% — not filled.', t, t;
+      CONTINUE;
+    END IF;
+
+    EXECUTE format('INSERT INTO src_local.%I (%s) SELECT %s FROM src.%I',
+                   t, shared_cols, shared_cols, t);
     RAISE NOTICE 'Filled src_local.% from the foreign table.', t;
 
   END LOOP;
