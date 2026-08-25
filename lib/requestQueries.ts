@@ -220,7 +220,6 @@ export async function getCoveringLabs(id: number) {
   return query<{
     lab_id: number; lab_name: string; city: string | null;
     missing: number | null; missing_items: string[]; cost: string | null;
-    served_orders: number | null; last_served: string | null;
   }>(`
     WITH want AS (
       SELECT DISTINCT kind, COALESCE(package_id, master_id) AS item_id
@@ -238,13 +237,6 @@ export async function getCoveringLabs(id: number) {
              OR NOT atlas.store_lab_gate_active()
              OR EXISTS (SELECT 1 FROM src_local."LabsOnStore" los
                          WHERE los."storeId" = s.store_id AND los."labId" = lph.lab_id))
-    ),
-    -- Has this lab actually collected here before, or does it only say it will?
-    proof AS (
-      SELECT sv.lab_id, sv.orders, sv.last_served
-      FROM analytics.mv_request_state s
-      JOIN analytics.mv_lab_pincode_served sv ON sv.pincode = s.pincode
-      WHERE s.request_id = $1
     )
     SELECT l.lab_id, lb."labName" AS lab_name, lb.city,
            -- NULL, not 0, when nothing identifiable was requested: we cannot
@@ -256,9 +248,7 @@ export async function getCoveringLabs(id: number) {
            ARRAY_REMOVE(ARRAY_AGG(
              CASE WHEN w.item_id IS NOT NULL AND lo.lab_id IS NULL
                   THEN COALESCE(p."packageName", m.name, '#' || w.item_id) END), NULL) AS missing_items,
-           ROUND(SUM(lo.cost)::numeric, 2) AS cost,
-           MAX(pf.orders) AS served_orders,
-           MAX(pf.last_served) AS last_served
+           ROUND(SUM(lo.cost)::numeric, 2) AS cost
     FROM labs l
     -- LEFT, not CROSS. A request with no identifiable items has an empty
     -- want-list, and a cross join against it returned no labs at all -- so the
@@ -270,12 +260,11 @@ export async function getCoveringLabs(id: number) {
     LEFT JOIN src_local."Package" p ON w.kind = 'PACKAGE' AND p.id = w.item_id
     LEFT JOIN src_local."Master"  m ON w.kind = 'TEST'    AND m.id = w.item_id
     JOIN src_local."Lab" lb ON lb.id = l.lab_id
-    LEFT JOIN proof pf ON pf.lab_id = l.lab_id
     GROUP BY l.lab_id, lb."labName", lb.city
-    -- Proven first. A lab that has collected in this pincode before is worth
-    -- more than one that merely lists it, and 87% of listings are unproven.
-    ORDER BY missing ASC, (MAX(pf.orders) IS NULL), MAX(pf.orders) DESC NULLS LAST,
-             cost ASC NULLS LAST
+    -- Fewest missing items first, then cheapest. Order history is deliberately
+    -- not a factor: serviceability is the lab's mapped pincode list, and
+    -- ranking by past collections implied otherwise on the page.
+    ORDER BY missing ASC, cost ASC NULLS LAST
     LIMIT 12
   `, [id]);
 }
