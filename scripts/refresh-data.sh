@@ -348,7 +348,8 @@ fi
 log "Phase 4.6/5 · request classification + commitments"
 $PG -c "REFRESH MATERIALIZED VIEW analytics.mv_master_lookup;"    >>"$LOG" 2>&1 || log "  WARN: master lookup refresh failed"
 $PG -c "SELECT atlas.sync_request_items();"                        >>"$LOG" 2>&1 || log "  WARN: request item sync failed"
-$PG -c "REFRESH MATERIALIZED VIEW analytics.mv_lab_pincode_home;"  >>"$LOG" 2>&1 || log "  WARN: lab-pincode refresh failed"
+$PG -c "REFRESH MATERIALIZED VIEW analytics.mv_lab_pincode_home;
+REFRESH MATERIALIZED VIEW analytics.mv_lab_pincode_served;"  >>"$LOG" 2>&1 || log "  WARN: lab-pincode refresh failed"
 $PG -c "REFRESH MATERIALIZED VIEW analytics.mv_lab_offering;"      >>"$LOG" 2>&1 || log "  WARN: lab offering refresh failed"
 $PG -c "REFRESH MATERIALIZED VIEW analytics.mv_request_state;"     >>"$LOG" 2>&1 || log "  WARN: request state refresh failed"
 $PG -c "SELECT atlas.sync_commitments();"                          >>"$LOG" 2>&1 || log "  WARN: commitment sync failed"

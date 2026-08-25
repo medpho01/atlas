@@ -423,6 +423,40 @@ $$;
 -- snapshots are there.
 
 -- ---------------------------------------------------------------------------
+-- Where a lab has actually collected, as opposed to where it says it will.
+--
+-- Lab."pincodesServiced" is the only serviceability signal Atlas has, and it is
+-- a claim rather than a fact. Eight national chains account for 74% of the
+-- whole coverage map, each listing two to four thousand pincodes, and only
+-- 12.7% of those lab-pincode pairs have ever carried a real order. That is why
+-- the same handful of labs appears against every request in the country, and
+-- why the console — which checks something stricter, an API call for the
+-- integrated partners — can disagree with us about a specific pincode.
+--
+-- This is the harder evidence: a delivered order from that pincode, fulfilled
+-- by that lab. It does not replace the claim (a lab has to serve somewhere for
+-- the first time), but it lets the UI put proven coverage first and label the
+-- rest honestly.
+--
+-- Order carries no pincode; the patient's is on Profile, reached through User,
+-- which is how mv_pincode_demand already does it.
+-- ---------------------------------------------------------------------------
+DROP MATERIALIZED VIEW IF EXISTS analytics.mv_lab_pincode_served CASCADE;
+CREATE MATERIALIZED VIEW analytics.mv_lab_pincode_served AS
+SELECT o."labId" AS lab_id, p.pincode,
+       COUNT(*)::int AS orders,
+       MAX(o."createdAt") AS last_served
+FROM src_local."Order" o
+JOIN src."User" u    ON u.id = o."userId"
+JOIN src."Profile" p ON p."profileUserId" = u.id
+WHERE o."labId" IS NOT NULL
+  AND NULLIF(TRIM(p.pincode), '') IS NOT NULL
+GROUP BY 1, 2;
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_lab_pincode_served_key
+  ON analytics.mv_lab_pincode_served (lab_id, pincode);
+
+-- ---------------------------------------------------------------------------
 -- Which labs can collect in which pincode.
 --
 -- A lab reaches a pincode for home collection two ways: it sits there, or the

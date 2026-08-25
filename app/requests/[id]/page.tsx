@@ -176,7 +176,25 @@ export default async function RequestDetail({ params }: { params: { id: string }
                           <Link href={`/lab/${l.lab_id}`} className="text-brand-600 hover:underline">
                             {l.lab_name}
                           </Link>
-                          <span className="block text-[10px] text-ink-400">{l.city}</span>
+                          <span className="block text-[10px] text-ink-400">
+                            {l.city}
+                            {/* Claimed vs proven. Lab."pincodesServiced" is the
+                                only serviceability field the source has, and
+                                87% of its lab-pincode pairs have never carried
+                                an order — eight national chains list two to
+                                four thousand pincodes each. Saying which is
+                                which is the difference between a lead and a
+                                fact. */}
+                            {l.served_orders ? (
+                              <span className="text-success-600">
+                                {' · '}collected here {l.served_orders}×
+                                {l.last_served && `, last ${new Date(l.last_served)
+                                  .toLocaleDateString('en-IN', { month: 'short', year: 'numeric' })}`}
+                              </span>
+                            ) : (
+                              <span className="text-ink-400"> · listed, never collected here</span>
+                            )}
+                          </span>
                         </td>
                         <td className="py-1.5 text-xs">
                           {/* null means we never knew what was asked for, which
