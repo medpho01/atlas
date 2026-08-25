@@ -341,6 +341,79 @@ BEGIN
 
   RETURN QUERY SELECT p, m, n;
 END $$;
+-- ===========================================================================
+-- Helper functions.
+--
+-- Defined here, above every view and materialized view in this file, because
+-- they are referenced by them. Appending a function to the end of the file
+-- and expecting a view 300 lines earlier to find it is a mistake this file
+-- has now made three times — and it only shows up on a host where the
+-- function does not already exist, which is never the machine it was written
+-- on.
+-- ===========================================================================
+
+
+-- ---------------------------------------------------------------------------
+-- What kind of place can actually do this test.
+--
+-- LabStack's own taxonomy cannot answer this: testCategory is only
+-- ROUTINE/NON_ROUTINE, and LabDepartment lists nine pathology disciplines with
+-- no imaging among them. Yet 1,913 catalogue entries are X-rays, ultrasounds,
+-- CT and MRI — work no pathology lab can take, however well equipped.
+--
+-- So it is inferred from the name, which is the only signal there is. Kept
+-- deliberately narrow: a false RADIOLOGY sends the network team looking for an
+-- imaging centre that was never needed, which wastes a call, while a missed one
+-- just leaves the default. Bare "scan" is excluded for that reason — it appears
+-- in plenty of pathology names.
+-- ---------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION atlas.test_discipline(test_name text)
+RETURNS text LANGUAGE sql IMMUTABLE AS $$
+  SELECT CASE
+    WHEN test_name IS NULL THEN 'PATHOLOGY'
+    WHEN test_name ~* '(x-?ray|ultraso|\musg\M|sonograph|\mmri\M|\mct\M|ct scan|mammogra|doppler|\mopg\M|radiolog|imaging|fluorosco|angiograph|\mdexa\M|bone densito)'
+      THEN 'RADIOLOGY'
+    WHEN test_name ~* '(\mecg\M|\mekg\M|echocardio|\mtmt\M|holter|spirometr|\mpft\M|\meeg\M|\memg\M|audiometr)'
+      THEN 'CARDIO_DIAGNOSTIC'
+    ELSE 'PATHOLOGY'
+  END
+$$;
+
+-- Human wording for each, used in the UI and in the search prompt.
+CREATE OR REPLACE FUNCTION atlas.discipline_label(d text)
+RETURNS text LANGUAGE sql IMMUTABLE AS $$
+  SELECT CASE d
+    WHEN 'RADIOLOGY'         THEN 'Radiology / imaging'
+    WHEN 'CARDIO_DIAGNOSTIC' THEN 'Cardiac & functional testing'
+    ELSE 'Pathology'
+  END
+$$;
+
+
+-- ---------------------------------------------------------------------------
+-- Day boundaries in IST, not UTC.
+--
+-- The container runs UTC, so date_trunc('day', now()) put the start of "today"
+-- at 05:30 IST — every request from an Indian midnight to half past five in the
+-- morning fell outside it — and after 18:30 UTC the window silently meant
+-- yesterday. For a queue an Indian ops team works by the day, that is wrong for
+-- roughly a quarter of every day.
+--
+-- Returns a naive timestamp in UTC, matching the source columns, which Prisma
+-- writes as `timestamp without time zone`.
+-- ---------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION atlas.ist_midnight(days_ago int DEFAULT 0)
+RETURNS timestamp LANGUAGE sql STABLE AS $$
+  SELECT (date_trunc('day', (now() AT TIME ZONE 'Asia/Kolkata')) - make_interval(days => days_ago))
+           AT TIME ZONE 'Asia/Kolkata' AT TIME ZONE 'UTC'
+$$;
+
+/** Today's date as an Indian ops person means it. */
+CREATE OR REPLACE FUNCTION atlas.ist_today()
+RETURNS date LANGUAGE sql STABLE AS $$
+  SELECT (now() AT TIME ZONE 'Asia/Kolkata')::date
+$$;
+
 
 -- Deliberately NOT run here. This file defines the pipeline; it does not
 -- execute it. On a fresh install the src_local snapshots do not exist yet, so
@@ -963,42 +1036,6 @@ BEGIN
 END $$;
 
 -- ---------------------------------------------------------------------------
--- What kind of place can actually do this test.
---
--- LabStack's own taxonomy cannot answer this: testCategory is only
--- ROUTINE/NON_ROUTINE, and LabDepartment lists nine pathology disciplines with
--- no imaging among them. Yet 1,913 catalogue entries are X-rays, ultrasounds,
--- CT and MRI — work no pathology lab can take, however well equipped.
---
--- So it is inferred from the name, which is the only signal there is. Kept
--- deliberately narrow: a false RADIOLOGY sends the network team looking for an
--- imaging centre that was never needed, which wastes a call, while a missed one
--- just leaves the default. Bare "scan" is excluded for that reason — it appears
--- in plenty of pathology names.
--- ---------------------------------------------------------------------------
-CREATE OR REPLACE FUNCTION atlas.test_discipline(test_name text)
-RETURNS text LANGUAGE sql IMMUTABLE AS $$
-  SELECT CASE
-    WHEN test_name IS NULL THEN 'PATHOLOGY'
-    WHEN test_name ~* '(x-?ray|ultraso|\musg\M|sonograph|\mmri\M|\mct\M|ct scan|mammogra|doppler|\mopg\M|radiolog|imaging|fluorosco|angiograph|\mdexa\M|bone densito)'
-      THEN 'RADIOLOGY'
-    WHEN test_name ~* '(\mecg\M|\mekg\M|echocardio|\mtmt\M|holter|spirometr|\mpft\M|\meeg\M|\memg\M|audiometr)'
-      THEN 'CARDIO_DIAGNOSTIC'
-    ELSE 'PATHOLOGY'
-  END
-$$;
-
--- Human wording for each, used in the UI and in the search prompt.
-CREATE OR REPLACE FUNCTION atlas.discipline_label(d text)
-RETURNS text LANGUAGE sql IMMUTABLE AS $$
-  SELECT CASE d
-    WHEN 'RADIOLOGY'         THEN 'Radiology / imaging'
-    WHEN 'CARDIO_DIAGNOSTIC' THEN 'Cardiac & functional testing'
-    ELSE 'Pathology'
-  END
-$$;
-
--- ---------------------------------------------------------------------------
 -- Incremental request sync.
 --
 -- mv_request_state reads src_local."Request", which the nightly job rebuilds at
@@ -1073,27 +1110,3 @@ BEGIN
   PERFORM atlas.sync_request_items();
   RETURN QUERY SELECT r, p, m;
 END $$;
-
--- ---------------------------------------------------------------------------
--- Day boundaries in IST, not UTC.
---
--- The container runs UTC, so date_trunc('day', now()) put the start of "today"
--- at 05:30 IST — every request from an Indian midnight to half past five in the
--- morning fell outside it — and after 18:30 UTC the window silently meant
--- yesterday. For a queue an Indian ops team works by the day, that is wrong for
--- roughly a quarter of every day.
---
--- Returns a naive timestamp in UTC, matching the source columns, which Prisma
--- writes as `timestamp without time zone`.
--- ---------------------------------------------------------------------------
-CREATE OR REPLACE FUNCTION atlas.ist_midnight(days_ago int DEFAULT 0)
-RETURNS timestamp LANGUAGE sql STABLE AS $$
-  SELECT (date_trunc('day', (now() AT TIME ZONE 'Asia/Kolkata')) - make_interval(days => days_ago))
-           AT TIME ZONE 'Asia/Kolkata' AT TIME ZONE 'UTC'
-$$;
-
-/** Today's date as an Indian ops person means it. */
-CREATE OR REPLACE FUNCTION atlas.ist_today()
-RETURNS date LANGUAGE sql STABLE AS $$
-  SELECT (now() AT TIME ZONE 'Asia/Kolkata')::date
-$$;
