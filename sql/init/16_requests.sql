@@ -52,24 +52,41 @@ ON CONFLICT (key) DO NOTHING;
 -- unquoted name to lower case and would never match "PackagesOnStore".
 -- ---------------------------------------------------------------------------
 DO $bootstrap$
+DECLARE t text;
 BEGIN
-  IF to_regclass('src_local."PackagesOnStore"') IS NOT NULL THEN
-    RETURN;
-  END IF;
+  -- Every source table this file's views read out of src_local. A snapshot is
+  -- created on demand when it is missing, because the alternative is what has
+  -- now happened four times: the file aborts partway, the DROP ... CASCADE at
+  -- the top of a view has already run, and production is left worse than
+  -- before. It is never caught locally, where the table was made by hand.
+  FOREACH t IN ARRAY ARRAY['PackagesOnStore', 'LabsOnStore'] LOOP
+    IF to_regclass(format('src_local.%I', t)) IS NOT NULL THEN
+      CONTINUE;
+    END IF;
 
-  IF to_regclass('src."PackagesOnStore"') IS NOT NULL THEN
-    EXECUTE 'CREATE TABLE src_local."PackagesOnStore" (LIKE src."PackagesOnStore")';
-    EXECUTE 'INSERT INTO src_local."PackagesOnStore" SELECT * FROM src."PackagesOnStore"';
-    RAISE NOTICE 'Bootstrapped src_local."PackagesOnStore" from the foreign table.';
-  ELSE
-    -- No FDW import either. An empty table of the right shape keeps the view
-    -- valid and leaves store price simply blank, which is honest — better than
-    -- refusing to build the entire request pipeline over one optional column.
-    EXECUTE 'CREATE TABLE src_local."PackagesOnStore" (
-               "storeId" integer, "packageId" integer,
-               "storePrice" integer, "storeMrp" integer)';
-    RAISE NOTICE 'src."PackagesOnStore" not imported — created an empty snapshot; store price will be blank until the next refresh.';
-  END IF;
+    IF to_regclass(format('src.%I', t)) IS NOT NULL THEN
+      EXECUTE format('CREATE TABLE src_local.%I (LIKE src.%I)', t, t);
+      EXECUTE format('INSERT INTO src_local.%I SELECT * FROM src.%I', t, t);
+      RAISE NOTICE 'Bootstrapped src_local.% from the foreign table.', t;
+    ELSE
+      -- Not even imported over the FDW. Create an empty table of the right
+      -- shape so the views still build; the columns that read it come back
+      -- blank until the next refresh, which is a far better outcome than
+      -- refusing to build the request pipeline at all.
+      IF t = 'PackagesOnStore' THEN
+        EXECUTE 'CREATE TABLE src_local."PackagesOnStore" (
+                   "storeId" integer, "packageId" integer,
+                   "storePrice" integer, "storeMrp" integer)';
+      ELSIF t = 'LabsOnStore' THEN
+        EXECUTE 'CREATE TABLE src_local."LabsOnStore" (
+                   "storeId" integer, "labId" integer, "storeLabRanking" integer)';
+      END IF;
+      RAISE WARNING 'src.% is not imported — created an empty src_local.%; anything reading it will be blank until the next refresh.', t, t;
+    END IF;
+  END LOOP;
+
+  -- Indexes the views depend on for these to be joins rather than scans.
+  EXECUTE 'CREATE INDEX IF NOT EXISTS idx_labs_on_store ON src_local."LabsOnStore" ("storeId", "labId")';
 END
 $bootstrap$;
 
