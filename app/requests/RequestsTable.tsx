@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Copy, Check, ChevronRight } from 'lucide-react';
 import {
-  STATE_SHORT, STATE_TONE, STATE_OWNER, TONE_CHIP,
+  STATE_SHORT, STATE_TONE, STATE_OWNER, TONE_CHIP, STAGE_TONE, stageLabel,
   quoteBlock, type RequestRow,
 } from '@/lib/requests';
 
@@ -88,6 +88,7 @@ export function RequestsTable({
         <tr className="text-[11px] uppercase tracking-wide text-ink-400 border-b border-ink-200">
           <th className="text-left font-medium px-5 py-2">Request</th>
           <th className="text-left font-medium px-2 py-2">Store</th>
+          <th className="text-left font-medium px-2 py-2 w-[110px]">Stage</th>
           <th className="text-left font-medium px-2 py-2">Where</th>
           <th className="text-left font-medium px-2 py-2 min-w-[220px]">Asked for</th>
           <th className="text-left font-medium px-2 py-2 w-[120px]">State</th>
@@ -115,11 +116,19 @@ export function RequestsTable({
                   #{r.request_id}
                   <span className="block text-[10px] text-ink-400 font-normal ml-4.5">
                     {new Date(r.created_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}
-                    {' · '}{r.status.toLowerCase().replace(/_/g, ' ')}
                   </span>
                 </td>
                 <td className="px-2 py-2.5 text-ink-700 text-xs">
                   {r.store_name ?? <span className="text-ink-400">—</span>}
+                </td>
+                {/* The console's stage, beside Atlas's verdict. A request can
+                    be Quoted here and a supply gap there — that pairing is the
+                    whole point of the network bucket. */}
+                <td className="px-2 py-2.5 whitespace-nowrap">
+                  <span className={`inline-block rounded border px-1.5 py-0.5 text-[11px]
+                                    ${TONE_CHIP[STAGE_TONE[r.status] ?? 'ink']}`}>
+                    {stageLabel(r.status)}
+                  </span>
                 </td>
                 <td className="px-2 py-2.5 text-ink-700">
                   {r.city ?? <span className="text-ink-400">—</span>}

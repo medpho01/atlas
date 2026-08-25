@@ -8,7 +8,10 @@ import { ChipButton } from '@/components/ui/Toggle';
 import {
   getRequests, countRequests, getRequestFunnel, getFacets, getRequestFreshness,
 } from '@/lib/requestQueries';
-import { REQUEST_STATES, STATE_SHORT, type RequestState } from '@/lib/requests';
+import {
+  REQUEST_STATES, STATE_SHORT, STAGE_ORDER, STAGE_LABEL, SETTLED_STAGES,
+  type RequestState,
+} from '@/lib/requests';
 import { RequestsTable } from './RequestsTable';
 import { RequestFunnel } from './RequestFunnel';
 
@@ -28,9 +31,13 @@ export default async function RequestsPage({
 
   const state = (REQUEST_STATES as readonly string[]).includes(searchParams.state ?? '')
     ? (searchParams.state as RequestState) : undefined;
-  const openOnly = searchParams.all !== '1';
+  // Picking a settled stage implies wanting to see settled requests. Without
+  // this, filtering to "Ordered" returns zero rows and reads as broken.
+  const openOnly = searchParams.all !== '1'
+    && !(searchParams.status && SETTLED_STAGES.has(searchParams.status));
   const f = {
     state,
+    status: searchParams.status,
     store: searchParams.store,
     city: searchParams.city,
     q: searchParams.q,
@@ -155,6 +162,20 @@ export default async function RequestsPage({
                       active={searchParams.store === String(s.store_id)}>
             {s.name}{' '}
             <span className={s.n === 0 ? 'text-ink-300' : 'text-ink-400'}>{s.n}</span>
+          </ChipButton>
+        ))}
+      </div>
+
+      <div className="flex flex-wrap items-center gap-1.5 mb-2">
+        <span className="text-[11px] uppercase tracking-wide text-ink-400 mr-1">Stage</span>
+        <ChipButton href={keep('status')} active={!searchParams.status}>All</ChipButton>
+        {STAGE_ORDER.filter((st) => (facets.stages.find((x) => x.status === st)?.n ?? 0) > 0)
+          .map((st) => (
+          <ChipButton key={st} href={keep('status', st)} active={searchParams.status === st}>
+            {STAGE_LABEL[st]}{' '}
+            <span className="text-ink-400">
+              {facets.stages.find((x) => x.status === st)?.n ?? 0}
+            </span>
           </ChipButton>
         ))}
       </div>

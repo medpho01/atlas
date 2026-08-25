@@ -182,3 +182,60 @@ export const DISCIPLINE_SEARCH: Record<string, string> = {
   RADIOLOGY: 'radiology and imaging centres (X-ray, ultrasound, CT, MRI)',
   CARDIO_DIAGNOSTIC: 'centres offering ECG, echocardiography and similar functional tests',
 };
+
+/**
+ * The console's own stage for a request — where it sits in LabStack's workflow,
+ * as opposed to `state`, which is Atlas's verdict on whether we can serve it.
+ *
+ * The two answer different questions and a row needs both: a request can be
+ * QUOTED in the console and still a supply gap in Atlas, which is exactly the
+ * situation the network bucket exists for.
+ *
+ * Ordered as the workflow runs, so the filter row reads as a funnel rather than
+ * an alphabetical list. Losses sit at the end.
+ */
+export const STAGE_ORDER = [
+  'OPEN', 'CONSENTED', 'QUOTED', 'QUOTATION_ACCEPTED', 'ORDERED', 'DISCHARGED',
+  'UNREACHABLE', 'WRONG_NUMBER', 'DENIED', 'CANCELLED', 'NON_SERVICEABLE',
+] as const;
+
+export const STAGE_LABEL: Record<string, string> = {
+  OPEN: 'Open',
+  CONSENTED: 'Consented',
+  QUOTED: 'Quoted',
+  QUOTATION_ACCEPTED: 'Quote accepted',
+  ORDERED: 'Ordered',
+  DISCHARGED: 'Discharged',
+  UNREACHABLE: 'Unreachable',
+  WRONG_NUMBER: 'Wrong number',
+  DENIED: 'Denied',
+  CANCELLED: 'Cancelled',
+  NON_SERVICEABLE: 'Not serviceable',
+};
+
+export const STAGE_TONE: Record<string, 'success' | 'warn' | 'danger' | 'ink'> = {
+  OPEN: 'warn',
+  CONSENTED: 'warn',
+  QUOTED: 'warn',
+  QUOTATION_ACCEPTED: 'success',
+  ORDERED: 'success',
+  DISCHARGED: 'success',
+  // Everything below is a request that ended without an order.
+  UNREACHABLE: 'danger',
+  WRONG_NUMBER: 'ink',
+  DENIED: 'danger',
+  CANCELLED: 'danger',
+  NON_SERVICEABLE: 'danger',
+};
+
+/**
+ * Stages that mean nobody is waiting on us. Mirrors the SETTLED list in
+ * requestQueries — selecting one of these has to switch settled requests back
+ * on, or the filter returns nothing and looks broken.
+ */
+export const SETTLED_STAGES = new Set([
+  'ORDERED', 'DISCHARGED', 'CANCELLED', 'DENIED', 'WRONG_NUMBER',
+]);
+
+export const stageLabel = (s: string) =>
+  STAGE_LABEL[s] ?? s.toLowerCase().replace(/_/g, ' ');

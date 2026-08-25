@@ -424,11 +424,15 @@ export async function getPincodeDemand(limit = 50) {
 export async function getFacets(f: RequestFilters = {}) {
   const forStores = build({ ...f, store: undefined });
   const forCities = build({ ...f, city: undefined });
+  // Stage counts ignore both the stage filter and the settled exclusion —
+  // otherwise every settled stage would permanently read zero, which is the
+  // opposite of informative.
+  const forStages = build({ ...f, status: undefined, openOnly: false });
   // The chip list is chosen by all-time volume so it stays put as filters
   // change — a row of chips that empties out reads as a broken page. The
   // count on each chip is the filtered one, including zero, so it is a
   // truthful preview of what clicking it returns.
-  const [stores, cities] = await Promise.all([
+  const [stores, cities, stages] = await Promise.all([
     query<{ store_id: number; name: string; n: number }>(`
       WITH top AS (
         SELECT store_id, COUNT(*) AS all_time
@@ -461,6 +465,10 @@ export async function getFacets(f: RequestFilters = {}) {
       SELECT t.city, COALESCE(f.n, 0) AS n
       FROM top t LEFT JOIN filtered f ON lower(f.city) = lower(t.city)
       ORDER BY COALESCE(f.n, 0) DESC, t.all_time DESC`, forCities.params),
+    query<{ status: string; n: number }>(`
+      SELECT status, COUNT(*)::int AS n
+      FROM analytics.v_request_quote ${forStages.clause}
+      GROUP BY 1`, forStages.params),
   ]);
-  return { stores, cities };
+  return { stores, cities, stages };
 }
