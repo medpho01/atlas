@@ -71,7 +71,17 @@ BEGIN
       -- bootstrap creates when the FDW import is missing: the table is made
       -- once, stays empty forever, and every later run skips it because it
       -- exists. Production sat in exactly this state with the store-lab gate
-      -- silently disengaged. Fill it if the source is reachable now.
+      -- silently disengaged. Import the source if needed, then fill it.
+      IF to_regclass(format('src.%I', t)) IS NULL THEN
+        BEGIN
+          EXECUTE format(
+            'IMPORT FOREIGN SCHEMA public LIMIT TO (%I) FROM SERVER labstack_src INTO src', t);
+          RAISE NOTICE 'Imported foreign table src.%.', t;
+        EXCEPTION WHEN OTHERS THEN
+          RAISE WARNING 'Could not import src.%: %', t, SQLERRM;
+        END;
+      END IF;
+
       IF to_regclass(format('src.%I', t)) IS NOT NULL THEN
         EXECUTE format('INSERT INTO src_local.%I SELECT * FROM src.%I', t, t);
         RAISE NOTICE 'Filled empty src_local.% from the foreign table.', t;
@@ -79,6 +89,20 @@ BEGIN
         RAISE WARNING 'src_local.% is empty and src.% is not imported — anything reading it stays blank.', t, t;
       END IF;
       CONTINUE;
+    END IF;
+
+    -- Import the foreign table first if it is absent. Adding a table to the
+    -- FDW list in 03_fdw.sh only helps a database created from scratch; an
+    -- existing one never gets it, which is why production sat with an empty
+    -- LabsOnStore and the store gate silently switched off.
+    IF to_regclass(format('src.%I', t)) IS NULL THEN
+      BEGIN
+        EXECUTE format(
+          'IMPORT FOREIGN SCHEMA public LIMIT TO (%I) FROM SERVER labstack_src INTO src', t);
+        RAISE NOTICE 'Imported foreign table src.%.', t;
+      EXCEPTION WHEN OTHERS THEN
+        RAISE WARNING 'Could not import src.%: %', t, SQLERRM;
+      END;
     END IF;
 
     IF to_regclass(format('src.%I', t)) IS NOT NULL THEN
