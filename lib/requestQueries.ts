@@ -228,10 +228,15 @@ export async function getCoveringLabs(id: number) {
       WHERE request_id = $1 AND (package_id IS NOT NULL OR master_id IS NOT NULL)
     ),
     labs AS (
+      -- Only labs this request's store is contracted with. The console will
+      -- not offer any other, so neither should we.
       SELECT DISTINCT lph.lab_id
       FROM analytics.mv_request_state s
       JOIN analytics.mv_lab_pincode_home lph ON lph.pincode = s.pincode
       WHERE s.request_id = $1
+        AND (s.store_id IS NULL
+             OR EXISTS (SELECT 1 FROM src_local."LabsOnStore" los
+                         WHERE los."storeId" = s.store_id AND los."labId" = lph.lab_id))
     ),
     -- Has this lab actually collected here before, or does it only say it will?
     proof AS (

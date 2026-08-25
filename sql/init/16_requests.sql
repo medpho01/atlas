@@ -475,7 +475,12 @@ CROSS JOIN LATERAL (
 ) p
 WHERE pu.kind IN ('LAB','HOSPITAL')
   AND 'HOME_SAMPLE' = ANY(pu.modalities)
-  AND NULLIF(TRIM(p.pincode),'') IS NOT NULL;
+  AND NULLIF(TRIM(p.pincode),'') IS NOT NULL
+  -- Not the placeholder. Lab id 1 is where orders park when nobody has been
+  -- found to serve them, so counting it as supply says the network can serve a
+  -- pincode precisely because it could not. It claimed 623 pincodes and made 55
+  -- requests read serviceable on its own.
+  AND pu.source_id <> atlas.request_setting('placeholder_lab_id')::int;
 
 CREATE INDEX IF NOT EXISTS idx_lab_pincode_home_pin ON analytics.mv_lab_pincode_home (pincode);
 CREATE INDEX IF NOT EXISTS idx_lab_pincode_home_lab ON analytics.mv_lab_pincode_home (lab_id);
@@ -536,9 +541,22 @@ resolvable AS (
   WHERE ri.package_id IS NOT NULL OR ri.master_id IS NOT NULL
 ),
 -- Labs that can collect here at all.
+--
+-- Gated on LabsOnStore, the store-to-lab contract. Without it Atlas offered
+-- every home-collection lab in the country for every request, while the console
+-- only ever offers the labs mapped to that request's store — 16 to 31 of them,
+-- not 198. The evidence is unambiguous: of 3,650 Star Health orders and 705
+-- Sugarfit orders, every single one was fulfilled by a mapped lab.
+--
+-- A request with no store cannot be gated, so it keeps the unrestricted list;
+-- that is a small minority and better than dropping them entirely.
 covering AS (
   SELECT r.id AS request_id, lph.lab_id
-  FROM req r JOIN analytics.mv_lab_pincode_home lph ON lph.pincode = r.pincode
+  FROM req r
+  JOIN analytics.mv_lab_pincode_home lph ON lph.pincode = r.pincode
+  WHERE r."storeId" IS NULL
+     OR EXISTS (SELECT 1 FROM src_local."LabsOnStore" los
+                 WHERE los."storeId" = r."storeId" AND los."labId" = lph.lab_id)
 ),
 -- Of those, the ones that can do every resolvable item asked for.
 full_service AS (
@@ -811,6 +829,7 @@ LEFT JOIN LATERAL (
              CASE WHEN lo.lab_id IS NULL
                   THEN COALESCE(p2."packageName", m2.name) END, ', ') AS missing_names
     FROM analytics.mv_lab_pincode_home lph
+    -- Same store-to-lab gate as the classification above.
     CROSS JOIN LATERAL (
       SELECT DISTINCT ri.kind, COALESCE(ri.package_id, ri.master_id) AS item_id
       FROM atlas.request_item ri
@@ -822,6 +841,9 @@ LEFT JOIN LATERAL (
     LEFT JOIN src_local."Package" p2 ON w.kind = 'PACKAGE' AND p2.id = w.item_id
     LEFT JOIN src_local."Master"  m2 ON w.kind = 'TEST'    AND m2.id = w.item_id
     WHERE lph.pincode = s.pincode
+      AND (s.store_id IS NULL
+           OR EXISTS (SELECT 1 FROM src_local."LabsOnStore" los
+                       WHERE los."storeId" = s.store_id AND los."labId" = lph.lab_id))
     GROUP BY lph.lab_id
   ) x
   JOIN src_local."Lab" l ON l.id = x.lab_id
