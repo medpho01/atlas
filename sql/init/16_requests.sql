@@ -52,7 +52,7 @@ ON CONFLICT (key) DO NOTHING;
 -- unquoted name to lower case and would never match "PackagesOnStore".
 -- ---------------------------------------------------------------------------
 DO $bootstrap$
-DECLARE t text;
+DECLARE t text; has_rows boolean;
 BEGIN
   -- Every source table this file's views read out of src_local. A snapshot is
   -- created on demand when it is missing, because the alternative is what has
@@ -60,7 +60,24 @@ BEGIN
   -- the top of a view has already run, and production is left worse than
   -- before. It is never caught locally, where the table was made by hand.
   FOREACH t IN ARRAY ARRAY['PackagesOnStore', 'LabsOnStore'] LOOP
+    -- Already populated: nothing to do.
     IF to_regclass(format('src_local.%I', t)) IS NOT NULL THEN
+      EXECUTE format('SELECT EXISTS (SELECT 1 FROM src_local.%I)', t) INTO has_rows;
+      IF has_rows THEN
+        CONTINUE;
+      END IF;
+
+      -- Exists but empty. This is the stuck state a previous run of this
+      -- bootstrap creates when the FDW import is missing: the table is made
+      -- once, stays empty forever, and every later run skips it because it
+      -- exists. Production sat in exactly this state with the store-lab gate
+      -- silently disengaged. Fill it if the source is reachable now.
+      IF to_regclass(format('src.%I', t)) IS NOT NULL THEN
+        EXECUTE format('INSERT INTO src_local.%I SELECT * FROM src.%I', t, t);
+        RAISE NOTICE 'Filled empty src_local.% from the foreign table.', t;
+      ELSE
+        RAISE WARNING 'src_local.% is empty and src.% is not imported — anything reading it stays blank.', t, t;
+      END IF;
       CONTINUE;
     END IF;
 
