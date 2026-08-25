@@ -52,7 +52,7 @@ ON CONFLICT (key) DO NOTHING;
 -- unquoted name to lower case and would never match "PackagesOnStore".
 -- ---------------------------------------------------------------------------
 DO $bootstrap$
-DECLARE t text; has_rows boolean;
+DECLARE t text; has_rows boolean; local_cols int; src_cols int;
 BEGIN
   -- Every source table this file's views read out of src_local. A snapshot is
   -- created on demand when it is missing, because the alternative is what has
@@ -60,41 +60,40 @@ BEGIN
   -- the top of a view has already run, and production is left worse than
   -- before. It is never caught locally, where the table was made by hand.
   FOREACH t IN ARRAY ARRAY['PackagesOnStore', 'LabsOnStore'] LOOP
-    -- Already populated: nothing to do.
+    -- If a snapshot exists, make sure it has the right shape before trusting
+    -- it. An earlier version of this block created LabsOnStore from a
+    -- hardcoded three-column guess when the foreign table was missing. Every
+    -- later INSERT ... SELECT * then failed with "more expressions than target
+    -- columns", the table stayed empty, the store gate stayed off, and nothing
+    -- upstream could tell — the gate fails open, so the app looked fine. A
+    -- guessed shape is worse than no table.
+    IF to_regclass(format('src_local.%I', t)) IS NOT NULL
+       AND to_regclass(format('src.%I', t)) IS NOT NULL THEN
+      SELECT COUNT(*) INTO local_cols
+        FROM information_schema.columns
+       WHERE table_schema = 'src_local' AND table_name = t;
+      SELECT COUNT(*) INTO src_cols
+        FROM information_schema.columns
+       WHERE table_schema = 'src' AND table_name = t;
+
+      IF local_cols <> src_cols THEN
+        EXECUTE format('DROP TABLE src_local.%I CASCADE', t);
+        RAISE WARNING 'src_local.% had % columns against % at source — rebuilt.',
+                      t, local_cols, src_cols;
+      END IF;
+    END IF;
+
+    -- Already populated and correctly shaped: nothing to do.
     IF to_regclass(format('src_local.%I', t)) IS NOT NULL THEN
       EXECUTE format('SELECT EXISTS (SELECT 1 FROM src_local.%I)', t) INTO has_rows;
       IF has_rows THEN
         CONTINUE;
       END IF;
-
-      -- Exists but empty. This is the stuck state a previous run of this
-      -- bootstrap creates when the FDW import is missing: the table is made
-      -- once, stays empty forever, and every later run skips it because it
-      -- exists. Production sat in exactly this state with the store-lab gate
-      -- silently disengaged. Import the source if needed, then fill it.
-      IF to_regclass(format('src.%I', t)) IS NULL THEN
-        BEGIN
-          EXECUTE format(
-            'IMPORT FOREIGN SCHEMA public LIMIT TO (%I) FROM SERVER labstack_src INTO src', t);
-          RAISE NOTICE 'Imported foreign table src.%.', t;
-        EXCEPTION WHEN OTHERS THEN
-          RAISE WARNING 'Could not import src.%: %', t, SQLERRM;
-        END;
-      END IF;
-
-      IF to_regclass(format('src.%I', t)) IS NOT NULL THEN
-        EXECUTE format('INSERT INTO src_local.%I SELECT * FROM src.%I', t, t);
-        RAISE NOTICE 'Filled empty src_local.% from the foreign table.', t;
-      ELSE
-        RAISE WARNING 'src_local.% is empty and src.% is not imported — anything reading it stays blank.', t, t;
-      END IF;
-      CONTINUE;
     END IF;
 
-    -- Import the foreign table first if it is absent. Adding a table to the
-    -- FDW list in 03_fdw.sh only helps a database created from scratch; an
-    -- existing one never gets it, which is why production sat with an empty
-    -- LabsOnStore and the store gate silently switched off.
+    -- Import the foreign table if it is absent. Adding a table to the FDW list
+    -- in 03_fdw.sh only helps a database created from scratch; an existing one
+    -- never receives it.
     IF to_regclass(format('src.%I', t)) IS NULL THEN
       BEGIN
         EXECUTE format(
@@ -105,25 +104,21 @@ BEGIN
       END;
     END IF;
 
-    IF to_regclass(format('src.%I', t)) IS NOT NULL THEN
-      EXECUTE format('CREATE TABLE src_local.%I (LIKE src.%I)', t, t);
-      EXECUTE format('INSERT INTO src_local.%I SELECT * FROM src.%I', t, t);
-      RAISE NOTICE 'Bootstrapped src_local.% from the foreign table.', t;
-    ELSE
-      -- Not even imported over the FDW. Create an empty table of the right
-      -- shape so the views still build; the columns that read it come back
-      -- blank until the next refresh, which is a far better outcome than
-      -- refusing to build the request pipeline at all.
-      IF t = 'PackagesOnStore' THEN
-        EXECUTE 'CREATE TABLE src_local."PackagesOnStore" (
-                   "storeId" integer, "packageId" integer,
-                   "storePrice" integer, "storeMrp" integer)';
-      ELSIF t = 'LabsOnStore' THEN
-        EXECUTE 'CREATE TABLE src_local."LabsOnStore" (
-                   "storeId" integer, "labId" integer, "storeLabRanking" integer)';
-      END IF;
-      RAISE WARNING 'src.% is not imported — created an empty src_local.%; anything reading it will be blank until the next refresh.', t, t;
+    IF to_regclass(format('src.%I', t)) IS NULL THEN
+      -- No source to copy from and no shape to trust. Leave it absent rather
+      -- than invent one; the view that reads it will fail loudly, which beats
+      -- a silently empty table that disables a rule nobody knows is off.
+      RAISE WARNING 'src.% unavailable — src_local.% not created.', t, t;
+      CONTINUE;
     END IF;
+
+    -- Shape always comes from the source, never from a literal.
+    IF to_regclass(format('src_local.%I', t)) IS NULL THEN
+      EXECUTE format('CREATE TABLE src_local.%I (LIKE src.%I)', t, t);
+    END IF;
+    EXECUTE format('INSERT INTO src_local.%I SELECT * FROM src.%I', t, t);
+    RAISE NOTICE 'Filled src_local.% from the foreign table.', t;
+
   END LOOP;
 
   -- Indexes the views depend on for these to be joins rather than scans.
