@@ -2,7 +2,7 @@
 
 import { runAction } from './runAction';
 
-import { useState, useTransition } from 'react';
+import { useEffect, useState, useTransition } from 'react';
 import { Search, Loader2 } from 'lucide-react';
 import { findLabsForPincode } from './actions';
 
@@ -22,6 +22,15 @@ export function FindLabs({
 }) {
   const [pending, start] = useTransition();
   const [msg, setMsg] = useState<string | null>(null);
+  // Elapsed seconds while it runs. A spinner with no number gives no way to
+  // tell "working" from "hung", which is the whole complaint.
+  const [secs, setSecs] = useState(0);
+
+  useEffect(() => {
+    if (!pending) { setSecs(0); return; }
+    const t = setInterval(() => setSecs((n) => n + 1), 1000);
+    return () => clearInterval(t);
+  }, [pending]);
 
   return (
     <div className="flex flex-wrap items-center gap-2">
@@ -39,9 +48,16 @@ export function FindLabs({
                    hover:bg-brand-100 disabled:opacity-50"
       >
         {pending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Search className="w-3.5 h-3.5" />}
-        {pending ? 'Searching the web…' : 'Find labs on the web'}
+        {pending
+          ? `Searching the web… ${secs}s`
+          : 'Find labs on the web'}
       </button>
       {msg && <span className="text-[11px] text-ink-600">{msg}</span>}
+      {pending && secs > 50 && (
+        <span className="text-[11px] text-warn-600">
+          Taking longer than usual — it gives up at 45s and will report why.
+        </span>
+      )}
       {!msg && lastRun && (
         <span className="text-[11px] text-ink-400">
           Last searched {new Date(lastRun).toLocaleString('en-IN',

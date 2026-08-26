@@ -119,18 +119,23 @@ export async function discoverForPincode(
   // outside, so a bad key or a bad config threw an unhandled rejection out of a
   // server action rather than returning an error the page could show.
   try {
-    // An explicit timeout, well under Next's own patience. The SDK default is
-    // ten minutes; a web search holding a connection that long in a 512MB
-    // container is how this gets killed rather than merely failing.
-    const anthropic = new Anthropic({ timeout: 90_000, maxRetries: 1 });
+    // 45 seconds, no retry.
+    //
+    // This runs inside a server action, so the browser holds an open HTTP
+    // request for its whole duration. Reverse proxies commonly cut idle
+    // responses at 60s, and when that happens the client never receives an
+    // answer at all — the button spins forever and no error is ever shown.
+    // Better to fail inside the window with something to read than to exceed
+    // it and hang. A retry would double the wall time, so there isn't one.
+    const anthropic = new Anthropic({ timeout: 45_000, maxRetries: 0 });
     const response = await anthropic.messages.create({
       model: MODEL,
       max_tokens: 4000,
       system: [{ type: 'text', text: SYSTEM, cache_control: { type: 'ephemeral' } }],
       // Four, not six: each use pulls page content back through the model,
       // and memory is the binding constraint in this container.
-      tools: [{ type: 'web_search_20260209', name: 'web_search', max_uses: 4 }],
-      output_config: { effort: 'medium', format: { type: 'json_schema', schema: SCHEMA } },
+      tools: [{ type: 'web_search_20260209', name: 'web_search', max_uses: 3 }],
+      output_config: { effort: 'low', format: { type: 'json_schema', schema: SCHEMA } },
       messages: [{
         role: 'user',
         content: `Find ${wanted(disciplines)} serving pincode ${pincode}` +
