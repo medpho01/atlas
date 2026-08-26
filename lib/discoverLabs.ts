@@ -115,13 +115,21 @@ export async function discoverForPincode(
     };
   }
 
-  const anthropic = new Anthropic();
+  // Everything below is inside the try, client construction included. It was
+  // outside, so a bad key or a bad config threw an unhandled rejection out of a
+  // server action rather than returning an error the page could show.
   try {
+    // An explicit timeout, well under Next's own patience. The SDK default is
+    // ten minutes; a web search holding a connection that long in a 512MB
+    // container is how this gets killed rather than merely failing.
+    const anthropic = new Anthropic({ timeout: 90_000, maxRetries: 1 });
     const response = await anthropic.messages.create({
       model: MODEL,
       max_tokens: 4000,
       system: [{ type: 'text', text: SYSTEM, cache_control: { type: 'ephemeral' } }],
-      tools: [{ type: 'web_search_20260209', name: 'web_search', max_uses: 6 }],
+      // Four, not six: each use pulls page content back through the model,
+      // and memory is the binding constraint in this container.
+      tools: [{ type: 'web_search_20260209', name: 'web_search', max_uses: 4 }],
       output_config: { effort: 'medium', format: { type: 'json_schema', schema: SCHEMA } },
       messages: [{
         role: 'user',

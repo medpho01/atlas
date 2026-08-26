@@ -98,7 +98,11 @@ services:
       resources:
         limits:
           cpus: "1.0"
-          memory: 512M
+          # 512M was enough until the app started calling the Anthropic API
+          # directly. A web search pulls page content back through the model,
+          # and the spike killed the container mid-request — which looks like
+          # the app crashing rather than one request failing.
+          memory: 1G
 
   atlas-refresh:
     # Daily cron sidecar — re-snapshots src_local from FDW and REFRESHes the
