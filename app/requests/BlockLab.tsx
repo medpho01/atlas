@@ -1,5 +1,7 @@
 'use client';
 
+import { runAction } from './runAction';
+
 import { useState, useTransition } from 'react';
 import { Ban, Loader2 } from 'lucide-react';
 import { blockLabForPincode } from './actions';
@@ -25,7 +27,7 @@ export function BlockLab({ labId, pincode }: { labId: number; pincode: string })
         disabled={pending}
         title="The console will not offer this lab in this pincode — stop showing it"
         onClick={() => start(async () => {
-          const r = await blockLabForPincode(labId, pincode, 'Console does not offer it here');
+          const r = await runAction(() => blockLabForPincode(labId, pincode, 'Console does not offer it here'));
           setMsg(r.ok ? 'done' : (r.error ?? 'failed'));
         })}
         className="inline-flex items-center gap-1 rounded border border-ink-200 text-ink-500

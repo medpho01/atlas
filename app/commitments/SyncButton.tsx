@@ -1,5 +1,7 @@
 'use client';
 
+import { runAction } from '../requests/runAction';
+
 import { useState, useTransition } from 'react';
 import { RefreshCw } from 'lucide-react';
 import { syncCommitments } from '../requests/actions';
@@ -20,7 +22,7 @@ export function SyncButton() {
         type="button"
         disabled={pending}
         onClick={() => start(async () => {
-          const r = await syncCommitments();
+          const r = await runAction(() => syncCommitments());
           setMsg(!r.ok ? (r.error ?? 'failed')
             : (r.opened || r.closed)
               ? `${r.opened ?? 0} opened, ${r.closed ?? 0} closed`

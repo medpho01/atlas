@@ -1,5 +1,7 @@
 'use client';
 
+import { runAction } from './runAction';
+
 import { useState, useTransition } from 'react';
 import { Search, Loader2 } from 'lucide-react';
 import { findLabsForPincode } from './actions';
@@ -27,7 +29,7 @@ export function FindLabs({
         type="button"
         disabled={pending}
         onClick={() => start(async () => {
-          const r = await findLabsForPincode(pincode, city, state, disciplines);
+          const r = await runAction(() => findLabsForPincode(pincode, city, state, disciplines));
           setMsg(r.ok
             ? (r.found ? `${r.found} lead${r.found === 1 ? '' : 's'} found` : 'nothing found')
             : (r.error ?? 'search failed'));

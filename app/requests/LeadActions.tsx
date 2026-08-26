@@ -1,5 +1,7 @@
 'use client';
 
+import { runAction } from './runAction';
+
 import { useState, useTransition } from 'react';
 import { Check, X, Loader2 } from 'lucide-react';
 import { promoteDiscoveredLab, dismissDiscoveredLab } from './actions';
@@ -23,7 +25,7 @@ export function LeadActions({ leadId, promoted }: { leadId: number; promoted: bo
         type="button"
         disabled={pending}
         onClick={() => start(async () => {
-          const r = await promoteDiscoveredLab(leadId);
+          const r = await runAction(() => promoteDiscoveredLab(leadId));
           setMsg(r.ok ? null : r.error ?? 'failed');
         })}
         className="inline-flex items-center gap-1 rounded border border-brand-200 dark:border-brand-100
