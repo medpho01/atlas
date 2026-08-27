@@ -2,8 +2,9 @@
 
 import { useMemo, useState, useTransition } from 'react';
 import * as XLSX from 'xlsx';
-import { Download, Loader2, Play, Search } from 'lucide-react';
+import { Building2, Download, Loader2, Play, Search } from 'lucide-react';
 import { Card, CardBody } from '@/components/ui/Card';
+import { KpiTile } from '@/components/KpiTile';
 import { runPanelGap } from './actions';
 
 type Lab = { lab_id: number; name: string; city: string | null; pincodes: number };
@@ -138,34 +139,38 @@ export function LabPanelGap({ labs }: { labs: Lab[] }) {
       </Card>
 
       {summary && (
-        <Card>
-          <CardBody>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-x-6 gap-y-3">
-              <div>
-                <div className="text-2xl font-bold num text-ink-900">{n(summary.panel_pincodes)}</div>
-                <div className="text-[11px] text-ink-500 mt-0.5">covered by your panel</div>
-              </div>
-              <div>
-                <div className="text-2xl font-bold num text-ink-700">{n(summary.network_pincodes)}</div>
-                <div className="text-[11px] text-ink-500 mt-0.5">reachable by the network</div>
-              </div>
-              <div>
-                <div className="text-2xl font-bold num text-warn-600">{n(summary.remaining_pincodes)}</div>
-                <div className="text-[11px] text-ink-500 mt-0.5">the panel does not reach</div>
-              </div>
-              <div>
-                <div className="text-2xl font-bold num text-danger-500">{n(summary.remaining_with_demand)}</div>
-                <div className="text-[11px] text-ink-500 mt-0.5">of those with real orders</div>
-              </div>
-            </div>
-            {summary.remaining_with_demand > 0 && (
-              <p className="text-[11px] text-ink-500 mt-3">
-                The last figure is the one worth working: pincodes this panel misses where orders
-                have actually been placed. The rest are reachable but untested.
-              </p>
-            )}
-          </CardBody>
-        </Card>
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+          <KpiTile
+            label="Covered by panel"
+            value={n(summary.panel_pincodes)}
+            sub="union of the labs you picked"
+            icon={<Building2 className="w-4 h-4" />}
+          />
+          <KpiTile
+            label="Network reach"
+            value={n(summary.network_pincodes)}
+            sub="every lab in the network"
+          />
+          <KpiTile
+            label="Panel misses"
+            value={n(summary.remaining_pincodes)}
+            sub="reachable, not by this panel"
+            tone="warn"
+          />
+          <KpiTile
+            label="Missed with demand"
+            value={n(summary.remaining_with_demand)}
+            sub="orders already placed here"
+            tone="bad"
+          />
+        </div>
+      )}
+
+      {summary && summary.remaining_with_demand > 0 && (
+        <p className="text-xs text-ink-500 -mt-1">
+          The last tile is the one worth working: pincodes this panel misses where orders have
+          actually been placed. The rest are reachable but untested.
+        </p>
       )}
 
       {rows.length > 0 && (
