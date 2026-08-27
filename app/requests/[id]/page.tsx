@@ -99,7 +99,7 @@ export default async function RequestDetail({ params }: { params: { id: string }
 
           {(r.disciplines?.length ?? 0) > 1 && (
             <Card>
-              <CardBody>
+              <CardBody className="pt-4">
                 <div className="text-xs text-ink-600">
                   <span className="text-ink-500">This request needs more than one kind of centre — </span>
                   {r.disciplines!.map((d: string) => DISCIPLINE_LABEL[d] ?? d).join(' and ')}.
@@ -298,7 +298,7 @@ export default async function RequestDetail({ params }: { params: { id: string }
 
           {r.pincode && (
             <Card>
-              <CardBody className="text-xs space-y-1.5">
+              <CardBody className="pt-4 text-xs space-y-1.5">
                 <Link href={`/pincode/${r.pincode}`} className="block text-brand-600 hover:underline">
                   Coverage in {r.pincode} →
                 </Link>

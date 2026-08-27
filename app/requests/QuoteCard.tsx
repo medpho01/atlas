@@ -27,7 +27,7 @@ export function QuoteCard({ row }: { row: RequestRow }) {
   if (row.state === 'SERVICEABLE') {
     return (
       <Card>
-        <CardBody>
+        <CardBody className="pt-4">
           <div className="text-sm font-semibold text-success-600 mb-1">Serviceable</div>
           <p className="text-xs text-ink-600">
             A covering lab already offers everything asked for. Convert it to an order in the
@@ -41,7 +41,7 @@ export function QuoteCard({ row }: { row: RequestRow }) {
   if (!price && !date) {
     return (
       <Card>
-        <CardBody>
+        <CardBody className="pt-4">
           <div className="text-sm font-semibold text-danger-500 mb-1">No basis — escalate</div>
           <p className="text-xs text-ink-600">{row.reason}</p>
           <p className="text-xs text-ink-500 mt-2">
@@ -60,7 +60,7 @@ export function QuoteCard({ row }: { row: RequestRow }) {
 
   return (
     <Card>
-      <CardBody>
+      <CardBody className="pt-4">
         <div className="text-[11px] uppercase tracking-wide text-ink-400 mb-2">Quote this</div>
         <div className="flex items-baseline gap-2 mb-1">
           <span className="text-3xl font-bold text-ink-900 num">{price ?? '—'}</span>

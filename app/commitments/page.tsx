@@ -58,7 +58,7 @@ export default async function CommitmentsPage() {
       />
 
       <Card className="my-4">
-        <CardBody>
+        <CardBody className="pt-4">
           <div className="flex flex-wrap items-baseline gap-x-8 gap-y-2">
             <div>
               <div className="text-2xl font-bold text-ink-900 num">{stats?.open ?? 0}</div>
