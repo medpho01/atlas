@@ -141,3 +141,43 @@ export async function unblockLabForPincode(labId: number, pincode: string): Prom
   revalidatePath(`/requests`);
   return { ok: true };
 }
+
+/**
+ * Pull anything new from LabStack, now.
+ *
+ * The poller already does this every ten minutes, so this exists for the
+ * minute after somebody creates a request in the console and comes here
+ * expecting to see it. Waiting ten minutes to be believed is how a queue stops
+ * being trusted as the live view.
+ *
+ * Deliberately narrow: a six-hour lookback and a concurrent refresh, roughly
+ * six seconds. A wider sync would hold the HTTP request long enough for a
+ * proxy to cut it, and the client would get nothing at all.
+ */
+export async function refreshRequests(): Promise<
+  R & { synced?: number; newestId?: number; newestAt?: string | null }
+> {
+  const me = await getSessionUser();
+  if (!me) return { ok: false, error: 'unauthenticated' };
+
+  try {
+    const synced = await queryOne<{ requests: number }>(
+      `SELECT requests FROM atlas.sync_recent_requests(6)`);
+    // CONCURRENTLY so nobody else's page blocks while this runs.
+    await queryOne(`REFRESH MATERIALIZED VIEW CONCURRENTLY analytics.mv_request_state`);
+
+    const newest = await queryOne<{ id: number; at: string }>(
+      `SELECT MAX(request_id) AS id, MAX(created_at)::text AS at
+         FROM analytics.mv_request_state`);
+
+    revalidatePath('/requests');
+    return {
+      ok: true,
+      synced: synced?.requests ?? 0,
+      newestId: newest?.id,
+      newestAt: newest?.at ?? null,
+    };
+  } catch (e) {
+    return { ok: false, error: (e as Error).message };
+  }
+}

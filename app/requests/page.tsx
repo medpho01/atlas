@@ -17,6 +17,7 @@ import {
 import { RequestsTable } from './RequestsTable';
 import { RequestFunnel } from './RequestFunnel';
 import { SearchBar } from './SearchBar';
+import { RefreshRequests } from './RefreshRequests';
 
 export const dynamic = 'force-dynamic';
 
@@ -107,6 +108,7 @@ export default async function RequestsPage({
 
       <div className="flex flex-wrap items-center gap-3 mt-4">
         <SearchBar initial={searchParams.q} />
+        <RefreshRequests newestAt={fresh?.newest ?? null} />
         {searchParams.q && (
           <span className="text-xs text-ink-500">
             {total.toLocaleString('en-IN')} match{total === 1 ? '' : 'es'} for
