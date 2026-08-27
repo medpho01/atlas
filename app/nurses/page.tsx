@@ -29,7 +29,7 @@ export default async function NursesPage({ searchParams }: { searchParams: Promi
     aggregators: (Array.isArray(sp.agg) ? sp.agg : sp.agg ? [sp.agg] : []).filter(Boolean),
     source:  (s(sp.source) || 'all') as 'derived' | 'manual' | 'both' | 'all',
     verifiedOnly: s(sp.verified) === '1',
-    nearby:  s(sp.nearby) === '1',
+    nearby:  s(sp.nearby) !== '0',
     radiusKm: Number(s(sp.radius)) || NURSE_REACH_RADIUS_KM,
   };
 

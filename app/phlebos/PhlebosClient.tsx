@@ -76,7 +76,8 @@ export function PhlebosClient({
     if (f.city) params.set('city', f.city);
     f.labs.forEach((l) => params.append('lab', l));
     if (f.source !== 'all') params.set('source', f.source);
-    if (f.nearby) params.set('nearby', '1');
+    // Nearby is the default, so only the narrower choice needs recording.
+    if (!f.nearby) params.set('nearby', '0');
     if (f.radiusKm !== defaultRadius) params.set('radius', String(f.radiusKm));
     if (f.minOrders > 0) params.set('min', String(f.minOrders));
     params.set('sort', f.sortBy);
@@ -97,7 +98,7 @@ export function PhlebosClient({
   };
 
   const clearAll = () => {
-    setFilters({ q: '', pincode: '', city: '', labs: [], source: 'all', nearby: false, radiusKm: defaultRadius, minOrders: 0, sortBy: 'orders', sortDir: 'desc' });
+    setFilters({ q: '', pincode: '', city: '', labs: [], source: 'all', nearby: true, radiusKm: defaultRadius, minOrders: 0, sortBy: 'orders', sortDir: 'desc' });
   };
 
   const toggleSort = (key: SortKey) => {

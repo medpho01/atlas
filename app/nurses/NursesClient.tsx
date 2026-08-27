@@ -82,7 +82,8 @@ export function NursesClient({
     f.aggregators.forEach((a) => params.append('agg', a));
     if (f.source !== 'all') params.set('source', f.source);
     if (f.verifiedOnly) params.set('verified', '1');
-    if (f.nearby) params.set('nearby', '1');
+    // Nearby is the default, so only the narrower choice needs recording.
+    if (!f.nearby) params.set('nearby', '0');
     if (f.radiusKm !== defaultRadius) params.set('radius', String(f.radiusKm));
     params.set('sort', f.sortBy);
     params.set('dir', f.sortDir);
@@ -104,7 +105,7 @@ export function NursesClient({
   const clearAll = () =>
     setFilters({
       q: '', pincode: '', city: '', aggregators: [], source: 'all', verifiedOnly: false,
-      nearby: false, radiusKm: defaultRadius, sortBy: 'name', sortDir: 'asc',
+      nearby: true, radiusKm: defaultRadius, sortBy: 'name', sortDir: 'asc',
     });
 
   const toggleSort = (key: SortKey) =>

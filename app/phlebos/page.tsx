@@ -25,7 +25,7 @@ export default async function PhlebosPage({ searchParams }: { searchParams: Prom
     state:     s(sp.state),
     labs:      (Array.isArray(sp.lab) ? sp.lab : sp.lab ? [sp.lab] : []).filter(Boolean),
     source:    (s(sp.source) || 'all') as 'derived' | 'manual' | 'both' | 'all',
-    nearby:    s(sp.nearby) === '1',
+    nearby:    s(sp.nearby) !== '0',
     radiusKm:  Number(s(sp.radius)) || PHLEBO_REACH_RADIUS_KM,
     minOrders: Number(s(sp.min)) || 0,
   };
