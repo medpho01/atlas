@@ -76,7 +76,7 @@ export function LabPanelGap({ labs }: { labs: Lab[] }) {
   return (
     <div className="space-y-4">
       <Card>
-        <CardBody className="space-y-4">
+        <CardBody className="pt-4 space-y-4">
           <div>
             <div className="text-sm font-medium text-ink-900">Pick the labs in your panel</div>
             <p className="text-xs text-ink-500 mt-0.5 max-w-2xl">
