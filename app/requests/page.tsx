@@ -175,9 +175,12 @@ export default async function RequestsPage({
       <div className="flex flex-wrap items-center gap-1.5 mb-4">
         <span className="text-[11px] uppercase tracking-wide text-ink-400 mr-1">Store</span>
         <ChipButton href={keep('store')} active={!searchParams.store}>All</ChipButton>
-        {/* Zero-count chips stay visible but muted: knowing a store has nothing
-            in this window is useful, and removing them makes the row jump. */}
-        {facets.stores.map((s) => (
+        {/* Only stores with something in the current view.
+            Zeros were kept visible when six stores were listed, on the grounds
+            that "Star Health 0" is worth knowing. With forty-odd tracked
+            stores most of them are zero, and the handful with actual work is
+            what the row is for. The count of what is hidden sits at the end. */}
+        {facets.stores.filter((s) => s.n > 0).map((s) => (
           <ChipButton key={s.store_id} href={keep('store', String(s.store_id))}
                       active={searchParams.store === String(s.store_id)}>
             {s.name}{' '}
@@ -186,12 +189,19 @@ export default async function RequestsPage({
         ))}
         {/* Untracked stores are hidden, never silently: the count is the
             prompt to go and reconsider the list. */}
-        <Link href="/settings/stores"
-              className="text-[11px] text-brand-600 hover:underline ml-1 whitespace-nowrap">
-          {untracked > 0
-            ? `${untracked.toLocaleString('en-IN')} hidden · edit stores →`
-            : 'edit stores →'}
-        </Link>
+        {(() => {
+          const quiet = facets.stores.filter((s) => s.n === 0).length;
+          const bits = [
+            quiet > 0 ? `${quiet} with none` : null,
+            untracked > 0 ? `${untracked.toLocaleString('en-IN')} hidden` : null,
+          ].filter(Boolean);
+          return (
+            <Link href="/settings/stores"
+                  className="text-[11px] text-brand-600 hover:underline ml-1 whitespace-nowrap">
+              {bits.length ? `${bits.join(' · ')} · edit stores →` : 'edit stores →'}
+            </Link>
+          );
+        })()}
       </div>
 
       <div className="flex flex-wrap items-center gap-1.5 mb-2">
