@@ -2,7 +2,7 @@
 
 import { useMemo, useState, useTransition } from 'react';
 import * as XLSX from 'xlsx';
-import { Building2, Download, Loader2, Play, Search } from 'lucide-react';
+import { Building2, Download, Loader2, Play, Search, X } from 'lucide-react';
 import { Card, CardBody } from '@/components/ui/Card';
 import { KpiTile } from '@/components/KpiTile';
 import { runPanelGap } from './actions';
@@ -43,6 +43,11 @@ export function LabPanelGap({ labs }: { labs: Lab[] }) {
     return list.slice(0, 60);
   }, [labs, q]);
 
+  const chosen = useMemo(
+    () => labs.filter((l) => picked.includes(l.lab_id)),
+    [labs, picked],
+  );
+
   const toggle = (id: number) =>
     setPicked((p) => (p.includes(id) ? p.filter((x) => x !== id) : [...p, id]));
 
@@ -71,69 +76,114 @@ export function LabPanelGap({ labs }: { labs: Lab[] }) {
   return (
     <div className="space-y-4">
       <Card>
-        <CardBody className="space-y-3">
+        <CardBody className="space-y-4">
           <div>
             <div className="text-sm font-medium text-ink-900">Pick the labs in your panel</div>
-            <p className="text-xs text-ink-500 mt-0.5">
+            <p className="text-xs text-ink-500 mt-0.5 max-w-2xl">
               Coverage is the union — a pincode counts if any one of them reaches it. The result
               is everything the rest of the network reaches that this panel does not.
             </p>
           </div>
 
-          <div className="relative max-w-sm">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-ink-400" />
-            <input
-              value={q}
-              onChange={(e) => setQ(e.target.value)}
-              placeholder="Filter labs by name or city…"
-              className="w-full rounded-md border border-ink-200 bg-surface pl-8 pr-3 py-1.5 text-sm
-                         focus:outline-none focus:ring-2 focus:ring-brand-200"
-            />
-          </div>
+          <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_300px] items-start">
+            {/* Left: search over the full lab list */}
+            <div className="min-w-0">
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-ink-400" />
+                <input
+                  value={q}
+                  onChange={(e) => setQ(e.target.value)}
+                  placeholder="Filter labs by name or city…"
+                  className="w-full rounded-md border border-ink-200 bg-surface pl-8 pr-3 py-1.5 text-sm
+                             focus:outline-none focus:ring-2 focus:ring-brand-200"
+                />
+              </div>
 
-          <div className="flex flex-wrap gap-1.5 max-h-56 overflow-y-auto">
-            {visible.map((l) => {
-              const on = picked.includes(l.lab_id);
-              return (
-                <button
-                  key={l.lab_id}
-                  type="button"
-                  onClick={() => toggle(l.lab_id)}
-                  className={`rounded-md border px-2 py-1 text-xs transition ${
-                    on
-                      ? 'border-brand-500 bg-brand-50 text-brand-700 dark:text-brand-400 font-medium'
-                      : 'border-ink-200 text-ink-700 hover:bg-ink-100'
-                  }`}
-                >
-                  {l.name}
-                  <span className="ml-1.5 text-ink-400">{n(l.pincodes)}</span>
-                </button>
-              );
-            })}
-            {!visible.length && <span className="text-xs text-ink-400">No labs match.</span>}
-          </div>
+              <div className="mt-2 rounded-lg border border-ink-150 bg-ink-50/40 dark:bg-ink-100/20
+                              h-64 overflow-y-auto p-2">
+                <div className="flex flex-wrap gap-1.5 content-start">
+                  {visible.map((l) => {
+                    const on = picked.includes(l.lab_id);
+                    return (
+                      <button
+                        key={l.lab_id}
+                        type="button"
+                        onClick={() => toggle(l.lab_id)}
+                        className={`rounded-md border px-2 py-1 text-xs transition ${
+                          on
+                            ? 'border-brand-500 bg-brand-50 text-brand-700 dark:text-brand-400 font-medium'
+                            : 'border-ink-200 bg-surface text-ink-700 hover:bg-ink-100'
+                        }`}
+                        title={l.city ?? undefined}
+                      >
+                        {l.name}
+                        <span className="ml-1.5 text-ink-400">{n(l.pincodes)}</span>
+                      </button>
+                    );
+                  })}
+                  {!visible.length && <span className="text-xs text-ink-400 p-1">No labs match.</span>}
+                </div>
+              </div>
+              <div className="text-[11px] text-ink-400 mt-1.5">
+                {q.trim()
+                  ? `${visible.length} of ${n(labs.length)} labs match`
+                  : `Showing the ${visible.length} widest of ${n(labs.length)} labs — search to reach the rest`}
+              </div>
+            </div>
 
-          <div className="flex flex-wrap items-center gap-3 pt-1">
-            <button
-              type="button"
-              disabled={pending || !picked.length}
-              onClick={() => start(async () => {
-                setErr(null);
-                const r = await runPanelGap(picked);
-                if (!r.ok) { setErr(r.error); setRows([]); setSummary(null); return; }
-                setSummary(r.summary); setRows(r.rows);
-              })}
-              className="inline-flex items-center gap-1.5 rounded-md bg-brand-600 text-white
-                         px-3 py-1.5 text-sm font-medium hover:bg-brand-700 disabled:opacity-50"
-            >
-              {pending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Play className="w-3.5 h-3.5" />}
-              {picked.length ? `Analyse ${picked.length} lab${picked.length === 1 ? '' : 's'}` : 'Pick a lab first'}
-            </button>
-            {picked.length > 0 && (
-              <button type="button" onClick={() => setPicked([])}
-                      className="text-xs text-ink-500 hover:text-ink-900">Clear</button>
-            )}
-            {err && <span className="text-xs text-danger-500">{err}</span>}
+            {/* Right: the panel as it stands, and the action */}
+            <div className="rounded-lg border border-ink-150 p-3 lg:sticky lg:top-4">
+              <div className="flex items-baseline justify-between">
+                <span className="text-[11px] uppercase tracking-wider text-ink-500 font-semibold">
+                  Your panel
+                </span>
+                {picked.length > 0 && (
+                  <button type="button" onClick={() => setPicked([])}
+                          className="text-[11px] text-ink-500 hover:text-ink-900">Clear</button>
+                )}
+              </div>
+
+              {picked.length === 0 ? (
+                <p className="text-xs text-ink-400 mt-2">
+                  Nothing picked yet. Choose the labs you already have on contract.
+                </p>
+              ) : (
+                <div className="mt-2 space-y-1 max-h-40 overflow-y-auto">
+                  {chosen.map((l) => (
+                    <button
+                      key={l.lab_id}
+                      type="button"
+                      onClick={() => toggle(l.lab_id)}
+                      className="w-full flex items-center gap-2 text-left text-xs rounded px-1.5 py-1
+                                 text-ink-700 hover:bg-ink-100 group"
+                      title="Remove from panel"
+                    >
+                      <span className="truncate flex-1">{l.name}</span>
+                      <span className="text-ink-400 tabular-nums">{n(l.pincodes)}</span>
+                      <X className="w-3 h-3 text-ink-300 group-hover:text-danger-500 shrink-0" />
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              <button
+                type="button"
+                disabled={pending || !picked.length}
+                onClick={() => start(async () => {
+                  setErr(null);
+                  const r = await runPanelGap(picked);
+                  if (!r.ok) { setErr(r.error); setRows([]); setSummary(null); return; }
+                  setSummary(r.summary); setRows(r.rows);
+                })}
+                className="mt-3 w-full inline-flex items-center justify-center gap-1.5 rounded-md
+                           bg-brand-600 text-white px-3 py-1.5 text-sm font-medium
+                           hover:bg-brand-700 disabled:opacity-50"
+              >
+                {pending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Play className="w-3.5 h-3.5" />}
+                {picked.length ? `Analyse ${picked.length} lab${picked.length === 1 ? '' : 's'}` : 'Pick a lab first'}
+              </button>
+              {err && <p className="text-[11px] text-danger-500 mt-2">{err}</p>}
+            </div>
           </div>
         </CardBody>
       </Card>
