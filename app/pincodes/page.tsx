@@ -12,6 +12,7 @@ import { InfoTip } from '@/components/ui/InfoTip';
 import { KpiTile } from '@/components/KpiTile';
 import { PincodesTable } from './PincodesTable';
 import { ServiceabilityPanel } from './ServiceabilityPanel';
+import { LabPanelGap } from './LabPanelGap';
 import { PincodeTabs } from './PincodeTabs';
 import { ALL_SERVICES, DEFAULT_SERVICES, serviceLabel } from '@/lib/serviceabilityQueries';
 
@@ -160,6 +161,22 @@ export default async function PincodesPage({ searchParams }: { searchParams: Sea
   // Serviceability is a tab here rather than its own page — same object
   // (a pincode), two questions: what does our footprint look like, and can we
   // serve this specific list. /coverage redirects in for old links.
+  // Lab panel gap: what a chosen set of labs covers, and who covers the rest.
+  if (s.tab === 'panel') {
+    const { listCoverageLabs } = await import('@/lib/serviceabilityQueries');
+    const labs = await listCoverageLabs();
+    return (
+      <div className="px-6 lg:px-8 py-6 max-w-[1600px] mx-auto">
+        <PageHeader
+          title="Pincodes"
+          subtitle="Check which of your services reach a pincode — one at a time, or a whole client list."
+        />
+        <PincodeTabs active="panel" />
+        <LabPanelGap labs={labs} />
+      </div>
+    );
+  }
+
   if (s.tab === 'serviceability') {
     return (
       <div className="px-6 lg:px-8 py-6 max-w-[1600px] mx-auto">

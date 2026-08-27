@@ -1,5 +1,5 @@
 import 'server-only';
-import { query } from './db';
+import { query, queryOne } from './db';
 import { CAPABILITY_MATRIX, KIND_LABEL, MODALITY_LABEL, type ProviderKind, type Modality } from './coverage';
 
 /**
@@ -132,4 +132,105 @@ export async function checkServiceability(
     });
   }
   return [...byPincode.values()];
+}
+
+/**
+ * What a panel of labs covers, and what it misses.
+ *
+ * The question behind it: "we have a deal with these labs — what can they
+ * collect for us, where do they leave us short, and who could fill it?"
+ *
+ * Coverage is the union of the selected labs' pincodes, not the intersection:
+ * a pincode is served if any one of them reaches it. "Remaining" is every
+ * pincode some *other* lab in the network reaches but the panel does not —
+ * which is the actionable half, because each one names a lab to talk to.
+ *
+ * Scoped to home collection, matching mv_lab_pincode_home, since that is what
+ * a panel of collection partners is for.
+ */
+export type PanelGapRow = {
+  pincode: string;
+  city: string | null;
+  state: string | null;
+  labs: string[];
+  lab_count: number;
+  orders_all_time: number | null;
+};
+
+export type PanelSummary = {
+  panel_pincodes: number;
+  network_pincodes: number;
+  remaining_pincodes: number;
+  remaining_with_demand: number;
+};
+
+export async function getPanelGap(labIds: number[], limit = 5000) {
+  const ids = Array.from(new Set(labIds.filter((n) => Number.isFinite(n)))).slice(0, 200);
+  if (!ids.length) {
+    return {
+      summary: { panel_pincodes: 0, network_pincodes: 0, remaining_pincodes: 0, remaining_with_demand: 0 },
+      rows: [] as PanelGapRow[],
+    };
+  }
+
+  const [summary, rows] = await Promise.all([
+    queryOne<PanelSummary>(`
+      WITH panel AS (
+        SELECT DISTINCT pincode FROM analytics.mv_lab_pincode_home WHERE lab_id = ANY($1)
+      ),
+      network AS (SELECT DISTINCT pincode FROM analytics.mv_lab_pincode_home),
+      remaining AS (SELECT pincode FROM network EXCEPT SELECT pincode FROM panel)
+      SELECT
+        (SELECT COUNT(*) FROM panel)::int      AS panel_pincodes,
+        (SELECT COUNT(*) FROM network)::int    AS network_pincodes,
+        (SELECT COUNT(*) FROM remaining)::int  AS remaining_pincodes,
+        (SELECT COUNT(*) FROM remaining r
+           JOIN analytics.mv_pincode_summary ps ON ps.pincode = r.pincode
+          WHERE COALESCE(ps.orders_all_time, 0) > 0)::int AS remaining_with_demand
+    `, [ids]),
+
+    query<PanelGapRow>(`
+      WITH panel AS (
+        SELECT DISTINCT pincode FROM analytics.mv_lab_pincode_home WHERE lab_id = ANY($1)
+      ),
+      remaining AS (
+        SELECT DISTINCT pincode FROM analytics.mv_lab_pincode_home
+        EXCEPT SELECT pincode FROM panel
+      )
+      SELECT r.pincode,
+             pd.city, pd.state,
+             ARRAY_REMOVE(ARRAY_AGG(DISTINCT l."labName" ORDER BY l."labName"), NULL) AS labs,
+             COUNT(DISTINCT lph.lab_id)::int AS lab_count,
+             MAX(ps.orders_all_time) AS orders_all_time
+      FROM remaining r
+      JOIN analytics.mv_lab_pincode_home lph ON lph.pincode = r.pincode
+      JOIN src_local."Lab" l ON l.id = lph.lab_id
+      LEFT JOIN LATERAL (
+        SELECT MIN(city) AS city, MIN(state) AS state
+        FROM atlas.pincode_directory WHERE pincode = r.pincode
+      ) pd ON true
+      LEFT JOIN analytics.mv_pincode_summary ps ON ps.pincode = r.pincode
+      GROUP BY r.pincode, pd.city, pd.state
+      -- Demand first: a gap nobody has ever ordered from is not the one to
+      -- fix first.
+      ORDER BY MAX(ps.orders_all_time) DESC NULLS LAST, r.pincode
+      LIMIT $2
+    `, [ids, limit]),
+  ]);
+
+  return {
+    summary: summary ?? { panel_pincodes: 0, network_pincodes: 0, remaining_pincodes: 0, remaining_with_demand: 0 },
+    rows,
+  };
+}
+
+/** Labs that actually have home-collection coverage, for the picker. */
+export async function listCoverageLabs() {
+  return query<{ lab_id: number; name: string; city: string | null; pincodes: number }>(`
+    SELECT lph.lab_id, l."labName" AS name, l.city, COUNT(*)::int AS pincodes
+    FROM analytics.mv_lab_pincode_home lph
+    JOIN src_local."Lab" l ON l.id = lph.lab_id
+    GROUP BY 1, 2, 3
+    ORDER BY COUNT(*) DESC, l."labName"
+  `);
 }

@@ -1,12 +1,13 @@
 import Link from 'next/link';
-import { BarChart3, ListChecks } from 'lucide-react';
+import { BarChart3, ListChecks, Building2 } from 'lucide-react';
 
 const TABS = [
   { key: 'distribution',   href: '/pincodes',                       label: 'Distribution',  icon: BarChart3 },
   { key: 'serviceability', href: '/pincodes?tab=serviceability',    label: 'Serviceability', icon: ListChecks },
+  { key: 'panel',          href: '/pincodes?tab=panel',             label: 'Lab panel',      icon: Building2 },
 ] as const;
 
-export function PincodeTabs({ active }: { active: 'distribution' | 'serviceability' }) {
+export function PincodeTabs({ active }: { active: 'distribution' | 'serviceability' | 'panel' }) {
   return (
     <div className="flex items-center gap-1 mb-4 border-b border-ink-200">
       {TABS.map((t) => {
