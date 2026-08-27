@@ -16,6 +16,7 @@ import {
 } from '@/lib/requests';
 import { RequestsTable } from './RequestsTable';
 import { RequestFunnel } from './RequestFunnel';
+import { SearchBar } from './SearchBar';
 
 export const dynamic = 'force-dynamic';
 
@@ -47,9 +48,13 @@ export default async function RequestsPage({
     priced: searchParams.priced === '1',
     disputed: searchParams.disputed === '1',
     hasLab: searchParams.haslab === '1',
-    // Default to this week. An all-time queue is a year of history and tells
-    // nobody what to do this morning.
-    window: (searchParams.window as 'today' | 'week' | 'month' | 'all') ?? 'week',
+    // Default to the last 7 days, because an all-time queue is a year of
+    // history and tells nobody what to do this morning — except when
+    // searching, where the whole point is to find one specific thing whose age
+    // you do not know. A search scoped to a week returns nothing and reads as
+    // "not found" rather than "not in this window".
+    window: (searchParams.window as 'today' | 'week' | 'month' | 'all')
+            ?? (searchParams.q ? 'all' : 'week'),
     appt: searchParams.appt as 'today' | 'tomorrow' | 'soon' | 'overdue' | 'none' | undefined,
     openOnly,
     limit: 150,
@@ -100,12 +105,22 @@ export default async function RequestsPage({
         }
       />
 
+      <div className="flex flex-wrap items-center gap-3 mt-4">
+        <SearchBar initial={searchParams.q} />
+        {searchParams.q && (
+          <span className="text-xs text-ink-500">
+            {total.toLocaleString('en-IN')} match{total === 1 ? '' : 'es'} for
+            {' '}<b className="text-ink-900">{searchParams.q}</b>
+          </span>
+        )}
+      </div>
+
       <div className="flex flex-wrap items-center gap-1.5 my-4">
         <span className="text-[11px] uppercase tracking-wide text-ink-400 mr-1">Arrived</span>
         {([
           ['today', 'Today'], ['week', 'Last 7 days'], ['month', 'Last 30 days'], ['all', 'All time'],
         ] as const).map(([k, label]) => (
-          <ChipButton key={k} href={keep('window', k)} active={(searchParams.window ?? 'week') === k}>
+          <ChipButton key={k} href={keep('window', k)} active={(searchParams.window ?? (searchParams.q ? 'all' : 'week')) === k}>
             {label}
           </ChipButton>
         ))}
@@ -137,7 +152,7 @@ export default async function RequestsPage({
 
       <RequestFunnel
         funnel={funnel}
-        windowLabel={WINDOW_LABEL[(searchParams.window ?? 'week') as keyof typeof WINDOW_LABEL]}
+        windowLabel={WINDOW_LABEL[(searchParams.window ?? (searchParams.q ? 'all' : 'week')) as keyof typeof WINDOW_LABEL]}
         hrefFor={(k, v) => keep(k, v)}
       />
 
@@ -231,7 +246,7 @@ export default async function RequestsPage({
           <div className="-mx-5">
             <RequestsTable
               rows={rows}
-              windowLabel={WINDOW_LABEL[(searchParams.window ?? 'week') as keyof typeof WINDOW_LABEL]}
+              windowLabel={WINDOW_LABEL[(searchParams.window ?? (searchParams.q ? 'all' : 'week')) as keyof typeof WINDOW_LABEL]}
               widenHref={keep('window', 'all')}
             />
           </div>

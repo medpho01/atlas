@@ -80,11 +80,30 @@ function build(f: RequestFilters) {
   // these are requests someone may have already turned away.
   if (f.disputed) where.push("NOT src_flag AND state = 'SERVICEABLE'");
   if (f.q) {
-    params.push(`%${f.q}%`);
-    const i = params.length;
-    where.push(`(pincode ILIKE $${i} OR city ILIKE $${i} OR request_id::text ILIKE $${i}
-                 OR store_name ILIKE $${i}
-                 OR array_to_string(item_names, ' ') ILIKE $${i})`);
+    // "#28785" and "28785" are the same search. Ops copy ids straight out of
+    // the console, hash and all.
+    const q = f.q.trim().replace(/^#/, '');
+
+    // A bare number is almost always a request id or a pincode, and matching
+    // it as a substring against everything buries the exact row among
+    // coincidences — "509125" appearing inside a longer id, say. Exact first.
+    if (/^\d+$/.test(q)) {
+      // Exact only. A substring match on a number is almost always wrong:
+      // searching "121" for request #121 also matched pincodes 121001 and
+      // 412105 and returned 543 rows with the one wanted row buried. Nobody
+      // searches a number hoping for things that merely contain it.
+      params.push(Number(q) <= 2147483647 ? Number(q) : 0);
+      const idParam = params.length;
+      params.push(q);
+      const pinParam = params.length;
+      where.push(`(request_id = $${idParam} OR pincode = $${pinParam})`);
+    } else {
+      params.push(`%${q}%`);
+      const i = params.length;
+      where.push(`(city ILIKE $${i} OR store_name ILIKE $${i}
+                   OR pincode ILIKE $${i}
+                   OR array_to_string(item_names, ' ') ILIKE $${i})`);
+    }
   }
   return { params, clause: where.length ? `WHERE ${where.join(' AND ')}` : '' };
 }
