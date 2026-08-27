@@ -392,6 +392,33 @@ BEGIN
 END $$;
 
 -- ---------------------------------------------------------------------------
+-- Which stores the team is actually working.
+--
+-- Sixty stores have sent requests; a handful account for nearly all of them,
+-- and the rest are noise in a queue meant to be worked top to bottom. Absent
+-- means tracked, so a new store appears on its own and someone has to decide
+-- to ignore it rather than to notice it — the safer default when the cost of
+-- missing a store is a partner wondering why nobody called.
+--
+-- Untracked stores are hidden from the queue and its filters, not deleted.
+-- Their requests still exist and the count of what is hidden is always shown,
+-- because a queue that silently drops work is worse than a long one.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS atlas.store_tracking (
+  store_id    int  PRIMARY KEY,
+  tracked     boolean NOT NULL DEFAULT true,
+  note        text,
+  updated_by  int REFERENCES atlas.users(id),
+  updated_at  timestamptz NOT NULL DEFAULT now()
+);
+
+/** Absent means tracked. */
+CREATE OR REPLACE FUNCTION atlas.store_is_tracked(sid int)
+RETURNS boolean LANGUAGE sql STABLE AS $$
+  SELECT COALESCE((SELECT tracked FROM atlas.store_tracking WHERE store_id = sid), true)
+$$;
+
+-- ---------------------------------------------------------------------------
 -- Pincodes a lab does not actually serve, whatever its mapping says.
 --
 -- Serviceability in LabStack is Lab."pincodesServiced". Atlas reads it exactly.

@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import { requireView } from '@/lib/guard';
 import { RoleBlocked } from '@/components/RoleBlocked';
 import { Inbox } from 'lucide-react';
@@ -7,6 +8,7 @@ import { InfoTip } from '@/components/ui/InfoTip';
 import { ChipButton } from '@/components/ui/Toggle';
 import {
   getRequests, countRequests, getRequestFunnel, getFacets, getRequestFreshness,
+  getUntrackedCount,
 } from '@/lib/requestQueries';
 import {
   REQUEST_STATES, STATE_SHORT, STAGE_ORDER, STAGE_LABEL, SETTLED_STAGES,
@@ -53,10 +55,11 @@ export default async function RequestsPage({
     limit: 150,
   };
 
-  const [rows, total, facets, funnel, fresh] = await Promise.all([
+  const [rows, total, facets, funnel, fresh, untracked] = await Promise.all([
     getRequests(f), countRequests(f), getFacets(f),
     getRequestFunnel({ ...f, state: undefined }),
     getRequestFreshness(),
+    getUntrackedCount(f),
   ]);
 
   const keep = (k: string, v?: string) => {
@@ -157,13 +160,21 @@ export default async function RequestsPage({
         <ChipButton href={keep('store')} active={!searchParams.store}>All</ChipButton>
         {/* Zero-count chips stay visible but muted: knowing a store has nothing
             in this window is useful, and removing them makes the row jump. */}
-        {facets.stores.slice(0, 6).map((s) => (
+        {facets.stores.map((s) => (
           <ChipButton key={s.store_id} href={keep('store', String(s.store_id))}
                       active={searchParams.store === String(s.store_id)}>
             {s.name}{' '}
             <span className={s.n === 0 ? 'text-ink-300' : 'text-ink-400'}>{s.n}</span>
           </ChipButton>
         ))}
+        {/* Untracked stores are hidden, never silently: the count is the
+            prompt to go and reconsider the list. */}
+        <Link href="/settings/stores"
+              className="text-[11px] text-brand-600 hover:underline ml-1 whitespace-nowrap">
+          {untracked > 0
+            ? `${untracked.toLocaleString('en-IN')} hidden · edit stores →`
+            : 'edit stores →'}
+        </Link>
       </div>
 
       <div className="flex flex-wrap items-center gap-1.5 mb-2">

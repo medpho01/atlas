@@ -29,6 +29,8 @@ export type RequestFilters = {
   window?: 'today' | 'week' | 'month' | 'all';
   /** Preferred appointment: today | tomorrow | soon (<=3d) | overdue | none. */
   appt?: 'today' | 'tomorrow' | 'soon' | 'overdue' | 'none';
+  /** Include stores switched off in settings. Off by default. */
+  includeUntracked?: boolean;
   limit?: number;
   offset?: number;
 };
@@ -67,6 +69,11 @@ function build(f: RequestFilters) {
   if (f.appt === 'overdue')  where.push('preferred_at::date < atlas.ist_today()');
   if (f.appt === 'none')     where.push('preferred_at IS NULL');
 
+  // Stores the team has switched off. Absent means tracked, so a new partner
+  // shows up without anyone configuring it.
+  if (f.includeUntracked !== true) {
+    where.push('(store_id IS NULL OR atlas.store_is_tracked(store_id))');
+  }
   if (f.priced) where.push('quote_price IS NOT NULL');
   if (f.hasLab) where.push('covering_labs > 0');
   // The console flag disagreeing with Atlas is worth filtering on directly:
@@ -188,6 +195,43 @@ export async function getRequestFreshness() {
            COUNT(*)::int AS total
     FROM analytics.mv_request_state
   `);
+}
+
+/**
+ * How many open requests are hidden because their store is switched off.
+ *
+ * Shown wherever the filter is applied. A queue that quietly drops work is
+ * worse than a long one, and the number is the prompt to revisit settings.
+ */
+export async function getUntrackedCount(f: RequestFilters = {}) {
+  const { params, clause } = build({ ...f, store: undefined, includeUntracked: true });
+  const row = await queryOne<{ n: number }>(`
+    SELECT COUNT(*)::int AS n FROM analytics.v_request_quote ${clause}
+    ${clause ? 'AND' : 'WHERE'} store_id IS NOT NULL AND NOT atlas.store_is_tracked(store_id)
+  `, params);
+  return row?.n ?? 0;
+}
+
+/** Every store that has ever sent a request, with its tracking state. */
+export async function getStoreSettings() {
+  return query<{
+    store_id: number; name: string; requests: number; open_requests: number;
+    tracked: boolean; note: string | null; last_request: string | null;
+  }>(`
+    SELECT s.store_id,
+           COALESCE(st."storeName", 'Store ' || s.store_id) AS name,
+           COUNT(*)::int AS requests,
+           COUNT(*) FILTER (WHERE NOT s.is_converted
+             AND s.status <> ALL($1))::int AS open_requests,
+           atlas.store_is_tracked(s.store_id) AS tracked,
+           (SELECT note FROM atlas.store_tracking t WHERE t.store_id = s.store_id) AS note,
+           MAX(s.created_at)::text AS last_request
+    FROM analytics.mv_request_state s
+    LEFT JOIN src_local."Store" st ON st.id = s.store_id
+    WHERE s.store_id IS NOT NULL
+    GROUP BY s.store_id, st."storeName"
+    ORDER BY COUNT(*) DESC
+  `, [SETTLED]);
 }
 
 export async function getRequest(id: number) {
@@ -444,9 +488,13 @@ export async function getFacets(f: RequestFilters = {}) {
   const [stores, cities, stages] = await Promise.all([
     query<{ store_id: number; name: string; n: number }>(`
       WITH top AS (
+        -- Every tracked store that has ever sent a request, not a fixed top
+        -- few: the settings page is what keeps this list short, so the filter
+        -- row should show exactly what is being tracked.
         SELECT store_id, COUNT(*) AS all_time
         FROM analytics.mv_request_state
-        WHERE store_id IS NOT NULL GROUP BY 1 ORDER BY 2 DESC LIMIT 25
+        WHERE store_id IS NOT NULL AND atlas.store_is_tracked(store_id)
+        GROUP BY 1 ORDER BY 2 DESC
       ),
       filtered AS (
         SELECT store_id, COUNT(*)::int AS n

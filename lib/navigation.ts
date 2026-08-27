@@ -74,7 +74,12 @@ export const NAV: NavGroup[] = [
   },
   {
     label: 'Admin',
-    items: [{ href: '/users', label: 'Users & roles', feature: 'admin' }],
+    items: [
+      // Which partners the requests queue is for. Sits under Admin rather than
+      // Fulfilment because it is configuration, not a queue to work.
+      { href: '/settings/stores', label: 'Stores', feature: 'coverage' },
+      { href: '/users', label: 'Users & roles', feature: 'admin' },
+    ],
   },
 ];
 
