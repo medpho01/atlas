@@ -20,9 +20,17 @@ function head(s, title, sub) {
   s.addText(sub, { x: M, y: 0.82, w: 10.5, h: 0.3, fontFace: F, fontSize: 12, color: INK5, isTextBox: true, margin: 0 });
   s.addText('Atlas · 2 September 2026', { x: 13.3 - M - 3, y: 0.36, w: 3, h: 0.25, fontFace: F, fontSize: 10, color: INK4, align: 'right', isTextBox: true, margin: 0 });
 }
-
 function card(s, x, y, w, h) {
   s.addShape(pres.ShapeType.roundRect, { x, y, w, h, rectRadius: 0.06, fill: { color: WHITE }, line: { color: INK15, width: 0.75 } });
+}
+// Depth is one ordered quantity — one hue, five steps.
+function band(d) {
+  if (!d) return { fill: INK1, text: INK3 };
+  if (d < 2)  return { fill: 'E4ECFC', text: '1D40AF' };
+  if (d < 5)  return { fill: 'C2D5F7', text: '1D40AF' };
+  if (d < 15) return { fill: '8FAFEF', text: '1D40AF' };
+  if (d < 50) return { fill: '5581E4', text: WHITE };
+  return { fill: BRAND, text: WHITE };
 }
 
 /* ─────────────────────────────── SLIDE 1 ─────────────────────────────── */
@@ -31,9 +39,9 @@ head(s1, 'The month in the network',
      'Serviceability by thread — where we can serve, not where we have served. Green is the last 30 days.');
 
 const cards = [
-  { n: 'Centre visit',           sub: 'Radiology and/or pathology', v: '2,131', d: '+78',  p: '8,910', dep: '5.0' },
-  { n: 'Home sample collection', sub: 'Pathology',                  v: '257',   d: '+40',  p: '8,822', dep: '5.0' },
-  { n: 'PPMC network',           sub: 'Active STAR-PPMC packages',  v: '42',    d: '+17',  p: '1,330', dep: '1.0' },
+  { n: 'Centre visit',           sub: 'Radiology and/or pathology', v: '2,131', d: '+78', p: '8,910', dep: '5.0' },
+  { n: 'Home sample collection', sub: 'Pathology',                  v: '257',   d: '+40', p: '8,822', dep: '5.0' },
+  { n: 'PPMC network',           sub: 'Active STAR-PPMC packages',  v: '42',    d: '+17', p: '1,330', dep: '1.0' },
 ];
 const cw = (W - 0.4) / 3;
 cards.forEach((c, i) => {
@@ -49,61 +57,54 @@ cards.forEach((c, i) => {
              { x: x + 0.22, y: y + 1.12, w: cw - 0.44, h: 0.24, fontFace: F, fontSize: 10, isTextBox: true, margin: 0 });
 });
 
-const COLS = [4.9, 1.9, 1.9, 2.3, 1.2];
-const rows = [
-  ['G', 'Place-bound capacity', 'serviceable pincodes'],
-  ['R', 'Centre visit',                '2,131', '+78',  '8,910', '5.0'],
-  ['R', 'Home sample collection',      '257',   '+40',  '8,822', '5.0'],
-  ['R', 'PPMC network',                '42',    '+17',  '1,330', '1.0'],
-  ['R', 'Offline doctor consultation', '909',   '+141', '53*',   '—'],
-  ['R', 'Dental network',              '30',    '+4',   '11*',   '—'],
-  ['R', 'Specialised tests',           'manual','—',    'manual','—'],
-  ['R', 'Processing labs',             'manual','—',    'manual','—'],
-  ['R', 'Pharmacy',                    'manual','—',    'manual','—'],
-  ['G', 'People', 'headcount, and where they are'],
-  ['R', 'Phlebotomists', '6,235', '—', '1,743*', '—'],
-  ['R', 'Nurses',        '951',   '—', '31*',    '—'],
-  ['G', 'Virtual', 'no geography — see slide 3'],
-  ['R', 'Online teleconsult', '1,076', '+202', '—', '—'],
+// One native table — editable in Google Slides, and one object instead of eighty.
+const G = (t, n) => [
+  { text: t.toUpperCase(), options: { bold: true, color: INK6, fontSize: 8, charSpacing: 0.6, fill: { color: 'F7F9FA' } } },
+  { text: n, options: { color: INK3, fontSize: 8, fill: { color: 'F7F9FA' }, colspan: 4 } },
 ];
-
-const tY = 3.0, tH = 3.75;
-card(s1, M, tY, W, tH);
-const hdr = ['Thread', 'Providers', 'Added (30d)', 'Pincodes serviceable', 'Depth'];
-let cx = M + 0.25;
-hdr.forEach((h, i) => {
-  s1.addText(h.toUpperCase(), { x: cx, y: tY + 0.12, w: COLS[i], h: 0.22, fontFace: F, fontSize: 8, bold: true,
-    color: INK4, charSpacing: 0.6, align: i === 0 ? 'left' : 'right', isTextBox: true, margin: 0 });
-  cx += COLS[i];
+const R = (name, prov, add, pins, depth) => {
+  const man = prov === 'manual';
+  const cell = (t, al, col, bold) => ({ text: t, options: { align: al, color: col, bold: !!bold, italic: man } });
+  return [
+    cell(name, 'left', man ? AMBER : INK7),
+    cell(prov, 'right', man ? AMBER : INK9),
+    cell(add, 'right', add.charAt(0) === '+' ? GREEN : INK3, add.charAt(0) === '+'),
+    cell(pins, 'right', man ? AMBER : INK9),
+    cell(depth, 'right', depth === '—' ? INK3 : INK6),
+  ];
+};
+const hdrOpt = { bold: true, color: INK4, fontSize: 8, charSpacing: 0.6, fill: { color: WHITE } };
+const tbl = [
+  [{ text: 'THREAD', options: hdrOpt },
+   { text: 'PROVIDERS', options: { ...hdrOpt, align: 'right' } },
+   { text: 'ADDED (30D)', options: { ...hdrOpt, align: 'right' } },
+   { text: 'PINCODES SERVICEABLE', options: { ...hdrOpt, align: 'right' } },
+   { text: 'DEPTH', options: { ...hdrOpt, align: 'right' } }],
+  G('Place-bound capacity', 'serviceable pincodes'),
+  R('Centre visit', '2,131', '+78', '8,910', '5.0'),
+  R('Home sample collection', '257', '+40', '8,822', '5.0'),
+  R('PPMC network', '42', '+17', '1,330', '1.0'),
+  R('Offline doctor consultation', '909', '+141', '53*', '—'),
+  R('Dental network', '30', '+4', '11*', '—'),
+  R('Specialised tests', 'manual', '—', 'manual', '—'),
+  R('Processing labs', 'manual', '—', 'manual', '—'),
+  R('Pharmacy', 'manual', '—', 'manual', '—'),
+  G('People', 'headcount, and where they are'),
+  R('Phlebotomists', '6,235', '—', '1,743*', '—'),
+  R('Nurses', '951', '—', '31*', '—'),
+  G('Virtual', 'no geography — see slide 3'),
+  R('Online teleconsult', '1,076', '+202', '—', '—'),
+];
+s1.addTable(tbl, {
+  x: M, y: 3.0, w: W, colW: [5.0, 1.85, 1.85, 2.35, 1.15], rowH: 0.24,
+  fontFace: F, fontSize: 11, valign: 'middle', fill: { color: WHITE },
+  border: [{ type: 'none' }, { type: 'none' }, { pt: 0.5, color: INK15 }, { type: 'none' }],
+  margin: [2, 6, 2, 6],
 });
-s1.addShape(pres.ShapeType.line, { x: M + 0.2, y: tY + 0.38, w: W - 0.4, h: 0, line: { color: INK15, width: 1 } });
-
-let ry = tY + 0.46;
-rows.forEach((r) => {
-  if (r[0] === 'G') {
-    s1.addText([{ text: r[1].toUpperCase(), options: { bold: true, color: INK6 } },
-                { text: '   ' + r[2], options: { color: INK3 } }],
-      { x: M + 0.25, y: ry, w: 8, h: 0.2, fontFace: F, fontSize: 8, charSpacing: 0.6, isTextBox: true, margin: 0 });
-    ry += 0.24;
-  } else {
-    let x = M + 0.25;
-    r.slice(1).forEach((cell, i) => {
-      const pending = cell === 'manual' || cell === 'pending';
-      s1.addText(String(cell), { x, y: ry, w: COLS[i], h: 0.22, fontFace: F, fontSize: 11,
-        bold: i === 2 && String(cell).charAt(0) === '+',
-        italic: pending,
-        color: pending ? AMBER : i === 0 ? INK7 : (i === 2 && String(cell).charAt(0) === '+') ? GREEN : (cell === '—' ? INK3 : INK9),
-        align: i === 0 ? 'left' : 'right', isTextBox: true, margin: 0 });
-      x += COLS[i];
-    });
-    ry += 0.245;
-  }
-});
-
 s1.addText('Serviceable = pincodes entered against the lab, plus the 20 km catchment of each centre.   ' +
            '*  counted at the provider’s own location, without a travel radius — a floor, not a reach.   ' +
            'Specialised tests, Processing labs and Pharmacy are filled by hand.',
-  { x: M, y: 6.9, w: W, h: 0.3, fontFace: F, fontSize: 8.5, color: INK4, isTextBox: true, margin: 0 });
+  { x: M, y: 6.95, w: W, h: 0.3, fontFace: F, fontSize: 8.5, color: INK4, isTextBox: true, margin: 0 });
 s1.addNotes('Serviceability, not fulfilled orders. 8,910 and 8,822 sit under Atlas’s 9,207 active pincodes.');
 
 /* ─────────────────────────────── SLIDE 2 ─────────────────────────────── */
@@ -117,50 +118,36 @@ const HEAT = [
   ['Home sample collection', [31.6, 23.9, 38.9, 21.5, 10.4, 16.5]],
   ['PPMC network',           [2.6, 14.5, 4.9, 1.0, 1.0, 1.0]],
 ];
-// One hue, five steps — depth is a single ordered quantity.
-function band(d) {
-  if (!d) return { fill: INK1, text: INK3 };
-  if (d < 2)  return { fill: 'E4ECFC', text: '1D40AF' };
-  if (d < 5)  return { fill: 'C2D5F7', text: '1D40AF' };
-  if (d < 15) return { fill: '8FAFEF', text: WHITE };
-  if (d < 50) return { fill: '5581E4', text: WHITE };
-  return { fill: BRAND, text: WHITE };
-}
-
 const hx = M, hy = 1.3, hw = W * 0.575, hh = 2.55;
 card(s2, hx, hy, hw, hh);
 s2.addText('Metro depth', { x: hx + 0.22, y: hy + 0.14, w: 3, h: 0.24, fontFace: F, fontSize: 13, bold: true, color: INK9, isTextBox: true, margin: 0 });
 s2.addText('providers within reach of a pincode', { x: hx + hw - 3.2, y: hy + 0.17, w: 3, h: 0.2, fontFace: F, fontSize: 9, color: INK4, align: 'right', isTextBox: true, margin: 0 });
 
-const labW = 2.15, cellW = (hw - 0.44 - labW) / 6, cellH = 0.36;
-METROS.forEach((m, i) => {
-  s2.addText(m, { x: hx + 0.22 + labW + i * cellW, y: hy + 0.5, w: cellW, h: 0.2, fontFace: F, fontSize: 8, color: INK5, align: 'center', isTextBox: true, margin: 0 });
+const heatRows = [[{ text: '', options: { fill: { color: WHITE } } },
+  ...METROS.map((m) => ({ text: m, options: { align: 'center', fontSize: 8, color: INK5, fill: { color: WHITE } } }))]];
+HEAT.forEach(([name, ds]) => {
+  heatRows.push([{ text: name, options: { fontSize: 10, color: INK7, fill: { color: WHITE } } },
+    ...ds.map((d) => {
+      const b = band(d);
+      return { text: d >= 10 ? String(Math.round(d)) : d.toFixed(1),
+               options: { align: 'center', bold: true, fontSize: 10, color: b.text, fill: { color: b.fill } } };
+    })]);
 });
-HEAT.forEach((row, r) => {
-  const y = hy + 0.74 + r * (cellH + 0.06);
-  s2.addText(row[0], { x: hx + 0.22, y, w: labW - 0.1, h: cellH, fontFace: F, fontSize: 10, color: INK7, valign: 'middle', isTextBox: true, margin: 0 });
-  row[1].forEach((d, i) => {
-    const b = band(d);
-    s2.addShape(pres.ShapeType.roundRect, { x: hx + 0.22 + labW + i * cellW + 0.02, y, w: cellW - 0.04, h: cellH, rectRadius: 0.03, fill: { color: b.fill }, line: { color: b.fill, width: 0 } });
-    s2.addText(d >= 10 ? String(Math.round(d)) : d.toFixed(1),
-      { x: hx + 0.22 + labW + i * cellW, y, w: cellW, h: cellH, fontFace: F, fontSize: 10, bold: true, color: b.text, align: 'center', valign: 'middle', isTextBox: true, margin: 0 });
-  });
-});
+const mcw = (hw - 0.44 - 2.15) / 6;
+s2.addTable(heatRows, { x: hx + 0.22, y: hy + 0.5, w: hw - 0.44, colW: [2.15, mcw, mcw, mcw, mcw, mcw, mcw],
+  rowH: 0.34, fontFace: F, valign: 'middle', border: [{ pt: 1.5, color: WHITE }], margin: [1, 3, 1, 3] });
 s2.addText('A 20 km catchment in Hyderabad contains ~151 centres. Wide reach, not walking distance.',
   { x: hx + 0.22, y: hy + hh - 0.42, w: hw - 0.44, h: 0.3, fontFace: F, fontSize: 8.5, color: INK4, isTextBox: true, margin: 0 });
 
-/* zonal */
 const zx = M + hw + 0.25, zw = W - hw - 0.25, zy = hy, zh = hh;
 card(s2, zx, zy, zw, zh);
 s2.addText('Zonal balance', { x: zx + 0.22, y: zy + 0.14, w: 3, h: 0.24, fontFace: F, fontSize: 13, bold: true, color: INK9, isTextBox: true, margin: 0 });
-
 let lx = zx + 0.22;
 Object.entries(ZONE).forEach(([n, c]) => {
   s2.addShape(pres.ShapeType.roundRect, { x: lx, y: zy + 0.5, w: 0.11, h: 0.11, rectRadius: 0.02, fill: { color: c }, line: { color: c, width: 0 } });
   s2.addText(n, { x: lx + 0.16, y: zy + 0.44, w: 0.8, h: 0.22, fontFace: F, fontSize: 9, color: INK6, isTextBox: true, margin: 0 });
   lx += 0.95;
 });
-
 const BARS = [
   ['Where demand is',        [57, 18, 21, 3],  true],
   ['Centre visit',           [33, 21, 25, 21], false],
@@ -181,13 +168,11 @@ BARS.forEach((b, i) => {
 s2.addText('Serviceability is spread evenly across the country. Demand is not — 57% of orders come from the South, 3% from the East.',
   { x: zx + 0.22, y: zy + zh - 0.5, w: zw - 0.44, h: 0.4, fontFace: F, fontSize: 8.5, color: INK4, isTextBox: true, margin: 0 });
 
-/* service mix */
 const mx = M, my = hy + hh + 0.25, mh = 1.35;
 card(s2, mx, my, W, mh);
 s2.addText('Service mix', { x: mx + 0.22, y: my + 0.13, w: 3, h: 0.24, fontFace: F, fontSize: 13, bold: true, color: INK9, isTextBox: true, margin: 0 });
 s2.addText('radiology is visible only through the facilities record, pathology through the test catalogue',
-  { x: mx + 1.6, y: my + 0.16, w: 6, h: 0.2, fontFace: F, fontSize: 9, color: INK4, isTextBox: true, margin: 0 });
-
+  { x: mx + 1.6, y: my + 0.16, w: 6.5, h: 0.2, fontFace: F, fontSize: 9, color: INK4, isTextBox: true, margin: 0 });
 const MIX = [
   ['Centre visit', [['Neither recorded', 1866, INK3], ['Pathology only', 127, '8FAFEF'], ['Radiology only', 127, '5581E4'], ['Radiology + pathology', 11, BRAND]]],
   ['PPMC network', [['Neither recorded', 15, INK3], ['Radiology only', 26, '5581E4'], ['Radiology + pathology', 1, BRAND]]],
@@ -196,7 +181,7 @@ MIX.forEach((m, i) => {
   const y = my + 0.5 + i * 0.4;
   const total = m[1].reduce((a, b) => a + b[1], 0);
   s2.addText(m[0], { x: mx + 0.22, y, w: 1.6, h: 0.2, fontFace: F, fontSize: 10, color: INK7, isTextBox: true, margin: 0 });
-  let bx = mx + 1.9, bw = W - 2.4;
+  let bx = mx + 1.9; const bw = W - 2.4;
   m[1].forEach(([lab, n, col]) => {
     const seg = (n / total) * bw;
     s2.addShape(pres.ShapeType.roundRect, { x: bx, y: y + 0.02, w: Math.max(seg - 0.02, 0.02), h: 0.17, rectRadius: 0.02, fill: { color: col }, line: { color: col, width: 0 } });
@@ -212,7 +197,6 @@ s2.addNotes('Zonal bars are each thread’s share of its own reach, read against
 const s3 = pres.addSlide();
 head(s3, 'The doctor panel',
      'Serves both teleconsult and in-clinic. Covered by speciality and by hour, since it has no geography.');
-
 const STATS = [
   ['Doctors', '1,076', '+202', 'on the panel · 909 with a pincode', GREEN],
   ['Specialities', '232', '+83', 'names carry spelling variants', GREEN],
@@ -242,33 +226,40 @@ const SPEC = [
   ['Ophthalmology',      27, 13, [0,0,0,0,0,0,0,0,2,8,11,10,11,9,9,12,8,6,1,0,0,0,0,0]],
 ];
 function hband(v) {
-  if (!v) return INK1;
+  if (!v) return { fill: INK1, text: INK1 };
   const f = v / 48;
-  if (f < 0.12) return 'E4ECFC';
-  if (f < 0.28) return 'C2D5F7';
-  if (f < 0.5)  return '8FAFEF';
-  if (f < 0.75) return '5581E4';
-  return BRAND;
+  if (f < 0.12) return { fill: 'E4ECFC', text: '1D40AF' };
+  if (f < 0.28) return { fill: 'C2D5F7', text: '1D40AF' };
+  if (f < 0.5)  return { fill: '8FAFEF', text: '1D40AF' };
+  if (f < 0.75) return { fill: '5581E4', text: WHITE };
+  return { fill: BRAND, text: WHITE };
 }
 const gy = 2.55, gh = 4.0;
 card(s3, M, gy, W, gh);
 s3.addText('Doctors online by hour', { x: M + 0.22, y: gy + 0.13, w: 4, h: 0.24, fontFace: F, fontSize: 13, bold: true, color: INK9, isTextBox: true, margin: 0 });
 s3.addText('top nine specialities by headcount · IST', { x: M + W - 3.6, y: gy + 0.16, w: 3.4, h: 0.2, fontFace: F, fontSize: 9, color: INK4, align: 'right', isTextBox: true, margin: 0 });
 
-const slab = 2.1, hcw = (W - 0.44 - slab) / 24, hch = 0.3;
-for (let h = 0; h < 24; h++) {
-  if (h % 2 === 0) s3.addText(String(h).padStart(2, '0'), { x: M + 0.22 + slab + h * hcw, y: gy + 0.48, w: hcw * 2, h: 0.18, fontFace: F, fontSize: 7.5, color: INK4, align: 'center', isTextBox: true, margin: 0 });
-}
-SPEC.forEach((sp, r) => {
-  const y = gy + 0.72 + r * (hch + 0.045);
-  s3.addText(sp[0], { x: M + 0.22, y, w: slab - 0.55, h: hch, fontFace: F, fontSize: 9.5, color: INK7, valign: 'middle', isTextBox: true, margin: 0 });
-  s3.addText(String(sp[1]) + (sp[2] ? '  +' + sp[2] : ''), { x: M + 0.22 + slab - 0.58, y, w: 0.52, h: hch, fontFace: F, fontSize: 8, color: sp[2] ? GREEN : INK4, align: 'right', valign: 'middle', isTextBox: true, margin: 0 });
-  sp[3].forEach((v, i) => {
-    const c = hband(v);
-    s3.addShape(pres.ShapeType.roundRect, { x: M + 0.22 + slab + i * hcw + 0.015, y, w: hcw - 0.03, h: hch, rectRadius: 0.02, fill: { color: c }, line: { color: c, width: 0 } });
-    if (v) s3.addText(String(v), { x: M + 0.22 + slab + i * hcw, y, w: hcw, h: hch, fontFace: F, fontSize: 7.5, bold: true, color: (v / 48) >= 0.5 ? WHITE : '1D40AF', align: 'center', valign: 'middle', isTextBox: true, margin: 0 });
-  });
+const specRows = [[
+  { text: 'Speciality', options: { fontSize: 8, bold: true, color: INK4, fill: { color: WHITE } } },
+  { text: 'Docs', options: { fontSize: 8, bold: true, color: INK4, align: 'right', fill: { color: WHITE } } },
+  ...Array.from({ length: 24 }, (_, h) => ({
+    text: String(h).padStart(2, '0'),
+    options: { fontSize: 7, color: INK4, align: 'center', fill: { color: WHITE } } })),
+]];
+SPEC.forEach(([name, n, add, hrs]) => {
+  specRows.push([
+    { text: name, options: { fontSize: 9.5, color: INK7, fill: { color: WHITE } } },
+    { text: String(n) + (add ? ' +' + add : ''), options: { fontSize: 8, color: add ? GREEN : INK4, align: 'right', fill: { color: WHITE } } },
+    ...hrs.map((v) => {
+      const b = hband(v);
+      return { text: v ? String(v) : '', options: { fontSize: 7.5, bold: true, color: b.text, align: 'center', fill: { color: b.fill } } };
+    }),
+  ]);
 });
+const hcw = (W - 0.44 - 2.1) / 24;
+s3.addTable(specRows, { x: M + 0.22, y: gy + 0.48, w: W - 0.44,
+  colW: [1.55, 0.55, ...Array(24).fill(hcw)], rowH: 0.31,
+  fontFace: F, valign: 'middle', border: [{ pt: 1.2, color: WHITE }], margin: [1, 1, 1, 1] });
 s3.addText('Only general physicians cover the night; every other speciality starts at 07:00 or later.',
   { x: M + 0.22, y: gy + gh - 0.38, w: W - 0.44, h: 0.26, fontFace: F, fontSize: 9, color: INK6, isTextBox: true, margin: 0 });
 s3.addNotes('232 specialities is inflated by spelling variants (Orthopaedics / Orthopedics) — worth a cleanup.');
