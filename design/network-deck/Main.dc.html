@@ -1,0 +1,146 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
+  <style>
+    body { margin: 0; font-family: Inter, ui-sans-serif, system-ui, -apple-system, sans-serif;
+           -webkit-font-smoothing: antialiased; }
+    a { color: #1f4ed6; } a:hover { color: #1d40af; }
+    .num { font-variant-numeric: tabular-nums; }
+  </style>
+</helmet>
+
+<div style="width: 1280px; height: 720px; background: #FAFBFC; color: #0E1117; padding: 40px 48px 30px; box-sizing: border-box; display: flex; flex-direction: column; gap: 16px;">
+
+  <div style="display: flex; align-items: flex-start; justify-content: space-between; gap: 24px;">
+    <div>
+      <div style="font-size: 26px; font-weight: 700; letter-spacing: -0.02em; line-height: 1.1;">The month in the network</div>
+      <div style="font-size: 13px; color: #646B7A; margin-top: 5px;">Serviceability by thread — where we can serve, not where we have served. Green is the last 30 days.</div>
+    </div>
+    <div style="display: flex; align-items: center; gap: 10px; flex-shrink: 0; padding-top: 3px;">
+      <span style="font-size: 11px; color: #8E96A3;">Atlas &middot; 2 September 2026</span>
+    </div>
+  </div>
+
+  <!-- three priority threads -->
+  <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px;">
+    <sc-for list="{{headline}}" as="h" hint-placeholder-count="3">
+      <div style="background: #FFFFFF; border: 1px solid #E8ECEF; border-radius: 12px; padding: 13px 16px;">
+        <div style="display: flex; align-items: baseline; justify-content: space-between; gap: 8px;">
+          <div>
+            <div style="font-size: 12.5px; font-weight: 600; color: #0E1117; line-height: 1.2;">{{h.name}}</div>
+            <div style="font-size: 10px; color: #8E96A3; margin-top: 2px;">{{h.sub}}</div>
+          </div>
+        </div>
+        <div style="display: flex; align-items: flex-end; gap: 9px; margin-top: 10px;">
+          <span class="num" style="font-size: 27px; font-weight: 600; letter-spacing: -0.02em; line-height: 1; color: {{h.tone}};">{{h.providers}}</span>
+          <span class="num" style="font-size: 13px; font-weight: 600; color: {{h.addedTone}}; padding-bottom: 2px;">{{h.added}}</span>
+          <span style="font-size: 10.5px; color: #8E96A3; padding-bottom: 3px;">{{h.addedNote}}</span>
+        </div>
+        <div style="display: flex; gap: 18px; margin-top: 10px; padding-top: 9px; border-top: 1px solid #F1F3F5;">
+          <div>
+            <div class="num" style="font-size: 14px; font-weight: 600; color: #2D3340;">{{h.pincodes}}</div>
+            <div style="font-size: 9.5px; color: #8E96A3; margin-top: 1px;">pincodes serviceable</div>
+          </div>
+          <div>
+            <div class="num" style="font-size: 13px; font-weight: 600; color: #2D3340;">{{h.services}}</div>
+            <div style="font-size: 9.5px; color: #8E96A3; margin-top: 1px;">services known</div>
+          </div>
+          <div>
+            <div class="num" style="font-size: 14px; font-weight: 600; color: #1f4ed6;">{{h.depth}}</div>
+            <div style="font-size: 9.5px; color: #8E96A3; margin-top: 1px;">providers per pincode</div>
+          </div>
+        </div>
+      </div>
+    </sc-for>
+  </div>
+
+  <!-- all threads -->
+  <div style="background: #FFFFFF; border: 1px solid #E8ECEF; border-radius: 12px; flex-grow: 1; overflow: hidden; display: flex; flex-direction: column;">
+    <div style="display: grid; grid-template-columns: minmax(0, 1fr) 132px 112px 150px 96px; align-items: center; padding: 9px 18px; border-bottom: 1px solid #DDE1E6; font-size: 9.5px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: #8E96A3;">
+      <div>Thread</div>
+      <div style="text-align: right;">Providers</div>
+      <div style="text-align: right;">Added (30d)</div>
+      <div style="text-align: right;">Pincodes serviceable</div>
+      <div style="text-align: right;">Depth</div>
+    </div>
+
+    <div style="flex-grow: 1; display: flex; flex-direction: column; justify-content: space-evenly; padding: 1px 0;">
+      <sc-for list="{{groups}}" as="g" hint-placeholder-count="3">
+        <div style="display: flex; align-items: center; gap: 8px; padding: 6px 18px 2px; border-top: 1px solid #DDE1E6;">
+          <span style="width: 4px; height: 4px; border-radius: 50%; background: {{g.dot}};"></span>
+          <span style="font-size: 9.5px; font-weight: 700; letter-spacing: 0.07em; text-transform: uppercase; color: #454C5B;">{{g.family}}</span>
+          <span style="font-size: 9.5px; color: #C0C6CF;">{{g.note}}</span>
+        </div>
+        <sc-for list="{{g.rows}}" as="r" hint-placeholder-count="7">
+          <div style="display: grid; grid-template-columns: minmax(0, 1fr) 132px 112px 150px 96px; align-items: center; padding: 4px 18px; border-top: 1px solid #F5F7F8;">
+            <div style="font-size: 12.5px; color: #2D3340;">{{r.name}}</div>
+            <div class="num" style="font-size: 12.5px; text-align: right; color: #0E1117;">{{r.providers}}</div>
+            <div class="num" style="font-size: 12.5px; text-align: right; font-weight: 600; color: {{r.addedTone}};">{{r.added}}</div>
+            <div class="num" style="font-size: 12.5px; text-align: right; color: #454C5B;">{{r.pincodes}}</div>
+            <div class="num" style="font-size: 12.5px; text-align: right; color: #454C5B;">{{r.demand}}</div>
+          </div>
+        </sc-for>
+      </sc-for>
+    </div>
+  </div>
+
+  <div style="display: flex; gap: 22px; font-size: 10px; color: #8E96A3;">
+    <span><b style="color: #454C5B; font-weight: 600;">Serviceable</b> = pincodes entered against the lab, plus the 20&thinsp;km catchment of each centre</span>
+    <span><b style="color: #454C5B; font-weight: 600;">Depth</b> = median providers per serviceable pincode</span>
+    <span><b style="color: #454C5B; font-weight: 600;">*</b> counted at the provider&rsquo;s own location, without a travel radius &mdash; a floor, not a reach</span>
+    <span style="color: #d97706;">Specialised tests and Pharmacy are filled by hand</span>
+  </div>
+</div>
+</x-dc>
+
+<script data-dc-script>
+class Component extends DCLogic {
+  renderVals() {
+    const head = (name, sub, providers, added, pincodes, depth, services) =>
+      ({ name, sub, providers, added, pincodes, depth, services,
+         addedNote: 'this month', tone: '#0E1117', addedTone: '#16a34a' });
+
+    // demand here carries depth; pending rows read as pending, not as zero.
+    const row = (name, providers, added, pincodes, depth) => ({
+      name, providers, pincodes, demand: depth, added,
+      addedTone: added.charAt(0) === '+' ? '#16a34a' : '#C0C6CF',
+    });
+
+    return {
+      headline: [
+        head('Centre visit', 'Radiology and/or pathology', '2,131', '+78', '8,910', '5.0', '12%'),
+        head('Home sample collection', 'Pathology', '257', '+40', '8,822', '5.0', '—'),
+        head('PPMC network', 'Active STAR-PPMC packages', '42', '+17', '1,330', '1.0', '64%'),
+      ],
+      groups: [
+        { family: 'Place-bound capacity', note: 'serviceable pincodes', dot: '#1f4ed6', rows: [
+          row('Centre visit',                '2,131', '+78', '8,910', '5.0'),
+          row('Home sample collection',      '257',   '+40', '8,822', '5.0'),
+          row('Processing labs',             '14',    '+4',  '1,511', '1.0'),
+          row('PPMC network',                '42',    '+17', '1,330', '1.0'),
+          row('Offline doctor consultation', '909',    '+141', '53*',    '—'),
+          row('Dental network',              '30',     '+4',   '11*',    '—'),
+          row('Specialised tests',           'manual', '—',    'manual', '—'),
+          row('Pharmacy',                    'manual', '—',    'manual', '—'),
+        ]},
+        { family: 'People', note: 'headcount, and where they are', dot: '#16a34a', rows: [
+          row('Phlebotomists', '6,235', '—', '1,743*', '—'),
+          row('Nurses',        '951',   '—', '31*',    '—'),
+        ]},
+        { family: 'Virtual', note: 'no geography — see slide 3', dot: '#8E96A3', rows: [
+          row('Online teleconsult', '1,076', '+202', '—', '—'),
+        ]},
+      ],
+    };
+  }
+}
+</script>
+</body>
+</html>

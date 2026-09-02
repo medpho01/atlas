@@ -1,0 +1,47 @@
+{
+  "artboards": [
+    {
+      "file": "Main.dc.html",
+      "x": 0,
+      "y": 0,
+      "w": 1280,
+      "h": 720,
+      "title": "1 \u2014 The month in the network"
+    },
+    {
+      "file": "Reach.dc.html",
+      "x": 1400,
+      "y": 0,
+      "w": 1280,
+      "h": 720,
+      "title": "2 \u2014 Where it reaches"
+    },
+    {
+      "file": "Teleconsult.dc.html",
+      "x": 2800,
+      "y": 0,
+      "w": 1280,
+      "h": 720,
+      "title": "3 \u2014 Online teleconsult"
+    }
+  ],
+  "annotations": [
+    {
+      "id": "brief",
+      "x": 0,
+      "y": -210,
+      "w": 470,
+      "text": "Provider network \u2014 monthly all-hands.\n\nREAL DATA, pulled 2 Sep 2026 via sql/network-deck-data.sql.\n\nPincodes are proven \u2014 a real order was fulfilled there. Claimed coverage would be roughly 6x higher and is not used anywhere in this deck."
+    },
+    {
+      "id": "checks",
+      "x": 2800,
+      "y": -210,
+      "w": 470,
+      "text": "Two things to settle before presenting:\n\n1. PPMC is derived from active STAR-PPMC package pricing, not the isApiPpmc flag, which is unset on every lab. Prod also has a separate Star Health store (id 38) that is NOT counted here \u2014 confirm that is right.\n\n2. Speciality names carry spelling variants (Orthopaedics / Orthopedics), which is why the count reads 232.\n\nPharmacy is still not tracked in Atlas at all."
+    }
+  ],
+  "launch": {
+    "view": "canvas"
+  }
+}
