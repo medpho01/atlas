@@ -2,8 +2,9 @@
 """
 Weekly duty form -> SlotConfig SQL.
 
-    python3 scripts/slots-from-form.py responses.xlsx --store 117
-    python3 scripts/slots-from-form.py responses.xlsx --store 117 --test
+    python3 scripts/slots-from-form.py responses.xlsx
+    python3 scripts/slots-from-form.py responses.xlsx --test
+    python3 scripts/slots-from-form.py responses.xlsx --store 117   # optional
 
 Reads the Google Form export and writes one self-contained .sql file. It does
 NOT touch any database itself — the file is for whoever owns the LabStack
@@ -18,9 +19,12 @@ Design notes worth knowing before editing this:
   form spells them differently from the console ("Dr M.Anu Shreeshma Devi"
   against "Dr. Anu Shreeshma Devi"), and a wrong match writes one doctor's
   hours onto another.
-* Matching is scoped to one store, and the SQL aborts if a phone still reaches
-  two providers inside it. Phone numbers are not unique: 9999900005 belongs to
-  both Dr Ayush Goel and Dr Tuhin Mitra.
+* The form is the roster, so by default every provider is in scope. --store
+  narrows it if you ever want that. Either way the SQL aborts if a phone
+  reaches two providers, because numbers are not unique: 9999900005 belongs to
+  both Dr Ayush Goel and Dr Tuhin Mitra. No number in the current form is
+  ambiguous, but a future one could be, and silently updating the wrong doctor
+  is worse than stopping.
 * The form collects availability hour by hour; SlotConfig stores a contiguous
   range against a set of days. So the SQL merges adjacent hours into ranges and
   collapses days whose ranges match — the shape the console's own rows have.
@@ -79,6 +83,13 @@ def read_form(path):
 
 
 def build_sql(latest, store, commit=True):
+    # A store, when given, is an extra join everywhere a provider is resolved.
+    scope_join = ('\n  JOIN "ProvidersOnStore" pos ON pos."providerId" = p.id'
+                  '\n                            AND pos."storeId" = (SELECT store FROM cfg)'
+                  if store else '')
+    cfg = (f'CREATE TEMP TABLE cfg (store int) ON COMMIT DROP;\nINSERT INTO cfg VALUES ({store});\n'
+           if store else '')
+    scope_note = f'store {store}' if store else 'all providers'
     values = ',\n'.join(
         "  ({}, {}, {})".format(
             clean(p), clean(r[2]), ','.join(clean(r[i]) for i in DAY_COLS))
@@ -88,7 +99,7 @@ def build_sql(latest, store, commit=True):
         "('{}', f.d{})".format(d, i) for i, d in enumerate(DAYS))
     day_cols = ', '.join('d{} text'.format(i) for i in range(7))
 
-    return f"""-- Doctor duty slots — bulk update for store {store}
+    return f"""-- Doctor duty slots — bulk update ({scope_note})
 -- Generated {datetime.now():%Y-%m-%d %H:%M} from the weekly availability form.
 --
 -- Target: the LabStack PRIMARY (this writes; the replica Atlas reads cannot).
@@ -101,11 +112,9 @@ def build_sql(latest, store, commit=True):
 \\set ON_ERROR_STOP on
 BEGIN;
 
--- psql does not substitute :variables inside dollar-quoted blocks, so the
--- store id goes somewhere the DO blocks below can read it.
-CREATE TEMP TABLE cfg (store int) ON COMMIT DROP;
-INSERT INTO cfg VALUES ({store});
-
+-- psql does not substitute :variables inside dollar-quoted blocks, so a store
+-- filter (when used) goes somewhere the DO blocks below can read it.
+{cfg}
 CREATE TEMP TABLE form (phone text, form_name text, {day_cols}) ON COMMIT DROP;
 INSERT INTO form VALUES
 {values};
@@ -151,9 +160,7 @@ BEGIN
   SELECT string_agg(t.phone || ' -> ' || t.who, '; ') INTO bad FROM (
     SELECT f.phone, string_agg(p.id || ' ' || p.name, ' / ') AS who
     FROM form f
-    JOIN "Provider" p ON right(regexp_replace(p.mobile, '\\D', '', 'g'), 10) = f.phone
-    JOIN "ProvidersOnStore" pos ON pos."providerId" = p.id
-                               AND pos."storeId" = (SELECT store FROM cfg)
+    JOIN "Provider" p ON right(regexp_replace(p.mobile, '\\D', '', 'g'), 10) = f.phone{scope_join}
     GROUP BY f.phone HAVING count(*) > 1) t;
   IF bad IS NOT NULL THEN
     RAISE EXCEPTION 'phone numbers matching more than one provider: %', bad;
@@ -170,9 +177,7 @@ SELECT p.id AS provider_id, p.name AS provider_name,
             ELSE to_char((m.b % 1440 || ' minutes')::interval, 'HH24:MI') END AS end_time,
        array_agg(m.day ORDER BY array_position(ARRAY[{','.join("'%s'" % d for d in DAYS)}], m.day)) AS days
 FROM merged m
-JOIN "Provider" p ON right(regexp_replace(p.mobile, '\\D', '', 'g'), 10) = m.phone
-JOIN "ProvidersOnStore" pos ON pos."providerId" = p.id
-                           AND pos."storeId" = (SELECT store FROM cfg)
+JOIN "Provider" p ON right(regexp_replace(p.mobile, '\\D', '', 'g'), 10) = m.phone{scope_join}
 GROUP BY p.id, p.name, 3, 4;
 
 \\echo ''
@@ -181,17 +186,12 @@ SELECT count(DISTINCT provider_id) AS doctors, count(*) AS slot_rows FROM final;
 
 \\echo ''
 \\echo '--- not updated, and why:'
-SELECT f.form_name, f.phone,
-       CASE WHEN EXISTS (SELECT 1 FROM "Provider" p
-                         WHERE right(regexp_replace(p.mobile, '\\D', '', 'g'), 10) = f.phone)
-            THEN 'exists, but not on this store' ELSE 'no provider record' END AS reason
+SELECT f.form_name, f.phone, 'no provider with this number' AS reason
 FROM form f
 WHERE NOT EXISTS (
-  SELECT 1 FROM "Provider" p
-  JOIN "ProvidersOnStore" pos ON pos."providerId" = p.id
-                             AND pos."storeId" = (SELECT store FROM cfg)
+  SELECT 1 FROM "Provider" p{scope_join}
   WHERE right(regexp_replace(p.mobile, '\\D', '', 'g'), 10) = f.phone)
-ORDER BY 3, 1;
+ORDER BY 1;
 
 -- Replace, not append: the form is a full weekly declaration.
 UPDATE "SlotConfig" SET "isActive" = false, "updatedAt" = now()
@@ -223,7 +223,8 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('xlsx', help='the Google Form responses export')
-    ap.add_argument('--store', type=int, required=True, help='store id the roster belongs to')
+    ap.add_argument('--store', type=int,
+                    help='optional: only touch providers attached to this store')
     ap.add_argument('-o', '--out', help='output .sql (default slots-<store>-<date>.sql)')
     ap.add_argument('--test', action='store_true',
                     help='dry-run it against a local database and roll back')
@@ -236,7 +237,8 @@ def main():
     print(f'form rows: {total}   doctors (latest submission each): {len(latest)}'
           + (f'   skipped, no phone: {no_phone}' if no_phone else ''))
 
-    out = a.out or f'slots-{a.store}-{datetime.now():%Y%m%d}.sql'
+    out = a.out or (f'slots-{a.store}-{datetime.now():%Y%m%d}.sql' if a.store
+                    else f'slots-{datetime.now():%Y%m%d}.sql')
     with open(out, 'w') as f:
         f.write(build_sql(latest, a.store, commit=True))
     print(f'wrote {out}')
