@@ -12,8 +12,17 @@
 -- form spells them differently from the console, and a wrong match would write
 -- one doctor's hours onto another.
 
+-- The store whose roster this applies to. Providers outside it are ignored,
+-- which also stops a shared phone number reaching a doctor in another store.
+\set STORE 117
+
 \set ON_ERROR_STOP on
 BEGIN;
+
+-- psql does not substitute :variables inside dollar-quoted blocks, so the
+-- store id is parked in a table the DO block below can read.
+CREATE TEMP TABLE cfg (store int) ON COMMIT DROP;
+INSERT INTO cfg VALUES (:STORE);
 
 CREATE TEMP TABLE form (phone text, form_name text,
                         mon text, tue text, wed text, thu text, fri text, sat text, sun text)
@@ -122,19 +131,42 @@ SELECT p.id AS provider_id, p.name AS provider_name, f.form_name,
        array_agg(m.day ORDER BY array_position(
          ARRAY['MONDAY','TUESDAY','WEDNESDAY','THURSDAY','FRIDAY','SATURDAY','SUNDAY'], m.day)) AS days
 FROM merged m
-JOIN form f     ON f.phone = m.phone
+JOIN form f       ON f.phone = m.phone
 JOIN "Provider" p ON right(regexp_replace(p.mobile, '\D', '', 'g'), 10) = m.phone
+JOIN "ProvidersOnStore" pos ON pos."providerId" = p.id AND pos."storeId" = :STORE
 GROUP BY p.id, p.name, f.form_name, 4, 5;
+
+-- A phone that reaches two providers in this store is ambiguous: writing to
+-- both would put one doctor's hours on another. Stop rather than guess.
+DO $ambiguous$
+DECLARE bad text;
+BEGIN
+  SELECT string_agg(t.phone || ' -> ' || t.who, '; ') INTO bad FROM (
+    SELECT f.phone, string_agg(p.id || ' ' || p.name, ' / ') AS who
+    FROM form f
+    JOIN "Provider" p ON right(regexp_replace(p.mobile, '\D', '', 'g'), 10) = f.phone
+    JOIN "ProvidersOnStore" pos ON pos."providerId" = p.id
+                               AND pos."storeId" = (SELECT store FROM cfg)
+    GROUP BY f.phone HAVING count(*) > 1) t;
+  IF bad IS NOT NULL THEN
+    RAISE EXCEPTION 'phone numbers matching more than one provider: %', bad;
+  END IF;
+END $ambiguous$;
 
 \echo '--- respondents matched to a provider:'
 SELECT count(DISTINCT provider_id) AS providers, count(*) AS slot_rows FROM final;
 
-\echo '--- respondents with NO provider (nothing will be written for these):'
-SELECT f.form_name, f.phone
+\echo '--- respondents NOT on this store (nothing is written for these):'
+SELECT f.form_name, f.phone,
+       CASE WHEN EXISTS (SELECT 1 FROM "Provider" p
+                         WHERE right(regexp_replace(p.mobile, '\D', '', 'g'), 10) = f.phone)
+            THEN 'exists, but not on this store' ELSE 'no provider record' END AS why
 FROM form f
-WHERE NOT EXISTS (SELECT 1 FROM "Provider" p
-                  WHERE right(regexp_replace(p.mobile, '\D', '', 'g'), 10) = f.phone)
-ORDER BY 1;
+WHERE NOT EXISTS (
+  SELECT 1 FROM "Provider" p
+  JOIN "ProvidersOnStore" pos ON pos."providerId" = p.id AND pos."storeId" = :STORE
+  WHERE right(regexp_replace(p.mobile, '\D', '', 'g'), 10) = f.phone)
+ORDER BY 3, 1;
 
 \echo '--- active rows before:'
 SELECT count(*) FROM "SlotConfig"
