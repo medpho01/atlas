@@ -1,35 +1,48 @@
 #!/usr/bin/env python3
 """
-Turn the weekly Doctor Duty Slot Availability form into SlotConfig SQL.
+Weekly duty form -> SlotConfig SQL.
 
-    python3 scripts/slots-from-form.py responses.xlsx store-117-doctors.csv
+    python3 scripts/slots-from-form.py responses.xlsx --store 117
+    python3 scripts/slots-from-form.py responses.xlsx --store 117 --test
 
-Writes three files beside the inputs:
-    slots-review.csv   every doctor, matched or not, with the parsed ranges
-    slots-apply.sql    the statements to run  (review this before running it)
-    slots-rollback.sql restores what was there before
+Reads the Google Form export and writes one self-contained .sql file. It does
+NOT touch any database itself — the file is for whoever owns the LabStack
+primary, since Atlas only ever reads a standby.
 
-Matching is on the last ten digits of the phone. Names are not used — the
-form spells them differently from the console ("Dr M.Anu Shreeshma Devi"
-against "Dr. Anu Shreeshma Devi"), and a wrong match writes one doctor's
-hours onto another.
+--test applies the generated SQL to a local database inside a transaction it
+then rolls back, and prints what would have changed. Nothing is kept.
 
-The form asks for availability hour by hour; SlotConfig stores contiguous
-ranges against a set of days. So adjacent hours are merged into a range, and
-days whose ranges are identical share one row — which is how the console's
-own rows are shaped.
+Design notes worth knowing before editing this:
+
+* Doctors are matched on the last ten digits of the phone, never the name. The
+  form spells them differently from the console ("Dr M.Anu Shreeshma Devi"
+  against "Dr. Anu Shreeshma Devi"), and a wrong match writes one doctor's
+  hours onto another.
+* Matching is scoped to one store, and the SQL aborts if a phone still reaches
+  two providers inside it. Phone numbers are not unique: 9999900005 belongs to
+  both Dr Ayush Goel and Dr Tuhin Mitra.
+* The form collects availability hour by hour; SlotConfig stores a contiguous
+  range against a set of days. So the SQL merges adjacent hours into ranges and
+  collapses days whose ranges match — the shape the console's own rows have.
+* The matching and merging happen IN the SQL rather than here, so the file the
+  team runs is auditable on its own and does not depend on this script having
+  been given the right roster.
 """
-import csv, re, sys, unicodedata
-from collections import defaultdict
+import argparse
+import os
+import re
+import subprocess
+import sys
+import unicodedata
 from datetime import datetime
 
 DAYS = ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY', 'SUNDAY']
-DAY_COL = {d: 6 + i for i, d in enumerate(DAYS)}          # columns G..M
-SLOT_MINUTES = 30                                          # matches existing rows
+DAY_COLS = range(6, 13)          # columns G..M
+SLOT_MINUTES = 30                # matches the console's existing rows
 
 
-def digits(v):
-    """Last ten digits — the form has floats, the console has strings."""
+def phone10(v):
+    """Last ten digits. The form stores numbers as floats, the console as text."""
     if v is None:
         return ''
     s = str(int(v)) if isinstance(v, float) else str(v)
@@ -37,212 +50,211 @@ def digits(v):
     return s[-10:] if len(s) >= 10 else s
 
 
-def parse_day(cell):
-    """'07:00 – 08:00, 08:00 – 09:00' -> [(420, 480), (480, 540)] in minutes."""
-    if not cell:
-        return []
-    # The form uses an en dash; normalise it and anything else unicode threw in.
-    text = unicodedata.normalize('NFKC', str(cell)).replace('–', '-').replace('—', '-')
-    out = []
-    for part in text.split(','):
-        part = part.strip()
-        m = re.match(r'^(\d{1,2}):(\d{2})\s*-\s*(\d{1,2}):(\d{2})$', part)
-        if not m:
-            continue                                       # 'Not available on this day'
-        h1, m1, h2, m2 = (int(x) for x in m.groups())
-        a, b = h1 * 60 + m1, h2 * 60 + m2
-        if b == 0:                                         # 23:00 - 00:00 means midnight
-            b = 24 * 60
-        if b > a:
-            out.append((a, b))
-    return sorted(out)
+def clean(v):
+    """Normalise the form's en dashes and smart punctuation, and quote for SQL."""
+    if v is None:
+        return "''"
+    t = unicodedata.normalize('NFKC', str(v)).replace('–', '-').replace('—', '-')
+    return "'" + t.replace("'", "''") + "'"
 
 
-def merge(spans):
-    """Adjacent or overlapping hours become one range."""
-    merged = []
-    for a, b in spans:
-        if merged and a <= merged[-1][1]:
-            merged[-1][1] = max(merged[-1][1], b)
-        else:
-            merged.append([a, b])
-    return [(a, b) for a, b in merged]
-
-
-def hhmm(mins):
-    # 24:00 is midnight-end and prints as 00:00, which the console already uses
-    # ("20:00-00:00"). A whole day would print 00:00-00:00 though — start and end
-    # identical, indistinguishable from an empty range — so it stops at 23:59.
-    return f'{(mins // 60) % 24:02d}:{mins % 60:02d}'
-
-
-def span_text(a, b):
-    if a == 0 and b >= 24 * 60:
-        return '00:00', '23:59'
-    return hhmm(a), hhmm(b)
-
-
-def main():
-    if len(sys.argv) < 3:
-        sys.exit('usage: slots-from-form.py <responses.xlsx> <doctors.csv>')
-    xlsx, doctors_csv = sys.argv[1], sys.argv[2]
-
+def read_form(path):
+    """Latest submission per phone — doctors do resubmit."""
     import openpyxl
-    wb = openpyxl.load_workbook(xlsx, data_only=True)
+    wb = openpyxl.load_workbook(path, data_only=True)
     rows = list(wb[wb.sheetnames[0]].iter_rows(values_only=True))[1:]
-
-    # A doctor may submit more than once; the latest submission wins.
     latest = {}
+    skipped = 0
     for r in rows:
         if not r or not r[2]:
             continue
-        phone = digits(r[3])
-        if not phone:
+        p = phone10(r[3])
+        if not p:
+            skipped += 1
             continue
         ts = r[0] if isinstance(r[0], datetime) else datetime.min
-        if phone not in latest or ts > latest[phone][0]:
-            latest[phone] = (ts, r)
+        if p not in latest or ts > latest[p][0]:
+            latest[p] = (ts, r)
+    return latest, len(rows), skipped
 
-    doctors = list(csv.DictReader(open(doctors_csv)))
-    by_phone = {digits(d['mobile']): d for d in doctors}
 
-    review, apply_sql, rollback_ids = [], [], []
+def build_sql(latest, store, commit=True):
+    values = ',\n'.join(
+        "  ({}, {}, {})".format(
+            clean(p), clean(r[2]), ','.join(clean(r[i]) for i in DAY_COLS))
+        for p, (_, r) in sorted(latest.items()))
 
-    for phone, (ts, r) in sorted(latest.items()):
-        doc = by_phone.get(phone)
-        # ranges keyed by the day they fall on, then inverted so identical
-        # schedules across days collapse into a single row.
-        per_day = {d: merge(parse_day(r[DAY_COL[d]])) for d in DAYS}
-        by_range = defaultdict(list)
-        for d in DAYS:
-            for span in per_day[d]:
-                by_range[span].append(d)
+    day_pairs = ',\n    '.join(
+        "('{}', f.d{})".format(d, i) for i, d in enumerate(DAYS))
+    day_cols = ', '.join('d{} text'.format(i) for i in range(7))
 
-        pretty = ' | '.join(
-            f'{d[:3]}: ' + (', '.join('%s-%s' % span_text(a, b) for a, b in per_day[d]) or '—')
-            for d in DAYS)
-
-        review.append({
-            'form_name': r[2], 'phone': phone,
-            'matched': 'yes' if doc else 'NO — not in this store',
-            'provider_id': doc['provider_id'] if doc else '',
-            'console_name': doc['name'] if doc else '',
-            'existing_slots': doc['slot_hours'] if doc else '',
-            'week_starting': r[5].date().isoformat() if isinstance(r[5], datetime) else '',
-            'submitted': ts.isoformat(sep=' ', timespec='minutes') if ts != datetime.min else '',
-            'new_config_rows': len(by_range),
-            'parsed': pretty,
-        })
-        if not doc or not by_range:
-            continue
-
-        pid = int(doc['provider_id'])
-        rollback_ids.append(pid)
-        apply_sql.append(f'\n-- {r[2]}  ->  provider {pid} ({doc["name"].strip()})')
-        # Replace rather than add: the form is a full weekly declaration, so
-        # yesterday's rows are not additive with today's.
-        apply_sql.append(f'UPDATE "SlotConfig" SET "isActive" = false, "updatedAt" = now()\n'
-                         f' WHERE provider_id = {pid} AND "isActive";')
-        for (a, b), days in sorted(by_range.items()):
-            arr = '{' + ','.join(days) + '}'
-            st, en = span_text(a, b)
-            apply_sql.append(
-                'INSERT INTO "SlotConfig"\n'
-                '  ("startTime","endTime",duration,"daysOfWeek","slotBegin",provider_id,'
-                '"isActive","createdAt","updatedAt")\n'
-                f"VALUES ('{st}','{en}',{SLOT_MINUTES},'{arr}',"
-                f"'1970-01-01 00:00:00',{pid},true,now(),now());")
-
-    with open('slots-review.csv', 'w', newline='') as f:
-        w = csv.DictWriter(f, fieldnames=list(review[0].keys()))
-        w.writeheader(); w.writerows(review)
-
-    ids = sorted(set(rollback_ids))
-    id_list = ','.join(str(i) for i in ids)
-    stamp = datetime.now().strftime('%Y-%m-%d %H:%M')
-
-    with open('slots-apply.sql', 'w') as f:
-        f.write(f"""-- Doctor duty slots — bulk update
--- Generated {stamp} by scripts/slots-from-form.py from the weekly form.
+    return f"""-- Doctor duty slots — bulk update for store {store}
+-- Generated {datetime.now():%Y-%m-%d %H:%M} from the weekly availability form.
 --
--- Target: the LabStack PRIMARY database (this writes; the read replica cannot).
--- Run:    psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f slots-apply.sql
+-- Target: the LabStack PRIMARY (this writes; the replica Atlas reads cannot).
+-- Run:    psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f {os.path.basename(sys.argv[0]).replace('.py','')}.sql
 --
--- {len(ids)} providers, {len([l for l in apply_sql if l.startswith('INSERT')])} SlotConfig rows.
--- The form is a full weekly declaration, so existing active configs for these
--- providers are deactivated (not deleted) and replaced. Re-running is safe:
--- it deactivates whatever is active and inserts the same set again.
---
--- Everything is one transaction. Any failure rolls the whole thing back.
+-- {len(latest)} form responses, latest per doctor. One transaction throughout:
+-- any failure rolls the whole thing back. Re-running is safe — it deactivates
+-- whatever is active and reinserts the same set.
 
 \\set ON_ERROR_STOP on
 BEGIN;
 
--- Pre-flight: stop before touching anything if a provider has gone missing.
-DO $preflight$
-DECLARE missing text;
+-- psql does not substitute :variables inside dollar-quoted blocks, so the
+-- store id goes somewhere the DO blocks below can read it.
+CREATE TEMP TABLE cfg (store int) ON COMMIT DROP;
+INSERT INTO cfg VALUES ({store});
+
+CREATE TEMP TABLE form (phone text, form_name text, {day_cols}) ON COMMIT DROP;
+INSERT INTO form VALUES
+{values};
+
+-- One row per (phone, day, slot). Anything not matching HH:MM - HH:MM is
+-- dropped, which is how "Not available on this day" disappears.
+CREATE TEMP TABLE slot ON COMMIT DROP AS
+WITH long AS (
+  SELECT f.phone, d.day, d.txt
+  FROM form f, LATERAL (VALUES
+    {day_pairs}) AS d(day, txt)
+),
+piece AS (
+  SELECT phone, day, btrim(p) AS p
+  FROM long, unnest(string_to_array(txt, ',')) AS p
+  WHERE txt IS NOT NULL
+)
+SELECT phone, day,
+       substring(p from '^(\\d{{1,2}}):')::int * 60
+         + substring(p from '^\\d{{1,2}}:(\\d{{2}})')::int AS a,
+       CASE WHEN substring(p from '-\\s*(\\d{{1,2}}):') = '00'
+             AND substring(p from '-\\s*\\d{{1,2}}:(\\d{{2}})') = '00'
+            THEN 1440
+            ELSE substring(p from '-\\s*(\\d{{1,2}}):')::int * 60
+                 + substring(p from '-\\s*\\d{{1,2}}:(\\d{{2}})')::int END AS b
+FROM piece
+WHERE p ~ '^\\d{{1,2}}:\\d{{2}}\\s*-\\s*\\d{{1,2}}:\\d{{2}}$';
+
+-- Adjacent hours become one range (gaps and islands).
+CREATE TEMP TABLE merged ON COMMIT DROP AS
+SELECT phone, day, min(a) AS a, max(b) AS b
+FROM (SELECT *, sum(brk) OVER (PARTITION BY phone, day ORDER BY a, b) AS grp
+      FROM (SELECT *, CASE WHEN a <= lag(b) OVER (PARTITION BY phone, day ORDER BY a, b)
+                           THEN 0 ELSE 1 END AS brk
+            FROM slot WHERE b > a) x) y
+GROUP BY phone, day, grp;
+
+-- A phone reaching two providers in this store is ambiguous — writing to both
+-- would put one doctor's hours on another. Stop rather than guess.
+DO $ambiguous$
+DECLARE bad text;
 BEGIN
-  SELECT string_agg(x::text, ', ') INTO missing
-  FROM unnest(ARRAY[{id_list}]) AS x
-  WHERE NOT EXISTS (SELECT 1 FROM "Provider" p WHERE p.id = x);
-  IF missing IS NOT NULL THEN
-    RAISE EXCEPTION 'these provider ids do not exist: %', missing;
+  SELECT string_agg(t.phone || ' -> ' || t.who, '; ') INTO bad FROM (
+    SELECT f.phone, string_agg(p.id || ' ' || p.name, ' / ') AS who
+    FROM form f
+    JOIN "Provider" p ON right(regexp_replace(p.mobile, '\\D', '', 'g'), 10) = f.phone
+    JOIN "ProvidersOnStore" pos ON pos."providerId" = p.id
+                               AND pos."storeId" = (SELECT store FROM cfg)
+    GROUP BY f.phone HAVING count(*) > 1) t;
+  IF bad IS NOT NULL THEN
+    RAISE EXCEPTION 'phone numbers matching more than one provider: %', bad;
   END IF;
-END $preflight$;
+END $ambiguous$;
 
--- What is there now, for the record.
-\\echo '--- active SlotConfig rows before:'
-SELECT count(*) AS rows_before FROM "SlotConfig"
-WHERE provider_id IN ({id_list}) AND "isActive";
-""")
-        f.write('\n'.join(apply_sql))
-        f.write(f"""
+-- Days sharing a range collapse into one row.
+CREATE TEMP TABLE final ON COMMIT DROP AS
+SELECT p.id AS provider_id, p.name AS provider_name,
+       -- a whole day would print 00:00-00:00, indistinguishable from empty
+       CASE WHEN m.a = 0 AND m.b >= 1440 THEN '00:00'
+            ELSE to_char((m.a || ' minutes')::interval, 'HH24:MI') END AS start_time,
+       CASE WHEN m.a = 0 AND m.b >= 1440 THEN '23:59'
+            ELSE to_char((m.b % 1440 || ' minutes')::interval, 'HH24:MI') END AS end_time,
+       array_agg(m.day ORDER BY array_position(ARRAY[{','.join("'%s'" % d for d in DAYS)}], m.day)) AS days
+FROM merged m
+JOIN "Provider" p ON right(regexp_replace(p.mobile, '\\D', '', 'g'), 10) = m.phone
+JOIN "ProvidersOnStore" pos ON pos."providerId" = p.id
+                           AND pos."storeId" = (SELECT store FROM cfg)
+GROUP BY p.id, p.name, 3, 4;
 
-\\echo '--- active SlotConfig rows after:'
-SELECT count(*) AS rows_after FROM "SlotConfig"
-WHERE provider_id IN ({id_list}) AND "isActive";
+\\echo ''
+\\echo '--- matched:'
+SELECT count(DISTINCT provider_id) AS doctors, count(*) AS slot_rows FROM final;
 
-\\echo '--- per doctor:'
+\\echo ''
+\\echo '--- not updated, and why:'
+SELECT f.form_name, f.phone,
+       CASE WHEN EXISTS (SELECT 1 FROM "Provider" p
+                         WHERE right(regexp_replace(p.mobile, '\\D', '', 'g'), 10) = f.phone)
+            THEN 'exists, but not on this store' ELSE 'no provider record' END AS reason
+FROM form f
+WHERE NOT EXISTS (
+  SELECT 1 FROM "Provider" p
+  JOIN "ProvidersOnStore" pos ON pos."providerId" = p.id
+                             AND pos."storeId" = (SELECT store FROM cfg)
+  WHERE right(regexp_replace(p.mobile, '\\D', '', 'g'), 10) = f.phone)
+ORDER BY 3, 1;
+
+-- Replace, not append: the form is a full weekly declaration.
+UPDATE "SlotConfig" SET "isActive" = false, "updatedAt" = now()
+WHERE provider_id IN (SELECT provider_id FROM final) AND "isActive";
+
+INSERT INTO "SlotConfig"
+  ("startTime", "endTime", duration, "daysOfWeek", "slotBegin",
+   provider_id, "isActive", "createdAt", "updatedAt")
+SELECT start_time, end_time, {SLOT_MINUTES}, days::"DayOfWeek"[], '1970-01-01 00:00:00',
+       provider_id, true, now(), now()
+FROM final;
+
+\\echo ''
+\\echo '--- result per doctor:'
 SELECT p.id, p.name,
        count(*) FILTER (WHERE sc."isActive")     AS active_now,
        count(*) FILTER (WHERE NOT sc."isActive") AS deactivated,
        string_agg(sc."startTime" || '-' || sc."endTime", ', '
                   ORDER BY sc."startTime") FILTER (WHERE sc."isActive") AS hours
 FROM "Provider" p JOIN "SlotConfig" sc ON sc.provider_id = p.id
-WHERE p.id IN ({id_list})
+WHERE p.id IN (SELECT provider_id FROM final)
 GROUP BY p.id, p.name ORDER BY p.name;
 
-COMMIT;
-""")
+{'COMMIT;' if commit else "\\echo ''\n\\echo '*** DRY RUN — rolling back, nothing was kept ***'\nROLLBACK;"}
+"""
 
-    with open('slots-rollback.sql', 'w') as f:
-        f.write(f"""-- Undo the run generated {stamp}.
--- Drops the rows it inserted and revives the ones it deactivated.
--- Only safe if run before anyone else edits these providers' slots.
 
-\\set ON_ERROR_STOP on
-BEGIN;
+def main():
+    ap = argparse.ArgumentParser(description=__doc__,
+                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument('xlsx', help='the Google Form responses export')
+    ap.add_argument('--store', type=int, required=True, help='store id the roster belongs to')
+    ap.add_argument('-o', '--out', help='output .sql (default slots-<store>-<date>.sql)')
+    ap.add_argument('--test', action='store_true',
+                    help='dry-run it against a local database and roll back')
+    ap.add_argument('--db', default=os.environ.get('LOCAL_DATABASE_URL'),
+                    help='connection string for --test (or set LOCAL_DATABASE_URL)')
+    ap.add_argument('--psql', default='psql', help='psql to use, e.g. a docker exec wrapper')
+    a = ap.parse_args()
 
-DELETE FROM "SlotConfig"
-WHERE provider_id IN ({id_list}) AND "createdAt" >= '{stamp}'::timestamp;
+    latest, total, no_phone = read_form(a.xlsx)
+    print(f'form rows: {total}   doctors (latest submission each): {len(latest)}'
+          + (f'   skipped, no phone: {no_phone}' if no_phone else ''))
 
-UPDATE "SlotConfig" SET "isActive" = true
-WHERE provider_id IN ({id_list}) AND NOT "isActive"
-  AND "updatedAt" >= '{stamp}'::timestamp;
+    out = a.out or f'slots-{a.store}-{datetime.now():%Y%m%d}.sql'
+    with open(out, 'w') as f:
+        f.write(build_sql(latest, a.store, commit=True))
+    print(f'wrote {out}')
 
-SELECT provider_id, count(*) FILTER (WHERE "isActive") AS active
-FROM "SlotConfig" WHERE provider_id IN ({id_list}) GROUP BY 1 ORDER BY 1;
+    if not a.test:
+        print('\nrun --test to dry-run it against a local database first')
+        return
 
-COMMIT;
-""")
-
-    m = sum(1 for x in review if x['matched'] == 'yes')
-    print(f'form responses (latest per doctor): {len(latest)}')
-    print(f'matched to a doctor in the store:   {m}')
-    print(f'not in this store:                  {len(latest) - m}')
-    print(f'SlotConfig rows to insert:          '
-          f'{sum(x["new_config_rows"] for x in review if x["matched"] == "yes")}')
-    print('\nwrote slots-review.csv, slots-apply.sql, slots-rollback.sql')
+    if not a.db:
+        sys.exit('--test needs --db or LOCAL_DATABASE_URL')
+    dry = build_sql(latest, a.store, commit=False)
+    print(f'\n--- dry run against {a.db.split("@")[-1]} (rolls back) ---')
+    p = subprocess.run(a.psql.split() + [a.db, '-v', 'ON_ERROR_STOP=1', '-f', '-'],
+                       input=dry, text=True, capture_output=True)
+    print(p.stdout.strip() or p.stderr.strip())
+    if p.returncode:
+        sys.exit(f'\ndry run FAILED — fix this before running {out} anywhere')
+    print('\ndry run clean.')
 
 
 if __name__ == '__main__':
