@@ -73,6 +73,76 @@ Atlas surfaces real data-quality gaps surfaced through audit:
 - **Lat/long outliers** bbox-filtered to India
 - **Chain concentration risk** surfaced in the City Leaderboard
 
+## Provider ranking (prototype)
+
+`ranking.py` ranks the labs and hospitals known for a pincode or city and
+attaches a plain-text reason to each one. Rule-based and deterministic — no
+model, no training, no network calls. Python 3.10+, standard library only.
+
+```bash
+python ranking.py                                    # sample area, no filter
+python ranking.py --area 560034 --services mri,ct    # filter by service
+python ranking.py --area Bengaluru                    # city instead of pincode
+```
+
+### Signals and weights
+
+| Signal | Weight | Normalised as |
+|---|---|---|
+| Accreditation | 0.40 | 1 if accredited, 0 if not |
+| Proximity | 0.30 | linear decay to 0 at `MAX_DISTANCE_KM` (15 km) |
+| Service match | 0.20 | share of requested services offered |
+| Reviews | 0.10 | `review_score / 5` |
+
+Two behaviours are worth knowing about before reading a score:
+
+- **Unknown is not zero.** A signal with no data is dropped and the remaining
+  weights are renormalised, then the result is scaled by how much of the weight
+  budget was actually observed (floor 0.6). A lab with no published rating is
+  not treated as a zero-star lab, but it also cannot top the list on two
+  flattering signals alone.
+- **`--services` filters, it does not merely weight.** Providers whose known
+  service list matches nothing requested are excluded. Providers with no
+  service list on file are kept and flagged, because unknown is not "no".
+
+Scores are relative within one run. Comparing a score across two different
+areas or two different service filters is meaningless.
+
+### Sample output
+
+```
+1. Koramangala Diagnostics   [0.940]
+   4th Block, Koramangala, Bengaluru 560034
+   080 4123 5566
+   Services: blood test, thyroid panel, ultrasound
+   Why: Ranked #1 — accredited, nearby (1.8 km) and well reviewed (4.4/5).
+
+2. Southside Imaging Centre   [0.823]
+   80 Feet Road, Koramangala, Bengaluru 560034
+   080 4998 2210
+   Services: mri, ct, x-ray, ultrasound
+   Why: Ranked #2 — accredited.
+
+3. Jyoti Collection Centre   [0.756]
+   1st Block, Koramangala, Bengaluru 560034
+   080 4110 9034
+   Services: blood test
+   Why: Ranked #3 — closest in this area (0.9 km) and well reviewed (4.8/5).
+        Against it: accreditation unverified.
+   Unknown: accreditation
+```
+
+The full run for both the unfiltered and the `mri,ct` case is pasted at the
+bottom of `ranking.py`.
+
+### Wiring it to real data
+
+The sample dataset mirrors `atlas.discovered_lab` (`sql/init/16_requests.sql`),
+which `npm run labs:discover` already populates. Four fields the ranker needs
+do not exist on that table yet and would have to be added or joined:
+`accredited`, `distance_km`, `services`, `review_score`. Until then the sample
+list in `ranking.py` is hand-written and clearly marked as such.
+
 ## What's next
 
 - Onboarding pipeline CRM
