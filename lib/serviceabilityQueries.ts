@@ -234,3 +234,245 @@ export async function listCoverageLabs() {
     ORDER BY COUNT(*) DESC, l."labName"
   `);
 }
+
+/* ────────────────────────────── tests ────────────────────────────── */
+
+export type TestOption = { name: string; category: string | null; labs: number; entries: number };
+
+/**
+ * Search the master test catalogue, ordered by how many labs actually offer it
+ * — a test nobody has is useless as a filter, so the common ones surface first.
+ */
+export async function searchTests(q: string, limit = 25): Promise<TestOption[]> {
+  const term = q.trim();
+  if (term.length < 2) return [];
+  // Master.name is NOT unique — "Glucose Fasting" is two rows, 316 and 2109,
+  // with different labs behind each. Grouping by name is what a user means by
+  // "can this centre do Glucose Fasting", and avoids offering the same test
+  // twice with two different counts.
+  return query<TestOption>(
+    `
+    SELECT m.name,
+           max(m."testCategory") AS category,
+           count(DISTINCT d.lab_id)::int AS labs,
+           count(DISTINCT m.id)::int     AS entries
+    FROM src."Master" m
+    LEFT JOIN src."DOS" d ON d.master_id = m.id AND d.active
+    WHERE m.name ILIKE '%' || $1 || '%'
+    GROUP BY m.name
+    ORDER BY labs DESC, length(m.name), m.name
+    LIMIT $2`,
+    [term, limit],
+  );
+}
+
+/**
+ * How complete the test catalogue is. Filtering by test silently understates
+ * coverage otherwise: a lab with no DOS row is unrecorded, not incapable, and
+ * that is the overwhelming majority of them.
+ */
+export async function getTestCatalogueCoverage() {
+  const rows = await query<{ with_dos: number; active_labs: number }>(
+    `SELECT (SELECT count(DISTINCT lab_id) FROM src."DOS" WHERE active)::int AS with_dos,
+            (SELECT count(*) FROM src."Lab" WHERE active)::int          AS active_labs`,
+  );
+  return rows[0];
+}
+
+/* ────────────────────────────── cities ────────────────────────────── */
+
+export type CityMatch = { input: string; city: string | null; state: string | null; pincodes: string[] };
+
+/**
+ * Resolve typed city names to their pincodes. Matching is case- and
+ * whitespace-insensitive and falls back to a prefix match, because people type
+ * "bangalore" for Bengaluru and "delhi" for a dozen different entries.
+ */
+export async function resolveCities(names: string[]): Promise<CityMatch[]> {
+  const clean = Array.from(new Set(names.map((n) => n.trim()).filter(Boolean))).slice(0, 40);
+  if (!clean.length) return [];
+
+  const rows = await query<{ input: string; city: string; state: string; pincodes: string[] }>(
+    `
+    WITH asked AS (SELECT unnest($1::text[]) AS input)
+    SELECT a.input,
+           d.city,
+           max(d.state) AS state,
+           array_agg(DISTINCT d.pincode) AS pincodes
+    FROM asked a
+    JOIN atlas.pincode_directory d
+      ON lower(btrim(d.city)) = lower(btrim(a.input))
+      OR lower(btrim(d.city)) LIKE lower(btrim(a.input)) || '%'
+    GROUP BY a.input, d.city
+    ORDER BY a.input, count(*) DESC`,
+    [clean],
+  );
+
+  // A typed name can hit several directory cities (Delhi -> New Delhi, ...);
+  // keep them separate so the user sees which one they got.
+  const seen = new Set(rows.map((r) => r.input.toLowerCase()));
+  const misses = clean.filter((c) => !seen.has(c.toLowerCase()))
+    .map((c) => ({ input: c, city: null, state: null, pincodes: [] as string[] }));
+  return [...rows, ...misses];
+}
+
+/**
+ * Serviceability restricted to labs that actually offer the given tests.
+ *
+ * The fast path above reads analytics.mv_pincode_coverage, a rollup that knows
+ * nothing about test catalogues — so once tests are in play the counts have to
+ * be rebuilt from lab-level reach:
+ *
+ *   home collection -> analytics.mv_lab_pincode_home
+ *   centre visit    -> analytics.mv_pincode_cv_reach  (a 20 km catchment)
+ *
+ * A lab qualifies only if it has an ACTIVE DOS row for EVERY test asked for —
+ * "which centre can do all of this panel" is the question worth answering.
+ * Only labs and hospitals are considered; a phlebo has no test catalogue.
+ */
+export async function checkServiceabilityWithTests(
+  pincodes: string[],
+  services: ServiceKey[],
+  testNames: string[],
+): Promise<ServiceabilityRow[]> {
+  const unique = Array.from(new Set(pincodes.filter((p) => /^\d{6}$/.test(p)))).slice(0, MAX_PINCODES);
+  const tests = Array.from(new Set(testNames.map((t) => t.trim()).filter(Boolean)));
+  if (!unique.length || !services.length || !tests.length) return [];
+
+  // Test filtering only means anything for lab-shaped supply.
+  const labServices = services.filter((s) => {
+    const kind = s.split('|')[0];
+    return kind === 'LAB' || kind === 'HOSPITAL';
+  });
+  if (!labServices.length) return [];
+
+  const rows = await query<{
+    pincode: string; city: string | null; state: string | null;
+    kind: string; modality: string; providers: number; local_providers: number; top: string[] | null;
+  }>(
+    `
+    WITH wanted AS (SELECT unnest($1::text[]) AS pincode),
+    asked AS (
+      SELECT split_part(s, '|', 1) AS kind, split_part(s, '|', 2) AS modality
+      FROM unnest($2::text[]) s
+    ),
+    -- Labs holding an active DOS row for every test asked for. Matched on
+    -- name, not master id: the catalogue carries the same test under several
+    -- ids, and a lab offering either one can do it.
+    qualified AS (
+      SELECT d.lab_id
+      FROM src."DOS" d
+      JOIN src."Master" m ON m.id = d.master_id
+      WHERE d.active AND m.name = ANY($3::text[])
+      GROUP BY d.lab_id
+      HAVING count(DISTINCT m.name) = array_length($3::text[], 1)
+    ),
+    lab AS (
+      SELECT q.lab_id, l."labName" AS name, btrim(l.pincode) AS own_pincode,
+             CASE WHEN l."centerType"::text = 'HOSPITAL' THEN 'HOSPITAL' ELSE 'LAB' END AS kind
+      FROM qualified q JOIN src."Lab" l ON l.id = q.lab_id
+      WHERE l.active
+    ),
+    -- Where each qualified lab can serve, by modality.
+    reach AS (
+      SELECT lb.lab_id, lb.name, lb.kind, 'HOME_SAMPLE' AS modality, h.pincode, 0::numeric AS km
+      FROM lab lb JOIN analytics.mv_lab_pincode_home h ON h.lab_id = lb.lab_id
+      UNION ALL
+      SELECT lb.lab_id, lb.name, lb.kind, 'CENTER_VISIT', r.covered_pincode, r.distance_km
+      FROM lab lb JOIN analytics.mv_pincode_cv_reach r ON r.entity_id = 'LAB-' || lb.lab_id
+      -- mv_pincode_coverage counts a centre as reaching a pincode within 10 km;
+      -- cv_reach carries 20. Match the rollup, or a test filter would appear to
+      -- INCREASE coverage.
+      WHERE r.distance_km <= 10
+    ),
+    grid AS (SELECT w.pincode, a.kind, a.modality FROM wanted w CROSS JOIN asked a)
+    SELECT g.pincode, pd.city, pd.state, g.kind, g.modality,
+           count(DISTINCT rc.lab_id)::int                                        AS providers,
+           count(DISTINCT rc.lab_id) FILTER (WHERE rc.km = 0)::int               AS local_providers,
+           (SELECT array_agg(x.n) FROM (
+              SELECT DISTINCT r2.name || CASE WHEN r2.km > 0
+                       THEN ' (' || round(r2.km, 1) || ' km)' ELSE '' END AS n, min(r2.km) AS k
+              FROM reach r2
+              WHERE r2.pincode = g.pincode AND r2.kind = g.kind AND r2.modality = g.modality
+              GROUP BY 1 ORDER BY k LIMIT 3) x)                                  AS top
+    FROM grid g
+    LEFT JOIN reach rc
+           ON rc.pincode = g.pincode AND rc.kind = g.kind AND rc.modality = g.modality
+    LEFT JOIN atlas.pincode_directory pd ON pd.pincode = g.pincode
+    GROUP BY g.pincode, pd.city, pd.state, g.kind, g.modality
+    ORDER BY g.pincode`,
+    [unique, labServices, tests],
+  );
+
+  const byPin = new Map<string, ServiceabilityRow>();
+  for (const r of rows) {
+    let row = byPin.get(r.pincode);
+    if (!row) {
+      row = { pincode: r.pincode, city: r.city, state: r.state, services: [] };
+      byPin.set(r.pincode, row);
+    }
+    row.services.push({
+      service: `${r.kind}|${r.modality}` as ServiceKey,
+      providers: r.providers,
+      local_providers: r.local_providers,
+      top: r.top ?? [],
+    });
+  }
+  return unique.map((p) => byPin.get(p)).filter(Boolean) as ServiceabilityRow[];
+}
+
+export type CityServiceCell = {
+  service: ServiceKey;
+  covered: number;
+  /** Best single provider count seen in any one pincode of the city. */
+  best: number;
+  top: string[];
+};
+export type CityRow = {
+  input: string; city: string | null; state: string | null;
+  pincodes: number; services: CityServiceCell[];
+};
+
+/**
+ * The same question at city scale: of this city's pincodes, how many can each
+ * service reach? A city is not serviceable or not — Bengaluru is 130 pincodes
+ * and the answer is usually "most of it", so the useful number is the share
+ * covered, not a yes/no.
+ */
+export async function checkCityServiceability(
+  cityNames: string[],
+  services: ServiceKey[],
+  testNames: string[] = [],
+): Promise<CityRow[]> {
+  const matches = await resolveCities(cityNames);
+  const found = matches.filter((m) => m.pincodes.length);
+  if (!found.length || !services.length) return [];
+
+  const out: CityRow[] = [];
+  for (const m of found) {
+    const rows = testNames.length
+      ? await checkServiceabilityWithTests(m.pincodes, services, testNames)
+      : await checkServiceability(m.pincodes, services);
+
+    const agg = new Map<ServiceKey, CityServiceCell>();
+    for (const r of rows) {
+      for (const c of r.services) {
+        const cur = agg.get(c.service)
+          ?? { service: c.service, covered: 0, best: 0, top: [] as string[] };
+        if (c.providers > 0) cur.covered += 1;
+        if (c.providers > cur.best) { cur.best = c.providers; cur.top = c.top; }
+        agg.set(c.service, cur);
+      }
+    }
+    out.push({
+      input: m.input, city: m.city, state: m.state,
+      pincodes: m.pincodes.length,
+      services: services.map((s) => agg.get(s) ?? { service: s, covered: 0, best: 0, top: [] }),
+    });
+  }
+  // Cities the user typed that the directory does not know.
+  for (const m of matches.filter((x) => !x.pincodes.length)) {
+    out.push({ input: m.input, city: null, state: null, pincodes: 0, services: [] });
+  }
+  return out;
+}

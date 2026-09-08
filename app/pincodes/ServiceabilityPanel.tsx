@@ -1,13 +1,17 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import * as XLSX from 'xlsx';
 import {
   Search, Upload, ClipboardPaste, Download, X, Check, ChevronDown, MapPin, AlertTriangle,
+  Building2, FlaskConical, Plus,
 } from 'lucide-react';
 
 type ServiceCell = { service: string; providers: number; local_providers: number; top: string[] };
 type Row = { pincode: string; city: string | null; state: string | null; services: ServiceCell[] };
+type CityCell = { service: string; covered: number; best: number; top: string[] };
+type CityRow = { input: string; city: string | null; state: string | null; pincodes: number; services: CityCell[] };
+type TestOption = { name: string; category: string | null; labs: number; entries: number };
 
 type Props = {
   allServices: { key: string; label: string }[];
@@ -31,29 +35,35 @@ export function ServiceabilityPanel({ allServices, defaultServices }: Props) {
   const [pasteOpen, setPasteOpen] = useState(false);
   const [pasteText, setPasteText] = useState('');
   const [truncated, setTruncated] = useState(false);
+  const [cityInput, setCityInput] = useState('');
+  const [cities, setCities] = useState<string[]>([]);
+  const [cityRows, setCityRows] = useState<CityRow[]>([]);
+  const [tests, setTests] = useState<string[]>([]);
+  const [catalogue, setCatalogue] = useState<{ with_dos: number; active_labs: number } | null>(null);
 
   const labelOf = useMemo(
     () => Object.fromEntries(allServices.map((s) => [s.key, s.label])),
     [allServices],
   );
 
-  const run = async (pins: string[], label: string | null) => {
-    if (!pins.length) { setError('No valid 6-digit pincodes found.'); return; }
+  const run = async (pins: string[], label: string | null, cityList = cities) => {
+    if (!pins.length && !cityList.length) { setError('Add a pincode or a city.'); return; }
     if (!services.length) { setError('Pick at least one service.'); return; }
     setLoading(true); setError(null); setSourceLabel(label);
     try {
       const r = await fetch('/api/coverage/check', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ pincodes: pins, services }),
+        body: JSON.stringify({ pincodes: pins, cities: cityList, services, tests }),
       });
       if (!r.ok) throw new Error(await r.text());
       const data = await r.json();
       setRows(data.rows ?? []);
+      setCityRows(data.cityRows ?? []);
       setTruncated(!!data.truncated);
     } catch (e) {
       setError((e as Error).message || 'Lookup failed');
-      setRows([]);
+      setRows([]); setCityRows([]);
     } finally {
       setLoading(false);
     }
@@ -102,6 +112,15 @@ export function ServiceabilityPanel({ allServices, defaultServices }: Props) {
     XLSX.writeFile(wb, 'atlas-serviceability.xlsx');
   };
 
+  // A test filter changes the answer, so re-ask rather than leaving stale
+  // counts on screen next to a chip that no longer matches them.
+  const first = useRef(true);
+  useEffect(() => {
+    if (first.current) { first.current = false; return; }
+    if (pincodes.length || cities.length) run(pincodes, sourceLabel);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tests.join('|')]);
+
   const covered = rows.filter((r) => r.services.some((s) => s.providers > 0)).length;
 
   return (
@@ -119,6 +138,26 @@ export function ServiceabilityPanel({ allServices, defaultServices }: Props) {
               onChange={(e) => setSingle(e.target.value.replace(/\D/g, '').slice(0, 6))}
               placeholder="Check one pincode — e.g. 560103"
               className="w-full pl-8 pr-3 h-9 text-sm tabular-nums rounded-md border border-ink-200 bg-surface focus:outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500"
+            />
+          </form>
+
+          <form
+            className="relative flex-1 min-w-[220px]"
+            onSubmit={(e) => {
+              e.preventDefault();
+              const c = cityInput.trim();
+              if (!c) return;
+              const next = [...new Set([...cities, c])];
+              setCities(next); setCityInput('');
+              run(pincodes, sourceLabel, next);
+            }}
+          >
+            <Building2 className="absolute left-2.5 top-2.5 w-4 h-4 text-ink-400" />
+            <input
+              value={cityInput}
+              onChange={(e) => setCityInput(e.target.value)}
+              placeholder="…or a city — e.g. Bengaluru"
+              className="w-full pl-8 pr-3 h-9 text-sm rounded-md border border-ink-200 bg-surface focus:outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500"
             />
           </form>
 
@@ -146,6 +185,44 @@ export function ServiceabilityPanel({ allServices, defaultServices }: Props) {
             </button>
           )}
         </div>
+
+        {(cities.length > 0 || tests.length > 0) && (
+          <div className="flex flex-wrap items-center gap-1.5">
+            {cities.map((c) => (
+              <span key={c} className="inline-flex items-center gap-1 pl-2 pr-1 h-6 text-xs rounded-md border border-brand-200 bg-brand-50 text-brand-700">
+                <Building2 className="w-3 h-3" /> {c}
+                <button
+                  onClick={() => { const next = cities.filter((x) => x !== c); setCities(next); run(pincodes, sourceLabel, next); }}
+                  className="p-0.5 hover:text-danger-500" aria-label={`Remove ${c}`}
+                ><X className="w-3 h-3" /></button>
+              </span>
+            ))}
+            {tests.map((t) => (
+              <span key={t} className="inline-flex items-center gap-1 pl-2 pr-1 h-6 text-xs rounded-md border border-ink-200 bg-ink-50 text-ink-700">
+                <FlaskConical className="w-3 h-3" /> {t}
+                <button
+                  onClick={() => setTests(tests.filter((x) => x !== t))}
+                  className="p-0.5 hover:text-danger-500" aria-label={`Remove ${t}`}
+                ><X className="w-3 h-3" /></button>
+              </span>
+            ))}
+          </div>
+        )}
+
+        <TestPicker
+          selected={tests}
+          onChange={setTests}
+          onCatalogue={setCatalogue}
+        />
+
+        {tests.length > 0 && catalogue && (
+          <p className="text-[11px] text-warn-600 flex items-start gap-1.5">
+            <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-px" />
+            Only labs are counted, and only those that list the test. {catalogue.with_dos.toLocaleString('en-IN')} of{' '}
+            {catalogue.active_labs.toLocaleString('en-IN')} active labs have a catalogue at all — the rest are
+            unrecorded, not incapable.
+          </p>
+        )}
 
         {pasteOpen && (
           <div className="flex gap-2">
@@ -187,10 +264,79 @@ export function ServiceabilityPanel({ allServices, defaultServices }: Props) {
         </div>
       )}
 
+      {/* Cities — a city is rarely all-or-nothing, so the share of its
+          pincodes covered is the honest answer. */}
+      {!loading && cityRows.length > 0 && (
+        <div className="rounded-2xl border border-ink-200 bg-surface overflow-hidden">
+          <div className="px-4 py-2.5 border-b border-ink-200 bg-ink-50 text-xs text-ink-600">
+            <b className="text-ink-900">{cityRows.length}</b> {cityRows.length === 1 ? 'city' : 'cities'}
+            <span className="text-ink-400"> · share of each city&rsquo;s pincodes a service reaches</span>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-ink-50">
+                <tr className="text-left text-[10px] uppercase tracking-wider text-ink-500 border-b border-ink-200">
+                  <th className="px-4 py-2 font-semibold">City</th>
+                  <th className="px-3 py-2 font-semibold text-right">Pincodes</th>
+                  {services.map((k) => (
+                    <th key={k} className="px-3 py-2 font-semibold">{labelOf[k]}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {cityRows.map((c) => (
+                  <tr key={c.input + (c.city ?? '')} className="border-b border-ink-100 last:border-0 hover:bg-ink-50/60">
+                    <td className="px-4 py-2">
+                      {c.city ? (
+                        <>
+                          <span className="font-medium text-ink-900">{c.city}</span>
+                          {c.state && <span className="text-ink-400 text-xs"> · {c.state}</span>}
+                          {c.city.toLowerCase() !== c.input.toLowerCase() && (
+                            <span className="text-ink-400 text-[11px]"> (matched &ldquo;{c.input}&rdquo;)</span>
+                          )}
+                        </>
+                      ) : (
+                        <span className="text-danger-500">&ldquo;{c.input}&rdquo; — no such city</span>
+                      )}
+                    </td>
+                    <td className="px-3 py-2 text-right tabular-nums text-ink-600">
+                      {c.pincodes ? c.pincodes.toLocaleString('en-IN') : '—'}
+                    </td>
+                    {services.map((k) => {
+                      const cell = c.services.find((x) => x.service === k);
+                      const pct = c.pincodes ? Math.round(100 * (cell?.covered ?? 0) / c.pincodes) : 0;
+                      return (
+                        <td key={k} className="px-3 py-2">
+                          {!c.pincodes ? <span className="text-ink-300">—</span> : (
+                            <div className="flex items-center gap-2">
+                              <div className="w-16 h-1.5 rounded-full bg-ink-100 overflow-hidden shrink-0">
+                                <div className={`h-full rounded-full ${pct >= 80 ? 'bg-success-500' : pct >= 30 ? 'bg-warn-500' : 'bg-danger-500'}`}
+                                     style={{ width: `${pct}%` }} />
+                              </div>
+                              <span className="tabular-nums text-xs text-ink-700">{pct}%</span>
+                              <span className="tabular-nums text-[11px] text-ink-400">
+                                {(cell?.covered ?? 0).toLocaleString('en-IN')}/{c.pincodes.toLocaleString('en-IN')}
+                              </span>
+                            </div>
+                          )}
+                        </td>
+                      );
+                    })}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
       {/* Results */}
       {loading ? (
         <div className="rounded-2xl border border-ink-200 bg-surface px-4 py-12 text-center text-sm text-ink-500">
-          Checking {pincodes.length.toLocaleString('en-IN')} pincode{pincodes.length === 1 ? '' : 's'}…
+          Checking {[
+            pincodes.length ? `${pincodes.length.toLocaleString('en-IN')} pincode${pincodes.length === 1 ? '' : 's'}` : '',
+            cities.length ? `${cities.length} ${cities.length === 1 ? 'city' : 'cities'}` : '',
+          ].filter(Boolean).join(' and ')}…
         </div>
       ) : rows.length > 0 ? (
         <div className="rounded-2xl border border-ink-200 bg-surface overflow-hidden">
@@ -316,6 +462,86 @@ function ServiceSelect({
             </div>
           </div>
         </>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Typeahead over the master test catalogue. Results are ordered by how many
+ * labs offer the test, so a filter that would return nothing sorts last rather
+ * than looking like a plausible choice.
+ */
+function TestPicker({
+  selected, onChange, onCatalogue,
+}: {
+  selected: string[];
+  onChange: (v: string[]) => void;
+  onCatalogue: (c: { with_dos: number; active_labs: number }) => void;
+}) {
+  const [q, setQ] = useState('');
+  const [opts, setOpts] = useState<TestOption[]>([]);
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const box = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const t = setTimeout(async () => {
+      if (q.trim().length < 2) { setOpts([]); return; }
+      setBusy(true);
+      try {
+        const r = await fetch(`/api/coverage/tests?q=${encodeURIComponent(q.trim())}`);
+        if (r.ok) {
+          const d = await r.json();
+          setOpts(d.tests ?? []);
+          if (d.coverage) onCatalogue(d.coverage);
+        }
+      } finally { setBusy(false); }
+    }, 220);
+    return () => clearTimeout(t);
+  }, [q, onCatalogue]);
+
+  useEffect(() => {
+    const away = (e: MouseEvent) => {
+      if (box.current && !box.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener('mousedown', away);
+    return () => document.removeEventListener('mousedown', away);
+  }, []);
+
+  const add = (name: string) => {
+    onChange([...new Set([...selected, name])]);
+    setQ(''); setOpts([]); setOpen(false);
+  };
+
+  return (
+    <div ref={box} className="relative max-w-md">
+      <FlaskConical className="absolute left-2.5 top-2.5 w-4 h-4 text-ink-400" />
+      <input
+        value={q}
+        onChange={(e) => { setQ(e.target.value); setOpen(true); }}
+        onFocus={() => setOpen(true)}
+        placeholder="Add a test — only centres that can do it will count"
+        className="w-full pl-8 pr-3 h-9 text-sm rounded-md border border-ink-200 bg-surface focus:outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500"
+      />
+      {open && (q.trim().length >= 2) && (
+        <div className="absolute z-20 mt-1 w-full max-h-64 overflow-y-auto rounded-md border border-ink-200 bg-surface shadow-pop">
+          {busy && <div className="px-3 py-2 text-xs text-ink-400">Searching…</div>}
+          {!busy && !opts.length && <div className="px-3 py-2 text-xs text-ink-400">No test matches.</div>}
+          {opts.map((o) => (
+            <button
+              key={o.name}
+              onClick={() => add(o.name)}
+              disabled={selected.includes(o.name)}
+              className="w-full flex items-center justify-between gap-3 px-3 py-1.5 text-left text-sm hover:bg-ink-50 disabled:opacity-40"
+            >
+              <span className="truncate text-ink-800">{o.name}</span>
+              <span className={`shrink-0 text-[11px] tabular-nums ${o.labs ? 'text-ink-500' : 'text-danger-500'}`}>
+                {o.labs ? `${o.labs} labs` : 'no lab lists it'}
+              </span>
+            </button>
+          ))}
+        </div>
       )}
     </div>
   );
