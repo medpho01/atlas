@@ -3,7 +3,7 @@ import { getSessionUser } from '@/lib/auth';
 import { canAccess } from '@/lib/access';
 import {
   checkServiceability, checkServiceabilityWithTests, checkCityServiceability,
-  parseServices, MAX_PINCODES,
+  listCentres, resolveCities, parseServices, MAX_PINCODES,
 } from '@/lib/serviceabilityQueries';
 
 export const dynamic = 'force-dynamic';
@@ -37,18 +37,26 @@ export async function POST(req: NextRequest) {
 
   const services = parseServices(body?.services);
 
-  const [rows, cityRows] = await Promise.all([
+  // Cities contribute their pincodes to the union of centres, so a search
+  // spanning six cities answers "every centre across all of them" in one list.
+  const cityMatches = cities.length ? await resolveCities(cities) : [];
+  const allPincodes = [...new Set([...pincodes, ...cityMatches.flatMap((c) => c.pincodes)])];
+
+  const [rows, cityRows, centres] = await Promise.all([
     pincodes.length
       ? (tests.length
           ? checkServiceabilityWithTests(pincodes, services, tests)
           : checkServiceability(pincodes, services))
       : Promise.resolve([]),
     cities.length ? checkCityServiceability(cities, services, tests) : Promise.resolve([]),
+    listCentres(allPincodes, services, tests),
   ]);
 
   return NextResponse.json({
     rows,
     cityRows,
+    centres,
+    scannedPincodes: allPincodes.length,
     services,
     tests,
     truncated: new Set(pincodes).size > MAX_PINCODES,

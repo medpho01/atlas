@@ -12,6 +12,11 @@ type Row = { pincode: string; city: string | null; state: string | null; service
 type CityCell = { service: string; covered: number; best: number; top: string[] };
 type CityRow = { input: string; city: string | null; state: string | null; pincodes: number; services: CityCell[] };
 type TestOption = { name: string; category: string | null; labs: number; entries: number };
+type Centre = {
+  entity_id: string; name: string; kind: string; modalities: string[];
+  city: string | null; state: string | null; pincode: string | null;
+  covers: number; sample: string[]; nearest_km: number | null; tests_listed: number;
+};
 
 type Props = {
   allServices: { key: string; label: string }[];
@@ -40,6 +45,9 @@ export function ServiceabilityPanel({ allServices, defaultServices }: Props) {
   const [cityRows, setCityRows] = useState<CityRow[]>([]);
   const [tests, setTests] = useState<string[]>([]);
   const [catalogue, setCatalogue] = useState<{ with_dos: number; active_labs: number } | null>(null);
+  const [centres, setCentres] = useState<Centre[]>([]);
+  const [scanned, setScanned] = useState(0);
+  const [centreQ, setCentreQ] = useState('');
 
   const labelOf = useMemo(
     () => Object.fromEntries(allServices.map((s) => [s.key, s.label])),
@@ -60,10 +68,12 @@ export function ServiceabilityPanel({ allServices, defaultServices }: Props) {
       const data = await r.json();
       setRows(data.rows ?? []);
       setCityRows(data.cityRows ?? []);
+      setCentres(data.centres ?? []);
+      setScanned(data.scannedPincodes ?? 0);
       setTruncated(!!data.truncated);
     } catch (e) {
       setError((e as Error).message || 'Lookup failed');
-      setRows([]); setCityRows([]);
+      setRows([]); setCityRows([]); setCentres([]);
     } finally {
       setLoading(false);
     }
@@ -120,6 +130,34 @@ export function ServiceabilityPanel({ allServices, defaultServices }: Props) {
     if (pincodes.length || cities.length) run(pincodes, sourceLabel);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tests.join('|')]);
+
+  const shownCentres = useMemo(() => {
+    const t = centreQ.trim().toLowerCase();
+    if (!t) return centres;
+    return centres.filter((c) =>
+      c.name.toLowerCase().includes(t) ||
+      (c.city ?? '').toLowerCase().includes(t) ||
+      (c.state ?? '').toLowerCase().includes(t) ||
+      (c.pincode ?? '').includes(t));
+  }, [centres, centreQ]);
+
+  const exportCentres = () => {
+    const sheet = shownCentres.map((c) => ({
+      Centre: c.name,
+      Type: c.kind,
+      Services: c.modalities.join('; '),
+      City: c.city ?? '',
+      State: c.state ?? '',
+      Pincode: c.pincode ?? '',
+      'Pincodes covered': c.covers,
+      'Nearest (km)': c.nearest_km === null ? '' : Number(c.nearest_km),
+      'Tests listed': c.tests_listed,
+      'Sample pincodes': c.sample.join('; '),
+    }));
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(sheet), 'Centres');
+    XLSX.writeFile(wb, 'atlas-centres.xlsx');
+  };
 
   const covered = rows.filter((r) => r.services.some((s) => s.providers > 0)).length;
 
@@ -261,6 +299,81 @@ export function ServiceabilityPanel({ allServices, defaultServices }: Props) {
       {truncated && (
         <div className="rounded-xl border border-warn-100 bg-warn-50 px-4 py-2.5 text-xs text-warn-600">
           Only the first 2,000 pincodes were checked. Split the file to cover the rest.
+        </div>
+      )}
+
+      {/* The union — every centre reaching ANY of the locations asked for.
+          This is the list people actually want to send on. */}
+      {!loading && centres.length > 0 && (
+        <div className="rounded-2xl border border-ink-200 bg-surface overflow-hidden">
+          <div className="px-4 py-2.5 border-b border-ink-200 bg-ink-50 flex flex-wrap items-center gap-3">
+            <span className="text-xs text-ink-600">
+              <b className="text-ink-900">{centres.length.toLocaleString('en-IN')}</b> centres across{' '}
+              <b className="text-ink-900">{scanned.toLocaleString('en-IN')}</b> pincodes
+              <span className="text-ink-400"> · union, one row per centre</span>
+            </span>
+            <input
+              value={centreQ}
+              onChange={(e) => setCentreQ(e.target.value)}
+              placeholder="Filter centres…"
+              className="ml-auto h-7 px-2 text-xs rounded-md border border-ink-200 bg-surface w-48 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
+            />
+            <button
+              onClick={exportCentres}
+              className="inline-flex items-center gap-1.5 px-2.5 h-7 text-xs font-semibold rounded-md bg-ink-900 text-ink-50 hover:bg-ink-800 transition"
+            >
+              <Download className="w-3.5 h-3.5" /> Excel
+            </button>
+          </div>
+          <div className="overflow-x-auto max-h-[520px]">
+            <table className="w-full text-sm">
+              <thead className="bg-ink-50 sticky top-0 z-10">
+                <tr className="text-left text-[10px] uppercase tracking-wider text-ink-500 border-b border-ink-200">
+                  <th className="px-4 py-2 font-semibold">Centre</th>
+                  <th className="px-3 py-2 font-semibold">Type</th>
+                  <th className="px-3 py-2 font-semibold">Where it is</th>
+                  <th className="px-3 py-2 font-semibold text-right">Pincodes covered</th>
+                  <th className="px-3 py-2 font-semibold text-right">Nearest</th>
+                  <th className="px-3 py-2 font-semibold text-right">Tests listed</th>
+                </tr>
+              </thead>
+              <tbody>
+                {shownCentres.map((c) => (
+                  <tr key={c.entity_id} className="border-b border-ink-100 last:border-0 hover:bg-ink-50/60">
+                    <td className="px-4 py-2 max-w-[380px]">
+                      <div className="truncate text-ink-900" title={c.name}>{c.name}</div>
+                      <div className="text-[11px] text-ink-400 truncate">
+                        covers {c.sample.slice(0, 4).join(', ')}{c.covers > 4 ? ` +${c.covers - 4}` : ''}
+                      </div>
+                    </td>
+                    <td className="px-3 py-2 text-xs text-ink-600">
+                      {c.kind.toLowerCase()}
+                      <div className="text-[11px] text-ink-400">
+                        {c.modalities.map((m) => m.replace('_', ' ').toLowerCase()).join(', ')}
+                      </div>
+                    </td>
+                    <td className="px-3 py-2 text-xs text-ink-600">
+                      {[c.city, c.state].filter(Boolean).join(', ') || '—'}
+                      {c.pincode && <span className="text-ink-400 tabular-nums"> · {c.pincode}</span>}
+                    </td>
+                    <td className="px-3 py-2 text-right tabular-nums text-ink-900">{c.covers.toLocaleString('en-IN')}</td>
+                    <td className="px-3 py-2 text-right tabular-nums text-xs text-ink-600">
+                      {c.nearest_km === null ? '—' : c.nearest_km === 0 ? 'in pincode' : `${Number(c.nearest_km).toFixed(1)} km`}
+                    </td>
+                    <td className="px-3 py-2 text-right tabular-nums text-xs">
+                      {c.tests_listed ? <span className="text-ink-600">{c.tests_listed.toLocaleString('en-IN')}</span>
+                                      : <span className="text-ink-300">none</span>}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {shownCentres.length < centres.length && (
+            <div className="px-4 py-2 text-[11px] text-ink-400 border-t border-ink-100">
+              Showing {shownCentres.length.toLocaleString('en-IN')} of {centres.length.toLocaleString('en-IN')} — the Excel has all of them.
+            </div>
+          )}
         </div>
       )}
 

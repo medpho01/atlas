@@ -476,3 +476,96 @@ export async function checkCityServiceability(
   }
   return out;
 }
+
+/* ───────────────────── the union of centres ───────────────────── */
+
+export type CentreRow = {
+  entity_id: string;
+  name: string;
+  kind: string;
+  modalities: string[];
+  city: string | null;
+  state: string | null;
+  pincode: string | null;
+  /** How many of the asked-for pincodes this centre reaches. */
+  covers: number;
+  /** A few of them, so the row is checkable without a second query. */
+  sample: string[];
+  /** Nearest distance to any asked-for pincode; 0 when it sits inside one. */
+  nearest_km: number | null;
+  tests_listed: number;
+};
+
+/**
+ * Every distinct centre that reaches ANY of the given locations — the union,
+ * not a per-location breakdown. One row per centre, whatever it covers.
+ *
+ * Reach follows the same rules as the coverage rollup so the two agree:
+ *   centre visit    -> a 10 km catchment (mv_pincode_cv_reach)
+ *   everything else -> the provider's own pincode or its serviced list
+ */
+export async function listCentres(
+  pincodes: string[],
+  services: ServiceKey[],
+  testNames: string[] = [],
+  limit = 5000,
+): Promise<CentreRow[]> {
+  const unique = Array.from(new Set(pincodes.filter((p) => /^\d{6}$/.test(p)))).slice(0, MAX_PINCODES);
+  if (!unique.length || !services.length) return [];
+
+  const kinds = [...new Set(services.map((s) => s.split('|')[0]))];
+  const modalities = [...new Set(services.map((s) => s.split('|')[1]))];
+  const tests = Array.from(new Set(testNames.map((t) => t.trim()).filter(Boolean)));
+
+  return query<CentreRow>(
+    `
+    WITH wanted AS (SELECT unnest($1::text[]) AS pincode),
+    -- Labs listing every test asked for. Empty filter = no restriction.
+    qualified AS (
+      SELECT d.lab_id
+      FROM src."DOS" d JOIN src."Master" m ON m.id = d.master_id
+      WHERE d.active AND m.name = ANY($4::text[])
+      GROUP BY d.lab_id
+      HAVING count(DISTINCT m.name) = array_length($4::text[], 1)
+    ),
+    -- Centre visit reaches through a catchment, so it needs the distance table.
+    radius AS (
+      SELECT 'LAB-' || split_part(r.entity_id, '-', 2) AS entity_id,
+             r.covered_pincode AS pincode, r.distance_km
+      FROM analytics.mv_pincode_cv_reach r
+      JOIN wanted w ON w.pincode = r.covered_pincode
+      WHERE r.distance_km <= 10 AND 'CENTER_VISIT' = ANY($3::text[])
+    ),
+    -- Everything else reaches where it sits, or where it says it serves.
+    direct AS (
+      SELECT pu.entity_id, w.pincode,
+             CASE WHEN pu.pincode = w.pincode THEN 0 ELSE NULL END::numeric AS distance_km
+      FROM analytics.mv_provider_unified pu
+      JOIN wanted w
+        ON w.pincode = pu.pincode OR w.pincode = ANY(pu.serviced_pincodes)
+      WHERE pu.active AND pu.kind = ANY($2::text[])
+        AND pu.modalities && $3::text[]
+        AND NOT ('CENTER_VISIT' = ANY($3::text[]) AND array_length($3::text[], 1) = 1
+                 AND pu.kind IN ('LAB','HOSPITAL'))
+    ),
+    hit AS (SELECT * FROM radius UNION ALL SELECT * FROM direct)
+    SELECT pu.entity_id, pu.name, pu.kind,
+           ARRAY(SELECT m FROM unnest(pu.modalities) m WHERE m = ANY($3::text[])) AS modalities,
+           pu.city, pu.state, pu.pincode,
+           count(DISTINCT h.pincode)::int AS covers,
+           (array_agg(DISTINCT h.pincode))[1:5]         AS sample,
+           min(h.distance_km)                            AS nearest_km,
+           COALESCE((SELECT count(*)::int FROM src."DOS" d
+                     WHERE d.lab_id = pu.source_id AND d.active
+                       AND pu.source_table = 'Lab'), 0)  AS tests_listed
+    FROM hit h
+    JOIN analytics.mv_provider_unified pu ON pu.entity_id = h.entity_id
+    WHERE pu.active AND pu.kind = ANY($2::text[])
+      AND (array_length($4::text[], 1) IS NULL
+           OR (pu.source_table = 'Lab' AND pu.source_id IN (SELECT lab_id FROM qualified)))
+    GROUP BY pu.entity_id, pu.name, pu.kind, pu.modalities, pu.city, pu.state, pu.pincode, pu.source_id, pu.source_table
+    ORDER BY covers DESC, pu.name
+    LIMIT $5`,
+    [unique, kinds, modalities, tests, limit],
+  );
+}
