@@ -487,6 +487,8 @@ export type CentreRow = {
   city: string | null;
   state: string | null;
   pincode: string | null;
+  /** Street address, assembled from whichever source table the row came from. */
+  address: string | null;
   /** How many of the asked-for pincodes this centre reaches. */
   covers: number;
   /** A few of them, so the row is checkable without a second query. */
@@ -552,6 +554,16 @@ export async function listCentres(
     SELECT pu.entity_id, pu.name, pu.kind,
            ARRAY(SELECT m FROM unnest(pu.modalities) m WHERE m = ANY($3::text[])) AS modalities,
            pu.city, pu.state, pu.pincode,
+           -- The unified view keeps only city/state/pincode, but a walk-in
+           -- centre is useless without the street address, so fetch it from
+           -- whichever table the row came from.
+           NULLIF(concat_ws(', ',
+             NULLIF(btrim(pr."unitFloorBuilding"), ''),
+             NULLIF(btrim(COALESCE(l.address, pr.address, ph.address)), ''),
+             NULLIF(btrim(COALESCE(l.locality, pr.locality, ph.locality)), ''),
+             NULLIF(btrim(pu.city), ''),
+             NULLIF(btrim(pu.state), ''),
+             NULLIF(btrim(pu.pincode), '')), '') AS address,
            count(DISTINCT h.pincode)::int AS covers,
            (array_agg(DISTINCT h.pincode))[1:5]         AS sample,
            min(h.distance_km)                            AS nearest_km,
@@ -560,10 +572,15 @@ export async function listCentres(
                        AND pu.source_table = 'Lab'), 0)  AS tests_listed
     FROM hit h
     JOIN analytics.mv_provider_unified pu ON pu.entity_id = h.entity_id
+    LEFT JOIN src."Lab"      l  ON pu.source_table = 'Lab'      AND l.id  = pu.source_id
+    LEFT JOIN src."Provider" pr ON pu.source_table = 'Provider' AND pr.id = pu.source_id
+    LEFT JOIN src."Pharmacy" ph ON pu.source_table = 'Pharmacy' AND ph.id = pu.source_id
     WHERE pu.active AND pu.kind = ANY($2::text[])
       AND (array_length($4::text[], 1) IS NULL
            OR (pu.source_table = 'Lab' AND pu.source_id IN (SELECT lab_id FROM qualified)))
-    GROUP BY pu.entity_id, pu.name, pu.kind, pu.modalities, pu.city, pu.state, pu.pincode, pu.source_id, pu.source_table
+    GROUP BY pu.entity_id, pu.name, pu.kind, pu.modalities, pu.city, pu.state, pu.pincode,
+             pu.source_id, pu.source_table, l.address, l.locality,
+             pr."unitFloorBuilding", pr.address, pr.locality, ph.address, ph.locality
     ORDER BY covers DESC, pu.name
     LIMIT $5`,
     [unique, kinds, modalities, tests, limit],

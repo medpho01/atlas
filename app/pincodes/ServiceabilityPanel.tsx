@@ -14,7 +14,7 @@ type CityRow = { input: string; city: string | null; state: string | null; pinco
 type TestOption = { name: string; category: string | null; labs: number; entries: number };
 type Centre = {
   entity_id: string; name: string; kind: string; modalities: string[];
-  city: string | null; state: string | null; pincode: string | null;
+  city: string | null; state: string | null; pincode: string | null; address: string | null;
   covers: number; sample: string[]; nearest_km: number | null; tests_listed: number;
 };
 
@@ -141,19 +141,26 @@ export function ServiceabilityPanel({ allServices, defaultServices }: Props) {
       (c.pincode ?? '').includes(t));
   }, [centres, centreQ]);
 
+  // Pincodes covered is a home-collection idea: we travel to them. For a
+  // walk-in centre the patient travels, so the address is the answer and a
+  // list of pincodes would be noise.
+  const showsHome = centres.some((c) => c.modalities.includes('HOME_SAMPLE'));
+
   const exportCentres = () => {
-    const sheet = shownCentres.map((c) => ({
-      Centre: c.name,
-      Type: c.kind,
-      Services: c.modalities.join('; '),
-      City: c.city ?? '',
-      State: c.state ?? '',
-      Pincode: c.pincode ?? '',
-      'Pincodes covered': c.covers,
-      'Nearest (km)': c.nearest_km === null ? '' : Number(c.nearest_km),
-      'Tests listed': c.tests_listed,
-      'Sample pincodes': c.sample.join('; '),
-    }));
+    const sheet = shownCentres.map((c) => {
+      const base: Record<string, string | number> = {
+        Centre: c.name,
+        Type: c.kind.toLowerCase(),
+        Services: c.modalities.map((m) => m.replace('_', ' ').toLowerCase()).join('; '),
+        'Full address': c.address ?? [c.city, c.state, c.pincode].filter(Boolean).join(', '),
+      };
+      if (showsHome) {
+        const home = c.modalities.includes('HOME_SAMPLE');
+        base['Pincodes covered'] = home ? c.covers : '';
+        base['Sample pincodes'] = home ? c.sample.join('; ') : '';
+      }
+      return base;
+    });
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(sheet), 'Centres');
     XLSX.writeFile(wb, 'atlas-centres.xlsx');
@@ -331,39 +338,41 @@ export function ServiceabilityPanel({ allServices, defaultServices }: Props) {
                 <tr className="text-left text-[10px] uppercase tracking-wider text-ink-500 border-b border-ink-200">
                   <th className="px-4 py-2 font-semibold">Centre</th>
                   <th className="px-3 py-2 font-semibold">Type</th>
-                  <th className="px-3 py-2 font-semibold">Where it is</th>
-                  <th className="px-3 py-2 font-semibold text-right">Pincodes covered</th>
-                  <th className="px-3 py-2 font-semibold text-right">Nearest</th>
-                  <th className="px-3 py-2 font-semibold text-right">Tests listed</th>
+                  <th className="px-3 py-2 font-semibold">Full address</th>
+                  {showsHome && <th className="px-3 py-2 font-semibold text-right">Pincodes covered</th>}
                 </tr>
               </thead>
               <tbody>
                 {shownCentres.map((c) => (
                   <tr key={c.entity_id} className="border-b border-ink-100 last:border-0 hover:bg-ink-50/60">
-                    <td className="px-4 py-2 max-w-[380px]">
+                    <td className="px-4 py-2 max-w-[320px]">
                       <div className="truncate text-ink-900" title={c.name}>{c.name}</div>
-                      <div className="text-[11px] text-ink-400 truncate">
-                        covers {c.sample.slice(0, 4).join(', ')}{c.covers > 4 ? ` +${c.covers - 4}` : ''}
-                      </div>
                     </td>
-                    <td className="px-3 py-2 text-xs text-ink-600">
+                    <td className="px-3 py-2 text-xs text-ink-600 whitespace-nowrap">
                       {c.kind.toLowerCase()}
                       <div className="text-[11px] text-ink-400">
                         {c.modalities.map((m) => m.replace('_', ' ').toLowerCase()).join(', ')}
                       </div>
                     </td>
-                    <td className="px-3 py-2 text-xs text-ink-600">
-                      {[c.city, c.state].filter(Boolean).join(', ') || '—'}
-                      {c.pincode && <span className="text-ink-400 tabular-nums"> · {c.pincode}</span>}
+                    <td className="px-3 py-2 text-xs text-ink-600 max-w-[420px]">
+                      {c.address ?? (
+                        <span className="text-ink-400">
+                          {[c.city, c.state, c.pincode].filter(Boolean).join(', ') || 'no address on record'}
+                        </span>
+                      )}
                     </td>
-                    <td className="px-3 py-2 text-right tabular-nums text-ink-900">{c.covers.toLocaleString('en-IN')}</td>
-                    <td className="px-3 py-2 text-right tabular-nums text-xs text-ink-600">
-                      {c.nearest_km === null ? '—' : c.nearest_km === 0 ? 'in pincode' : `${Number(c.nearest_km).toFixed(1)} km`}
-                    </td>
-                    <td className="px-3 py-2 text-right tabular-nums text-xs">
-                      {c.tests_listed ? <span className="text-ink-600">{c.tests_listed.toLocaleString('en-IN')}</span>
-                                      : <span className="text-ink-300">none</span>}
-                    </td>
+                    {showsHome && (
+                      <td className="px-3 py-2 text-right align-top">
+                        {c.modalities.includes('HOME_SAMPLE') ? (
+                          <>
+                            <div className="tabular-nums text-ink-900">{c.covers.toLocaleString('en-IN')}</div>
+                            <div className="text-[11px] text-ink-400 truncate max-w-[160px]" title={c.sample.join(', ')}>
+                              {c.sample.slice(0, 3).join(', ')}{c.covers > 3 ? ` +${c.covers - 3}` : ''}
+                            </div>
+                          </>
+                        ) : <span className="text-ink-300">—</span>}
+                      </td>
+                    )}
                   </tr>
                 ))}
               </tbody>
