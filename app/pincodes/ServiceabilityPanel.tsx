@@ -12,9 +12,33 @@ type Row = { pincode: string; city: string | null; state: string | null; service
 type CityCell = { service: string; covered: number; best: number; top: string[] };
 type CityRow = { input: string; city: string | null; state: string | null; pincodes: number; services: CityCell[] };
 type TestOption = { name: string; category: string | null; labs: number; entries: number };
+/** Every provider kind that offers a modality, as one pick. */
+/** Lab records spell the same city several ways; group them as one. */
+const CITY_ALIASES: Record<string, string> = {
+  bangalore: 'Bengaluru', bengaluru: 'Bengaluru', bombay: 'Mumbai', madras: 'Chennai',
+  calcutta: 'Kolkata', cochin: 'Kochi', ernakulam: 'Kochi', gurgaon: 'Gurugram',
+  poona: 'Pune', secunderabad: 'Hyderabad', 'new delhi': 'Delhi', trivandrum: 'Thiruvananthapuram',
+  pondicherry: 'Puducherry', baroda: 'Vadodara', mysore: 'Mysuru', mangalore: 'Mangaluru',
+  vizag: 'Visakhapatnam', 'navi mumbai': 'Mumbai', thane: 'Mumbai', noida: 'Delhi',
+  ghaziabad: 'Delhi', faridabad: 'Delhi',
+};
+const canonicalCity = (n: string | null) => {
+  const t = (n ?? '').trim();
+  return CITY_ALIASES[t.toLowerCase()] ?? t;
+};
+
+const MODALITY_GROUPS = [
+  { key: 'CENTER_VISIT', label: 'All centre visit' },
+  { key: 'HOME_SAMPLE',  label: 'All home sample' },
+  { key: 'HOME_VISIT',   label: 'All home visit' },
+];
+
 type Centre = {
   entity_id: string; name: string; kind: string; modalities: string[];
   city: string | null; state: string | null; pincode: string | null; address: string | null;
+  area: string | null; chain: string | null; home_collection: boolean;
+  /** The searched city this centre sits in, when it was found through one. */
+  group?: string | null;
   covers: number; sample: string[]; nearest_km: number | null; tests_listed: number;
 };
 
@@ -146,24 +170,119 @@ export function ServiceabilityPanel({ allServices, defaultServices }: Props) {
   // list of pincodes would be noise.
   const showsHome = centres.some((c) => c.modalities.includes('HOME_SAMPLE'));
 
+  /**
+   * A network workbook, not a data dump: a Summary that can be read on its own,
+   * then one tab per city with the centre-level detail behind it.
+   */
   const exportCentres = () => {
-    const sheet = shownCentres.map((c) => {
-      const base: Record<string, string | number> = {
-        Centre: c.name,
-        Type: c.kind.toLowerCase(),
-        Services: c.modalities.map((m) => m.replace('_', ' ').toLowerCase()).join('; '),
-        'Full address': c.address ?? [c.city, c.state, c.pincode].filter(Boolean).join(', '),
-      };
-      if (showsHome) {
-        const home = c.modalities.includes('HOME_SAMPLE');
-        base['Pincodes covered'] = home ? c.covers : '';
-        base['Sample pincodes'] = home ? c.sample.join('; ') : '';
-      }
-      return base;
-    });
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(sheet), 'Centres');
-    XLSX.writeFile(wb, 'atlas-centres.xlsx');
+    const today = new Date().toLocaleDateString('en-GB',
+      { day: '2-digit', month: 'long', year: 'numeric' });
+    const isHospital = (c: Centre) => c.kind === 'HOSPITAL';
+    const label = (c: Centre) => (isHospital(c) ? 'Hospital' : 'Diagnostic Centre');
+
+    // Group by the centre's own city — that is what the data actually says,
+    // and it keeps Thane and Navi Mumbai visible rather than folded away.
+    const byCity = new Map<string, Centre[]>();
+    for (const c of shownCentres) {
+      // Prefer the city that was searched for; the centre's own city field is
+      // full of localities.
+      const key = c.group ?? canonicalCity(c.city) ?? '';
+      const k = key || 'Other';
+      if (!byCity.has(k)) byCity.set(k, []);
+      byCity.get(k)!.push(c);
+    }
+    const ordered = [...byCity.entries()].sort((a, b) => b[1].length - a[1].length);
+
+    const modalityNames = [...new Set(shownCentres.flatMap((c) => c.modalities))]
+      .map((m) => m.replace('_', ' ').toLowerCase()).join(' + ');
+
+    const summary: (string | number)[][] = [
+      ['LabStack — ' + (modalityNames || 'network')],
+      ['Partner centres reaching the locations searched'],
+      ['Network snapshot as of ' + today],
+      [],
+      ['City', 'Total Centres', 'Diagnostic Centres', 'Hospitals', 'Chains / Brands', 'With Home Collection'],
+    ];
+    for (const [city, list] of ordered) {
+      summary.push([
+        city,
+        list.length,
+        list.filter((c) => !isHospital(c)).length,
+        list.filter(isHospital).length,
+        new Set(list.map((c) => c.chain).filter(Boolean)).size,
+        list.filter((c) => c.home_collection).length,
+      ]);
+    }
+    summary.push([
+      'Total',
+      shownCentres.length,
+      shownCentres.filter((c) => !isHospital(c)).length,
+      shownCentres.filter(isHospital).length,
+      new Set(shownCentres.map((c) => c.chain).filter(Boolean)).size,
+      shownCentres.filter((c) => c.home_collection).length,
+    ]);
+    summary.push([], ['Notes']);
+    summary.push(['• Each city tab carries the centre-level detail behind its row here.']);
+    summary.push([`• ${scanned.toLocaleString('en-IN')} pincodes were searched; a centre appears once however many it reaches.`]);
+    summary.push(['• "Chains / Brands" counts distinct chains; independent centres are excluded from that count.']);
+    if (tests.length) {
+      summary.push([`• Restricted to centres listing: ${tests.join(', ')}. Labs with no catalogue recorded are excluded.`]);
+    }
+    const sum = XLSX.utils.aoa_to_sheet(summary);
+    sum['!cols'] = [{ wch: 26 }, { wch: 14 }, { wch: 18 }, { wch: 11 }, { wch: 16 }, { wch: 20 }];
+    XLSX.utils.book_append_sheet(wb, sum, 'Summary');
+
+    // Excel forbids : \ / ? * [ ] in a sheet name, and caps it at 31 chars.
+    const used = new Set<string>();
+    const tabName = (city: string) => {
+      let n = city.replace(/[:\\/?*[\]]/g, ' ').slice(0, 28).trim() || 'Unknown';
+      let i = 2;
+      while (used.has(n.toLowerCase())) n = `${n.slice(0, 25)} ${i++}`;
+      used.add(n.toLowerCase());
+      return n;
+    };
+
+    for (const [city, list] of ordered) {
+      const rowsOut: (string | number)[][] = [
+        [`${city} — ${modalityNames || 'network'}`],
+        [`${list.length} centres · ${list.filter((c) => c.home_collection).length} with home collection`],
+        [],
+        ['Sr No', 'Centre Name', 'Centre Type', 'Chain / Brand', 'Area', 'Pincode', 'Home Collection', 'Full Address'],
+      ];
+      list
+        .slice()
+        .sort((a, b) => a.name.localeCompare(b.name))
+        .forEach((c, i) => rowsOut.push([
+          i + 1, c.name, label(c), c.chain ?? 'Independent',
+          c.area ?? '', c.pincode ?? '', c.home_collection ? 'Yes' : 'No',
+          c.address ?? '',
+        ]));
+      const ws = XLSX.utils.aoa_to_sheet(rowsOut);
+      ws['!cols'] = [{ wch: 7 }, { wch: 44 }, { wch: 18 }, { wch: 22 },
+                     { wch: 20 }, { wch: 10 }, { wch: 16 }, { wch: 60 }];
+      XLSX.utils.book_append_sheet(wb, ws, tabName(city));
+    }
+
+    // One flat sheet as well, for anyone who wants to pivot it themselves.
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(shownCentres.map((c) => ({
+      Centre: c.name,
+      'Centre Type': label(c),
+      'Chain / Brand': c.chain ?? 'Independent',
+      Services: c.modalities.map((m) => m.replace('_', ' ').toLowerCase()).join('; '),
+      Area: c.area ?? '',
+      City: c.city ?? '',
+      State: c.state ?? '',
+      Pincode: c.pincode ?? '',
+      'Home Collection': c.home_collection ? 'Yes' : 'No',
+      'Full address': c.address ?? '',
+      ...(showsHome ? {
+        'Pincodes covered': c.modalities.includes('HOME_SAMPLE') ? c.covers : '',
+        'Sample pincodes': c.modalities.includes('HOME_SAMPLE') ? c.sample.join('; ') : '',
+      } : {}),
+    }))), 'All centres');
+
+    XLSX.writeFile(wb, 'labstack-network.xlsx');
   };
 
   const covered = rows.filter((r) => r.services.some((s) => s.providers > 0)).length;
@@ -559,12 +678,37 @@ function ServiceSelect({
         <>
           <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} aria-hidden />
           <div className="absolute left-0 top-full mt-1 z-50 w-[250px] rounded-lg border border-ink-200 bg-surface shadow-lg overflow-hidden">
-            <div className="flex items-center gap-3 px-2.5 py-2 border-b border-ink-150">
-              <button onClick={() => onChange(all.map((s) => s.key))}
-                className="text-[11px] font-semibold text-brand-700 dark:text-brand-400 hover:underline">Select all</button>
-              <button onClick={() => onChange([])}
-                className="text-[11px] font-semibold text-ink-600 hover:text-ink-900 hover:underline">Clear</button>
-              <span className="ml-auto text-[11px] text-ink-500 tabular-nums">{selected.length} on</span>
+            {/* People think in modalities, not kind × modality pairs — asking
+                for "centre visit" means labs AND hospitals, and picking one and
+                missing the other is the easiest mistake to make here. */}
+            <div className="px-2.5 py-2 border-b border-ink-150 space-y-1.5">
+              <div className="flex flex-wrap gap-1">
+                {MODALITY_GROUPS.map((g) => {
+                  const keys = all.filter((s) => s.key.endsWith('|' + g.key)).map((s) => s.key);
+                  if (!keys.length) return null;
+                  const on = keys.every((k) => set.has(k));
+                  return (
+                    <button
+                      key={g.key}
+                      onClick={() => onChange(on
+                        ? selected.filter((k) => !keys.includes(k))
+                        : [...new Set([...selected, ...keys])])}
+                      className={`px-1.5 py-0.5 text-[11px] font-semibold rounded border transition ${
+                        on ? 'border-brand-500 bg-brand-50 text-brand-700 dark:text-brand-400'
+                           : 'border-ink-200 text-ink-600 hover:bg-ink-100'}`}
+                    >
+                      {g.label}
+                    </button>
+                  );
+                })}
+              </div>
+              <div className="flex items-center gap-3">
+                <button onClick={() => onChange(all.map((s) => s.key))}
+                  className="text-[11px] font-semibold text-brand-700 dark:text-brand-400 hover:underline">Select all</button>
+                <button onClick={() => onChange([])}
+                  className="text-[11px] font-semibold text-ink-600 hover:text-ink-900 hover:underline">Clear</button>
+                <span className="ml-auto text-[11px] text-ink-500 tabular-nums">{selected.length} on</span>
+              </div>
             </div>
             <div className="max-h-64 overflow-y-auto py-1">
               {all.map((s) => {

@@ -52,10 +52,28 @@ export async function POST(req: NextRequest) {
     listCentres(allPincodes, services, tests),
   ]);
 
+  // Which searched city each centre belongs to. Grouping on the centre's own
+  // `city` field produces a tab per locality — "Kilpauk", "Banjara Hills",
+  // "KPHB" are all recorded as cities — so resolve its pincode back to the
+  // city that was actually asked for.
+  const pinToCity = new Map<string, string>();
+  for (const m of cityMatches) {
+    for (const p of m.pincodes) if (!pinToCity.has(p)) pinToCity.set(p, m.input);
+  }
+  // Its own pincode when that was searched; otherwise one it covers — every
+  // pincode in `sample` is by construction one of the searched ones, so a
+  // centre reaching in from just outside still lands in the right city.
+  const grouped = centres.map((c) => ({
+    ...c,
+    group: (c.pincode && pinToCity.get(c.pincode.trim()))
+      ?? c.sample.map((p) => pinToCity.get(p)).find(Boolean)
+      ?? null,
+  }));
+
   return NextResponse.json({
     rows,
     cityRows,
-    centres,
+    centres: grouped,
     scannedPincodes: allPincodes.length,
     services,
     tests,

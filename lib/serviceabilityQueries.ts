@@ -284,13 +284,62 @@ export async function getTestCatalogueCoverage() {
 export type CityMatch = { input: string; city: string | null; state: string | null; pincodes: string[] };
 
 /**
+ * What people type against what the postal directory calls it. Lab records use
+ * both spellings freely — 93 centres say "Bangalore" and 36 say "Bengaluru" —
+ * so a search for either has to find both.
+ */
+export const CITY_ALIASES: Record<string, string> = {
+  bangalore: 'Bengaluru', bengaluru: 'Bengaluru', blr: 'Bengaluru',
+  bombay: 'Mumbai', mumbai: 'Mumbai',
+  madras: 'Chennai', chennai: 'Chennai',
+  calcutta: 'Kolkata', kolkata: 'Kolkata',
+  cochin: 'Kochi', kochi: 'Kochi', ernakulam: 'Kochi',
+  gurgaon: 'Gurugram', gurugram: 'Gurugram',
+  poona: 'Pune', pune: 'Pune',
+  hyderabad: 'Hyderabad', secunderabad: 'Hyderabad',
+  'new delhi': 'Delhi', delhi: 'Delhi',
+  trivandrum: 'Thiruvananthapuram', pondicherry: 'Puducherry',
+  baroda: 'Vadodara', mysore: 'Mysuru', mangalore: 'Mangaluru',
+  vizag: 'Visakhapatnam', vishakapatnam: 'Visakhapatnam',
+};
+
+/**
+ * Metros people name as one place but the postal directory splits. "Delhi" is
+ * four pincodes in the directory and the whole NCR in conversation; asking for
+ * it and getting four is not a useful answer.
+ */
+export const METRO_EXPANSIONS: Record<string, string[]> = {
+  Delhi:  ['Delhi', 'New Delhi', 'Gurugram', 'Gurgaon', 'Noida', 'Ghaziabad', 'Faridabad', 'Greater Noida'],
+  Mumbai: ['Mumbai', 'Navi Mumbai', 'Thane'],
+  Kochi:  ['Kochi', 'Ernakulam'],
+  Hyderabad: ['Hyderabad', 'Secunderabad'],
+};
+
+/** Canonical form of a typed or recorded city name. */
+export function canonicalCity(name: string | null | undefined): string {
+  const k = (name ?? '').trim().toLowerCase();
+  return CITY_ALIASES[k] ?? (name ?? '').trim();
+}
+
+/**
  * Resolve typed city names to their pincodes. Matching is case- and
  * whitespace-insensitive and falls back to a prefix match, because people type
  * "bangalore" for Bengaluru and "delhi" for a dozen different entries.
  */
 export async function resolveCities(names: string[]): Promise<CityMatch[]> {
-  const clean = Array.from(new Set(names.map((n) => n.trim()).filter(Boolean))).slice(0, 40);
-  if (!clean.length) return [];
+  // Search the canonical name, but report back what the user typed.
+  const typed = Array.from(new Set(names.map((n) => n.trim()).filter(Boolean))).slice(0, 40);
+  if (!typed.length) return [];
+  const clean = typed.map(canonicalCity);
+  const backToTyped = new Map<string, string>();
+  const search: string[] = [];
+  clean.forEach((c, i) => {
+    const parts = METRO_EXPANSIONS[c] ?? [c];
+    for (const p of parts) {
+      backToTyped.set(p.toLowerCase(), typed[i]);
+      search.push(p);
+    }
+  });
 
   const rows = await query<{ input: string; city: string; state: string; pincodes: string[] }>(
     `
@@ -305,15 +354,28 @@ export async function resolveCities(names: string[]): Promise<CityMatch[]> {
       OR lower(btrim(d.city)) LIKE lower(btrim(a.input)) || '%'
     GROUP BY a.input, d.city
     ORDER BY a.input, count(*) DESC`,
-    [clean],
+    [search],
   );
 
   // A typed name can hit several directory cities (Delhi -> New Delhi, ...);
   // keep them separate so the user sees which one they got.
-  const seen = new Set(rows.map((r) => r.input.toLowerCase()));
-  const misses = clean.filter((c) => !seen.has(c.toLowerCase()))
+  const merged = new Map<string, CityMatch>();
+  for (const r of rows) {
+    const label = backToTyped.get(r.input.toLowerCase()) ?? r.input;
+    const cur = merged.get(label);
+    if (cur) {
+      cur.pincodes = [...new Set([...cur.pincodes, ...r.pincodes])];
+      // Name the metro as asked for, not whichever suburb sorted first.
+      if (r.pincodes.length > (cur.pincodes.length - r.pincodes.length)) cur.state ??= r.state;
+    } else {
+      merged.set(label, { input: label, city: canonicalCity(label), state: r.state, pincodes: r.pincodes });
+    }
+  }
+  const named = [...merged.values()];
+  const seen = new Set(named.map((r) => r.input.toLowerCase()));
+  const misses = typed.filter((c) => !seen.has(c.toLowerCase()))
     .map((c) => ({ input: c, city: null, state: null, pincodes: [] as string[] }));
-  return [...rows, ...misses];
+  return [...named, ...misses];
 }
 
 /**
@@ -489,6 +551,12 @@ export type CentreRow = {
   pincode: string | null;
   /** Street address, assembled from whichever source table the row came from. */
   address: string | null;
+  /** Locality — the "area" a network sheet lists. */
+  area: string | null;
+  /** Chain the centre belongs to; null reads as independent. */
+  chain: string | null;
+  /** Whether the same centre also collects from home. */
+  home_collection: boolean;
   /** How many of the asked-for pincodes this centre reaches. */
   covers: number;
   /** A few of them, so the row is checkable without a second query. */
@@ -564,6 +632,9 @@ export async function listCentres(
              NULLIF(btrim(pu.city), ''),
              NULLIF(btrim(pu.state), ''),
              NULLIF(btrim(pu.pincode), '')), '') AS address,
+           NULLIF(btrim(COALESCE(l.locality, pr.locality, ph.locality)), '') AS area,
+           NULLIF(btrim(ch."chainName"), '')                                  AS chain,
+           COALESCE(l."homeCollection", false)                                AS home_collection,
            count(DISTINCT h.pincode)::int AS covers,
            (array_agg(DISTINCT h.pincode))[1:5]         AS sample,
            min(h.distance_km)                            AS nearest_km,
@@ -575,12 +646,14 @@ export async function listCentres(
     LEFT JOIN src."Lab"      l  ON pu.source_table = 'Lab'      AND l.id  = pu.source_id
     LEFT JOIN src."Provider" pr ON pu.source_table = 'Provider' AND pr.id = pu.source_id
     LEFT JOIN src."Pharmacy" ph ON pu.source_table = 'Pharmacy' AND ph.id = pu.source_id
+    LEFT JOIN src."Chain"    ch ON ch.id = pu.chain_id
     WHERE pu.active AND pu.kind = ANY($2::text[])
       AND (array_length($4::text[], 1) IS NULL
            OR (pu.source_table = 'Lab' AND pu.source_id IN (SELECT lab_id FROM qualified)))
     GROUP BY pu.entity_id, pu.name, pu.kind, pu.modalities, pu.city, pu.state, pu.pincode,
-             pu.source_id, pu.source_table, l.address, l.locality,
-             pr."unitFloorBuilding", pr.address, pr.locality, ph.address, ph.locality
+             pu.source_id, pu.source_table, l.address, l.locality, l."homeCollection",
+             pr."unitFloorBuilding", pr.address, pr.locality, ph.address, ph.locality,
+             ch."chainName"
     ORDER BY covers DESC, pu.name
     LIMIT $5`,
     [unique, kinds, modalities, tests, limit],
