@@ -132,10 +132,45 @@ $PG -c "ALTER TABLE src_local.\"Master\" ADD COLUMN IF NOT EXISTS aliases text[]
 log "Phase 0.6/4 · probing foreign tables for schema drift"
 for t in Chain ProviderType Pharmacy Store PincodeToLatLong Lab Provider Profile User Request Order Appointment PharmaOrder Master DOS Package PackagesOnLab _MasterToPackage; do
   if ! $PG -c "SELECT * FROM src.\"$t\" LIMIT 1;" >/dev/null 2>&1; then
-    log "  src.\"$t\" is stale (probe failed) — re-importing"
-    $PG -c "DROP FOREIGN TABLE IF EXISTS src.\"$t\";
-            IMPORT FOREIGN SCHEMA public LIMIT TO (\"$t\") FROM SERVER labstack_src INTO src;" >>"$LOG" 2>&1 \
-      || { log "  WARN: re-import of $t failed"; continue; }
+    log "  src.\"$t\" is stale (probe failed) — repairing columns in place"
+    # Reconcile against a fresh probe rather than DROP + IMPORT. The drop needs
+    # every dependent view gone, so on a table anything reads it fails, hits the
+    # `continue` below, and the alignment that follows never runs — which is how
+    # Lab stayed broken while the script reported only a WARN.
+    $PG >>"$LOG" 2>&1 <<DRIFT || { log "  WARN: in-place repair of $t failed"; continue; }
+DROP SCHEMA IF EXISTS src_probe CASCADE;
+CREATE SCHEMA src_probe;
+IMPORT FOREIGN SCHEMA public LIMIT TO ("$t") FROM SERVER labstack_src INTO src_probe;
+DO \$\$
+DECLARE c record;
+BEGIN
+  -- Gone from the source: this is what makes every full-width read fail.
+  FOR c IN SELECT a.attname FROM pg_attribute a
+           JOIN pg_class k ON k.oid=a.attrelid JOIN pg_namespace n ON n.oid=k.relnamespace
+           WHERE n.nspname='src' AND k.relname='$t' AND a.attnum>0 AND NOT a.attisdropped
+             AND NOT EXISTS (SELECT 1 FROM pg_attribute a2
+               JOIN pg_class k2 ON k2.oid=a2.attrelid JOIN pg_namespace n2 ON n2.oid=k2.relnamespace
+               WHERE n2.nspname='src_probe' AND k2.relname='$t'
+                 AND a2.attname=a.attname AND a2.attnum>0 AND NOT a2.attisdropped)
+  LOOP
+    EXECUTE format('ALTER FOREIGN TABLE src.%I DROP COLUMN %I', '$t', c.attname);
+    RAISE NOTICE 'src.$t: dropped stale column %', c.attname;
+  END LOOP;
+  -- New on the source.
+  FOR c IN SELECT a.attname, format_type(a.atttypid,a.atttypmod) ft FROM pg_attribute a
+           JOIN pg_class k ON k.oid=a.attrelid JOIN pg_namespace n ON n.oid=k.relnamespace
+           WHERE n.nspname='src_probe' AND k.relname='$t' AND a.attnum>0 AND NOT a.attisdropped
+             AND NOT EXISTS (SELECT 1 FROM pg_attribute a2
+               JOIN pg_class k2 ON k2.oid=a2.attrelid JOIN pg_namespace n2 ON n2.oid=k2.relnamespace
+               WHERE n2.nspname='src' AND k2.relname='$t'
+                 AND a2.attname=a.attname AND a2.attnum>0 AND NOT a2.attisdropped)
+  LOOP
+    EXECUTE format('ALTER FOREIGN TABLE src.%I ADD COLUMN %I %s', '$t', c.attname, c.ft);
+    RAISE NOTICE 'src.$t: added column %', c.attname;
+  END LOOP;
+END \$\$;
+DROP SCHEMA IF EXISTS src_probe CASCADE;
+DRIFT
     $PG >>"$LOG" 2>&1 <<ALIGN || log "  WARN: column align for $t failed"
 DO \$\$
 DECLARE r record;
