@@ -43,13 +43,14 @@ function SubscoreBar({ label, value }: { label: string; value: number | null }) 
       />
     );
   }
-  const tone = value >= 75 ? 'success' : value >= 50 ? 'warn' : 'danger';
+  // Orange -> light blue -> blue, not red/amber/green. Five bars side by side
+  // in traffic-light colours are the one pairing roughly 8% of men cannot
+  // separate, and here they carry the entire column's meaning. This ramp keeps
+  // the three steps and stays readable to everyone.
+  const fill = value >= 75 ? 'bg-blue-700' : value >= 50 ? 'bg-blue-300' : 'bg-amber-500';
   return (
     <div className="h-1.5 flex-1 rounded-full bg-ink-150 overflow-hidden" title={`${label}: ${value}%`}>
-      <div
-        className={`h-full rounded-full ${TONE_FILL[tone]}`}
-        style={{ width: `${Math.max(value, 2)}%` }}
-      />
+      <div className={`h-full rounded-full ${fill}`} style={{ width: `${Math.max(value, 2)}%` }} />
     </div>
   );
 }
@@ -71,7 +72,7 @@ export function ReadinessTable({
   if (!rows.length) {
     return (
       <p className="px-5 py-10 text-sm text-ink-500 text-center">
-        No cities scored for this category yet — supply has to exist before readiness means anything.
+        No cities scored for this segment yet — supply has to exist before readiness means anything.
       </p>
     );
   }

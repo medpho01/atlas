@@ -475,6 +475,12 @@ fi
 log "Phase 4.5 · readiness"
 if $PG -t -A -c "SELECT to_regclass('analytics.mv_city_readiness')" | grep -q .; then
   $PG -c "SELECT atlas.seed_city_bands();" >/dev/null 2>&1 || log "  WARN city bands failed"
+  # Segment-level readiness. Guarded separately: a database that has not
+  # applied sql/init/13a_readiness_segment.sql must still finish its refresh.
+  if $PG -t -A -c "SELECT to_regclass('analytics.mv_city_readiness_segment')" | grep -q .; then
+    $PG -c "REFRESH MATERIALIZED VIEW analytics.mv_city_readiness_segment;" >/dev/null 2>&1 \
+      || log "  WARN segment readiness refresh failed"
+  fi
   $PG -c "SELECT atlas.seed_integration_from_signals();" >/dev/null 2>&1 || log "  WARN integration seed failed"
   $PG -c "REFRESH MATERIALIZED VIEW analytics.mv_city_readiness;" >/dev/null 2>&1 \
     && log "  readiness recomputed" || log "  WARN readiness refresh failed"

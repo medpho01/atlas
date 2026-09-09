@@ -7,6 +7,7 @@
  */
 
 import { CATEGORY_LABEL, type Category } from './categories';
+import { SEGMENT_SUPPLY_NOUN } from './segmentLabels';
 
 export type ReadinessRow = {
   city: string;
@@ -76,6 +77,13 @@ export const readinessBand = (score: number) =>
  */
 export type Gap = { kind: string; detail: string; severity: 'high' | 'medium' | 'low' };
 
+/** The noun for this row's supply, whether it is keyed by category or segment. */
+function supplyNoun(key: string): string {
+  return (SEGMENT_SUPPLY_NOUN as Record<string, string>)[key]
+      ?? (CATEGORY_LABEL as Record<string, string>)[key]?.toLowerCase()
+      ?? 'provider';
+}
+
 export function gapsFor(r: ReadinessRow): Gap[] {
   const gaps: Gap[] = [];
   const num = (v: string | null) => (v == null ? null : Number(v));
@@ -84,7 +92,10 @@ export function gapsFor(r: ReadinessRow): Gap[] {
   if (cov != null && r.total_pincodes && cov < 0.8) {
     gaps.push({
       kind: 'Coverage',
-      detail: `${r.total_pincodes - r.pincodes_covered} of ${r.total_pincodes} pincodes have no ${CATEGORY_LABEL[r.category].toLowerCase()} supply`,
+      // r.category carries a SEGMENT on the segment view and a category on the
+      // category view, so the noun is looked up in both. Falling back rather
+      // than indexing blind: an unknown key used to crash the whole page here.
+      detail: `${r.total_pincodes - r.pincodes_covered} of ${r.total_pincodes} pincodes have no ${supplyNoun(r.category)} supply`,
       severity: cov < 0.4 ? 'high' : 'medium',
     });
   }
