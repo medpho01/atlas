@@ -59,6 +59,11 @@ CREATE TABLE IF NOT EXISTS atlas.crm_providers (
 );
 CREATE INDEX IF NOT EXISTS idx_crm_providers_name ON atlas.crm_providers (lower(name));
 CREATE INDEX IF NOT EXISTS idx_crm_providers_city ON atlas.crm_providers (lower(city));
+-- One CRM row per source lab. Without this, atlas.close_commitment_to_crm()'s
+-- ON CONFLICT had nothing to conflict on and a lab fulfilling several
+-- commitments got a card each.
+CREATE UNIQUE INDEX IF NOT EXISTS uq_crm_providers_source_lab
+  ON atlas.crm_providers (source_lab_id) WHERE source_lab_id IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS atlas.crm_thread_providers (
   id           serial PRIMARY KEY,

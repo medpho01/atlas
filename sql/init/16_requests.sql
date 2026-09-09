@@ -1103,7 +1103,14 @@ RETURNS int LANGUAGE plpgsql AS $$
 DECLARE n int;
 BEGIN
   WITH allocated AS (
-    SELECT cm.id, cm.allocated_lab_id, cm.attributed_to, cm.request_id,
+    -- One row per LAB, not per commitment. atlas.commitment has a row per
+    -- REQUEST, so a lab that fulfilled three of them was inserted three times
+    -- in a single statement — and neither the NOT EXISTS below nor ON CONFLICT
+    -- could see it, because a statement cannot observe its own inserts and
+    -- nothing was unique. Both are now closed: this, and the partial unique
+    -- index on source_lab_id.
+    SELECT DISTINCT ON (cm.allocated_lab_id)
+           cm.id, cm.allocated_lab_id, cm.attributed_to, cm.request_id,
            l."labName", l.city, l.state, l.pincode
     FROM atlas.commitment cm
     JOIN src_local."Lab" l ON l.id = cm.allocated_lab_id
@@ -1113,6 +1120,8 @@ BEGIN
       AND NOT EXISTS (
         SELECT 1 FROM atlas.crm_providers cp WHERE cp.source_lab_id = cm.allocated_lab_id
       )
+    -- The earliest request is the one that actually earned the relationship.
+    ORDER BY cm.allocated_lab_id, cm.request_id
   ),
   ins AS (
     INSERT INTO atlas.crm_providers
@@ -1121,7 +1130,7 @@ BEGIN
            'commitment', a.allocated_lab_id, a.attributed_to,
            'Onboarded to fulfil request #' || a.request_id
     FROM allocated a
-    ON CONFLICT DO NOTHING
+    ON CONFLICT (source_lab_id) WHERE source_lab_id IS NOT NULL DO NOTHING
     RETURNING source_lab_id
   )
   SELECT COUNT(*)::int INTO n FROM ins;

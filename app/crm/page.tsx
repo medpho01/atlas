@@ -72,46 +72,48 @@ export default async function MyQueuePage({
 
   return (
     <main className="mx-auto max-w-7xl px-6 py-8">
-      <div className="flex items-center gap-2 mb-1">
-        <KanbanSquare className="w-5 h-5 text-brand-600" strokeWidth={2.25} />
-        <h1 className="text-2xl font-bold text-ink-900">Network CRM</h1>
-      </div>
-      <p className="text-sm text-ink-600 mb-5 max-w-3xl">
-        Everything assigned to you across every thread, longest-untouched first. Providers get
-        assigned per campaign, so anything sitting in a thread you don&rsquo;t open often is easy to
-        lose — this is the same work, sorted by what&rsquo;s been waiting.
-      </p>
+      {/* Title, tabs and the two filter rows stay put while the queue scrolls —
+          the filters are what you change to read the numbers below them, and
+          scrolling back up to reach them is the whole friction. */}
+      <div className="sticky top-0 z-30 -mx-6 px-6 pt-1 pb-3 bg-ink-50/95 backdrop-blur-sm border-b border-ink-150">
+        <div className="flex items-center gap-2 mb-3">
+          <KanbanSquare className="w-5 h-5 text-brand-600" strokeWidth={2.25} />
+          <h1 className="text-2xl font-bold text-ink-900">Network CRM</h1>
+        </div>
 
-      <CrmTabs active="/crm" />
+        <CrmTabs active="/crm" />
 
-      <div className="flex flex-wrap items-center gap-1.5 mb-4">
-        <span className="text-[11px] uppercase tracking-wide text-ink-400 mr-1">Showing</span>
-        <ChipButton href={href({ who: undefined })} active={!unassigned && viewingId === me.id}>
-          Mine
-        </ChipButton>
-        <ChipButton href={href({ who: 'unassigned' })} active={unassigned}>
-          ⚠ Unassigned
-        </ChipButton>
-        {team.filter((t) => t.id !== me.id).map((t) => (
-          <ChipButton key={t.id} href={href({ who: String(t.id) })} active={!unassigned && viewingId === t.id}>
-            {t.name}
+        <div className="flex flex-wrap items-center gap-1.5 mb-2">
+          <span className="text-[11px] uppercase tracking-wide text-ink-400 mr-1">Showing</span>
+          <ChipButton href={href({ who: undefined })} active={!unassigned && viewingId === me.id}>
+            Mine
           </ChipButton>
-        ))}
-      </div>
-
-      {threads.length > 1 && (
-        <div className="flex flex-wrap items-center gap-1.5 mb-4">
-          <span className="text-[11px] uppercase tracking-wide text-ink-400 mr-1">Thread</span>
-          <ChipButton href={href({ thread: undefined })} active={!threadFilter}>
-            All {threads.length}
+          <ChipButton href={href({ who: 'unassigned' })} active={unassigned}>
+            ⚠ Unassigned
           </ChipButton>
-          {threads.map((t) => (
-            <ChipButton key={t.id} href={href({ thread: String(t.id) })} active={threadFilter === t.id}>
-              {t.name} · {t.n}
+          {team.filter((t) => t.id !== me.id).map((t) => (
+            <ChipButton key={t.id} href={href({ who: String(t.id) })} active={!unassigned && viewingId === t.id}>
+              {t.name}
             </ChipButton>
           ))}
         </div>
-      )}
+
+        {threads.length > 1 && (
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="text-[11px] uppercase tracking-wide text-ink-400 mr-1">Thread</span>
+            <ChipButton href={href({ thread: undefined })} active={!threadFilter}>
+              All {threads.length}
+            </ChipButton>
+            {threads.map((t) => (
+              <ChipButton key={t.id} href={href({ thread: String(t.id) })} active={threadFilter === t.id}>
+                {t.name} · {t.n}
+              </ChipButton>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div className="mt-4" />
 
       <QueueFunnel funnel={funnel} staleCount={stale.length} staleAfter={staleAfter} />
 

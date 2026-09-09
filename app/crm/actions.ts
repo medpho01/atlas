@@ -251,7 +251,8 @@ export type DupStatus = 'new' | 'in_thread' | 'in_directory' | 'in_file';
  */
 export async function checkProviderDuplicates(input: {
   threadId: number; names: string[];
-}): Promise<{ ok: boolean; error?: string; statuses?: Record<string, DupStatus> }> {
+}): Promise<{ ok: boolean; error?: string; statuses?: Record<string, DupStatus>;
+              similar?: Record<string, string[]> }> {
   const { err } = await writer();
   if (err) return { ok: false, error: err };
 
@@ -286,7 +287,42 @@ export async function checkProviderDuplicates(input: {
     const k = crmNameKey(n);
     statuses[n] = thread.has(k) ? 'in_thread' : directory.has(k) ? 'in_directory' : 'new';
   }
-  return { ok: true, statuses };
+  // Near-duplicates. An exact key cannot catch "RXDX Labs" vs "RxDx" or
+  // "Ekaiva Diagnostics" vs "Ekiava", which is how the same provider ends up
+  // on the board twice. Compared on the core name — the descriptor words
+  // stripped — because on the full string a shared "Hospitals" outweighs the
+  // part that actually names the organisation.
+  const similar: Record<string, string[]> = {};
+  const unresolved = names.filter((n) => statuses[n] === 'new');
+  if (unresolved.length) {
+    const near = await query<{ input: string; name: string }>(
+      `SELECT i.input, p.name
+       FROM unnest($1::text[]) AS i(input)
+       JOIN atlas.crm_providers p
+         ON atlas.crm_core_name(p.name) <> ''
+        AND atlas.crm_core_name(i.input) <> ''
+        -- Anything matching on the full key is already reported above.
+        AND atlas.crm_name_key(p.name) <> atlas.crm_name_key(i.input)
+        AND (
+          -- Same organisation, different descriptor: "RxDx" / "RXDX Labs".
+          atlas.crm_core_name(p.name) = atlas.crm_core_name(i.input)
+          OR similarity(atlas.crm_core_name(p.name), atlas.crm_core_name(i.input)) >= 0.6
+          -- A typo or transposition: "Ekiava" / "Ekaiva". Six characters is
+          -- the floor — at five, "kanva" and "ekaiva" are two edits apart and
+          -- the warning starts naming unrelated providers.
+          OR (length(atlas.crm_core_name(i.input)) >= 6
+              AND levenshtein(atlas.crm_core_name(p.name), atlas.crm_core_name(i.input)) <= 2)
+        )
+       ORDER BY i.input,
+                levenshtein(atlas.crm_core_name(p.name), atlas.crm_core_name(i.input)),
+                p.name
+       LIMIT 40`,
+      [unresolved],
+    );
+    for (const r of near) (similar[r.input] ??= []).push(r.name);
+  }
+
+  return { ok: true, statuses, similar };
 }
 
 export async function bulkCreateProviders(input: {

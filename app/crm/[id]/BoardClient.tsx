@@ -339,16 +339,18 @@ function AddProviderModal({ threadId, defaultKind, onClose }: {
   });
   const [err, setErr] = useState<string | null>(null);
   const [dup, setDup] = useState<DupStatus | null>(null);
+  const [similar, setSimilar] = useState<string[]>([]);
   const [pending, startTransition] = useTransition();
 
   // Checked as the name is typed, so a duplicate is visible before the form is
   // filled in rather than after it's submitted.
   const checkName = (name: string) => {
-    setDup(null);
+    setDup(null); setSimilar([]);
     if (!name.trim()) return;
     startTransition(async () => {
       const res = await checkProviderDuplicates({ threadId, names: [name.trim()] });
       setDup(res.statuses?.[name.trim()] ?? null);
+      setSimilar(res.similar?.[name.trim()] ?? []);
     });
   };
 
@@ -401,6 +403,21 @@ function AddProviderModal({ threadId, defaultKind, onClose }: {
             <b>{form.name.trim()}</b> already exists in the directory from other work. Adding it here
             attaches that record rather than creating a second one.
           </p>
+        )}
+        {dup === 'new' && similar.length > 0 && (
+          <div className="mt-2 rounded-md border border-warn-200 bg-warn-50 px-3 py-2">
+            <p className="text-sm text-warn-700">
+              Already on the board under {similar.length === 1 ? 'a similar name' : 'similar names'}?
+            </p>
+            <ul className="mt-1 space-y-0.5">
+              {similar.map((nm) => (
+                <li key={nm} className="text-sm font-medium text-ink-900">{nm}</li>
+              ))}
+            </ul>
+            <p className="text-[11px] text-warn-700 mt-1.5">
+              Add it anyway only if this is genuinely a different provider.
+            </p>
+          </div>
         )}
         {err && <p className="text-sm text-danger-500 mt-2">{err}</p>}
         <div className="flex gap-2 mt-3">
