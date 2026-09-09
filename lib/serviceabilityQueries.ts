@@ -162,16 +162,41 @@ export type PanelSummary = {
   network_pincodes: number;
   remaining_pincodes: number;
   remaining_with_demand: number;
+  /** Of the panel's own pincodes, how many have ever been ordered from. */
+  panel_with_demand: number;
 };
 
-export async function getPanelGap(labIds: number[], limit = 5000) {
+/**
+ * Which side of the panel to report on.
+ *   exclude — everything the rest of the network reaches that the panel does not
+ *   include — what the panel itself reaches
+ * Same sets either way; only which one is listed changes.
+ */
+export type PanelMode = 'include' | 'exclude';
+
+export async function getPanelGap(
+  labIds: number[],
+  mode: PanelMode = 'exclude',
+  limit = 5000,
+) {
   const ids = Array.from(new Set(labIds.filter((n) => Number.isFinite(n)))).slice(0, 200);
-  if (!ids.length) {
-    return {
-      summary: { panel_pincodes: 0, network_pincodes: 0, remaining_pincodes: 0, remaining_with_demand: 0 },
-      rows: [] as PanelGapRow[],
-    };
-  }
+  const empty: PanelSummary = {
+    panel_pincodes: 0, network_pincodes: 0, remaining_pincodes: 0,
+    remaining_with_demand: 0, panel_with_demand: 0,
+  };
+  if (!ids.length) return { summary: empty, rows: [] as PanelGapRow[], mode };
+
+  // The row set is the only thing that differs: the panel's own pincodes, or
+  // everything else the network reaches. The labs named against each row follow
+  // suit — in include mode only the selected labs are worth naming, since they
+  // are the ones being asked about.
+  const rowScope = mode === 'include'
+    ? `panel AS (SELECT DISTINCT pincode FROM analytics.mv_lab_pincode_home WHERE lab_id = ANY($1)),
+       scope AS (SELECT pincode FROM panel)`
+    : `panel AS (SELECT DISTINCT pincode FROM analytics.mv_lab_pincode_home WHERE lab_id = ANY($1)),
+       scope AS (SELECT DISTINCT pincode FROM analytics.mv_lab_pincode_home
+                 EXCEPT SELECT pincode FROM panel)`;
+  const labFilter = mode === 'include' ? 'AND lph.lab_id = ANY($1)' : '';
 
   const [summary, rows] = await Promise.all([
     queryOne<PanelSummary>(`
@@ -186,42 +211,36 @@ export async function getPanelGap(labIds: number[], limit = 5000) {
         (SELECT COUNT(*) FROM remaining)::int  AS remaining_pincodes,
         (SELECT COUNT(*) FROM remaining r
            JOIN analytics.mv_pincode_summary ps ON ps.pincode = r.pincode
-          WHERE COALESCE(ps.orders_all_time, 0) > 0)::int AS remaining_with_demand
+          WHERE COALESCE(ps.orders_all_time, 0) > 0)::int AS remaining_with_demand,
+        (SELECT COUNT(*) FROM panel p
+           JOIN analytics.mv_pincode_summary ps ON ps.pincode = p.pincode
+          WHERE COALESCE(ps.orders_all_time, 0) > 0)::int AS panel_with_demand
     `, [ids]),
 
     query<PanelGapRow>(`
-      WITH panel AS (
-        SELECT DISTINCT pincode FROM analytics.mv_lab_pincode_home WHERE lab_id = ANY($1)
-      ),
-      remaining AS (
-        SELECT DISTINCT pincode FROM analytics.mv_lab_pincode_home
-        EXCEPT SELECT pincode FROM panel
-      )
-      SELECT r.pincode,
+      WITH ${rowScope}
+      SELECT s.pincode,
              pd.city, pd.state,
              ARRAY_REMOVE(ARRAY_AGG(DISTINCT l."labName" ORDER BY l."labName"), NULL) AS labs,
              COUNT(DISTINCT lph.lab_id)::int AS lab_count,
              MAX(ps.orders_all_time) AS orders_all_time
-      FROM remaining r
-      JOIN analytics.mv_lab_pincode_home lph ON lph.pincode = r.pincode
+      FROM scope s
+      JOIN analytics.mv_lab_pincode_home lph ON lph.pincode = s.pincode ${labFilter}
       JOIN src_local."Lab" l ON l.id = lph.lab_id
       LEFT JOIN LATERAL (
         SELECT MIN(city) AS city, MIN(state) AS state
-        FROM atlas.pincode_directory WHERE pincode = r.pincode
+        FROM atlas.pincode_directory WHERE pincode = s.pincode
       ) pd ON true
-      LEFT JOIN analytics.mv_pincode_summary ps ON ps.pincode = r.pincode
-      GROUP BY r.pincode, pd.city, pd.state
-      -- Demand first: a gap nobody has ever ordered from is not the one to
-      -- fix first.
-      ORDER BY MAX(ps.orders_all_time) DESC NULLS LAST, r.pincode
+      LEFT JOIN analytics.mv_pincode_summary ps ON ps.pincode = s.pincode
+      GROUP BY s.pincode, pd.city, pd.state
+      -- Demand first, either way: the pincodes people actually order from are
+      -- the ones worth reading, whether you are defending them or chasing them.
+      ORDER BY MAX(ps.orders_all_time) DESC NULLS LAST, s.pincode
       LIMIT $2
     `, [ids, limit]),
   ]);
 
-  return {
-    summary: summary ?? { panel_pincodes: 0, network_pincodes: 0, remaining_pincodes: 0, remaining_with_demand: 0 },
-    rows,
-  };
+  return { summary: summary ?? empty, rows, mode };
 }
 
 /** Labs that actually have home-collection coverage, for the picker. */

@@ -15,7 +15,9 @@ type Row = {
 type Summary = {
   panel_pincodes: number; network_pincodes: number;
   remaining_pincodes: number; remaining_with_demand: number;
+  panel_with_demand: number;
 };
+type Mode = 'include' | 'exclude';
 
 const n = (v: number | null | undefined) => (v ?? 0).toLocaleString('en-IN');
 
@@ -31,6 +33,10 @@ export function LabPanelGap({ labs }: { labs: Lab[] }) {
   const [picked, setPicked] = useState<number[]>([]);
   const [q, setQ] = useState('');
   const [summary, setSummary] = useState<Summary | null>(null);
+  const [mode, setMode] = useState<Mode>('exclude');
+  // What the shown numbers were computed with, so the labels never describe a
+  // toggle position the results do not belong to.
+  const [ranMode, setRanMode] = useState<Mode>('exclude');
   const [rows, setRows] = useState<Row[]>([]);
   const [err, setErr] = useState<string | null>(null);
   const [pending, start] = useTransition();
@@ -57,11 +63,12 @@ export function LabPanelGap({ labs }: { labs: Lab[] }) {
       City: r.city ?? '',
       State: r.state ?? '',
       'Orders all time': r.orders_all_time ?? 0,
-      'Labs covering': r.lab_count,
+      [ranMode === 'include' ? 'Selected labs covering' : 'Labs covering']: r.lab_count,
       Labs: r.labs.join('; '),
     }));
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(sheet), 'Not covered by panel');
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(sheet),
+      ranMode === 'include' ? 'Covered by panel' : 'Not covered by panel');
     XLSX.utils.book_append_sheet(
       wb,
       XLSX.utils.json_to_sheet(
@@ -70,7 +77,8 @@ export function LabPanelGap({ labs }: { labs: Lab[] }) {
       ),
       'Panel',
     );
-    XLSX.writeFile(wb, 'atlas-lab-panel-gap.xlsx');
+    XLSX.writeFile(wb, ranMode === 'include'
+      ? 'atlas-lab-panel-coverage.xlsx' : 'atlas-lab-panel-gap.xlsx');
   };
 
   return (
@@ -80,8 +88,10 @@ export function LabPanelGap({ labs }: { labs: Lab[] }) {
           <div>
             <div className="text-sm font-medium text-ink-900">Pick the labs in your panel</div>
             <p className="text-xs text-ink-500 mt-0.5 max-w-2xl">
-              Coverage is the union — a pincode counts if any one of them reaches it. The result
-              is everything the rest of the network reaches that this panel does not.
+              Coverage is the union — a pincode counts if any one of them reaches it.{' '}
+              {mode === 'include'
+                ? 'Inclusion returns every pincode this panel serves.'
+                : 'Exclusion returns everything the rest of the network reaches that this panel does not.'}
             </p>
           </div>
 
@@ -166,14 +176,34 @@ export function LabPanelGap({ labs }: { labs: Lab[] }) {
                 </div>
               )}
 
+              <div className="flex rounded-md border border-ink-200 overflow-hidden mb-2">
+                {([
+                  { k: 'include' as Mode, label: 'Inclusion', hint: 'what these labs cover' },
+                  { k: 'exclude' as Mode, label: 'Exclusion', hint: 'what they leave to others' },
+                ]).map((m) => (
+                  <button
+                    key={m.k}
+                    type="button"
+                    onClick={() => setMode(m.k)}
+                    title={m.hint}
+                    className={`flex-1 px-2 py-1.5 text-xs font-medium transition ${
+                      mode === m.k
+                        ? 'bg-brand-600 text-white'
+                        : 'bg-surface text-ink-600 hover:bg-ink-100'}`}
+                  >
+                    {m.label}
+                  </button>
+                ))}
+              </div>
+
               <button
                 type="button"
                 disabled={pending || !picked.length}
                 onClick={() => start(async () => {
                   setErr(null);
-                  const r = await runPanelGap(picked);
+                  const r = await runPanelGap(picked, mode);
                   if (!r.ok) { setErr(r.error); setRows([]); setSummary(null); return; }
-                  setSummary(r.summary); setRows(r.rows);
+                  setSummary(r.summary); setRows(r.rows); setRanMode(mode);
                 })}
                 className="mt-3 w-full inline-flex items-center justify-center gap-1.5 rounded-md
                            bg-brand-600 text-white px-3 py-1.5 text-sm font-medium
@@ -195,31 +225,53 @@ export function LabPanelGap({ labs }: { labs: Lab[] }) {
             value={n(summary.panel_pincodes)}
             sub="union of the labs you picked"
             icon={<Building2 className="w-4 h-4" />}
+            tone={ranMode === 'include' ? 'good' : 'default'}
           />
           <KpiTile
             label="Network reach"
             value={n(summary.network_pincodes)}
             sub="every lab in the network"
           />
-          <KpiTile
-            label="Panel misses"
-            value={n(summary.remaining_pincodes)}
-            sub="reachable, not by this panel"
-            tone="warn"
-          />
-          <KpiTile
-            label="Missed with demand"
-            value={n(summary.remaining_with_demand)}
-            sub="orders already placed here"
-            tone="bad"
-          />
+          {ranMode === 'include' ? (
+            <>
+              <KpiTile
+                label="Share of network"
+                value={summary.network_pincodes
+                  ? Math.round(100 * summary.panel_pincodes / summary.network_pincodes) + '%'
+                  : '—'}
+                sub="of everywhere the network reaches"
+              />
+              <KpiTile
+                label="Covered with demand"
+                value={n(summary.panel_with_demand)}
+                sub="orders already placed here"
+                tone="good"
+              />
+            </>
+          ) : (
+            <>
+              <KpiTile
+                label="Panel misses"
+                value={n(summary.remaining_pincodes)}
+                sub="reachable, not by this panel"
+                tone="warn"
+              />
+              <KpiTile
+                label="Missed with demand"
+                value={n(summary.remaining_with_demand)}
+                sub="orders already placed here"
+                tone="bad"
+              />
+            </>
+          )}
         </div>
       )}
 
-      {summary && summary.remaining_with_demand > 0 && (
+      {summary && (
         <p className="text-xs text-ink-500 -mt-1">
-          The last tile is the one worth working: pincodes this panel misses where orders have
-          actually been placed. The rest are reachable but untested.
+          {ranMode === 'include'
+            ? 'These are the pincodes the selected labs already reach — the coverage you would keep if the rest of the network went away.'
+            : 'The last tile is the one worth working: pincodes this panel misses where orders have actually been placed. The rest are reachable but untested.'}
         </p>
       )}
 
@@ -228,7 +280,8 @@ export function LabPanelGap({ labs }: { labs: Lab[] }) {
           <CardBody className="pt-4">
             <div className="flex items-center justify-between mb-3">
               <div className="text-sm font-medium text-ink-900">
-                {n(rows.length)} pincode{rows.length === 1 ? '' : 's'} the panel misses
+                {n(rows.length)} pincode{rows.length === 1 ? '' : 's'}{' '}
+                {ranMode === 'include' ? 'this panel covers' : 'the panel misses'}
                 <span className="ml-2 text-[11px] font-normal text-ink-500">
                   most-ordered first{rows.length >= 5000 ? ' · capped at 5,000' : ''}
                 </span>
