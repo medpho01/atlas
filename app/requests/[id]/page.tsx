@@ -205,7 +205,17 @@ export default async function RequestDetail({ params }: { params: { id: string }
             <Card>
               <CardHeader
                 title="Labs found on the open web"
-                subtitle="Unverified search results — leads to call, not network records." />
+                subtitle="Unverified search results — leads to call, not network records."
+                actions={
+                  leads.length > 1 && (
+                    <Link
+                      href={`/discovery?area=${encodeURIComponent(r.pincode)}`}
+                      className="text-xs text-brand-600 hover:text-brand-700 font-medium"
+                    >
+                      Rank these →
+                    </Link>
+                  )
+                } />
               <CardBody className="pt-0">
                 <div className="mb-3">
                   <FindLabs pincode={r.pincode} city={r.city} state={r.state_name}

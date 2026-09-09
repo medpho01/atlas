@@ -6,7 +6,7 @@ import { useEffect, useState } from 'react';
 import {
   LayoutDashboard, MapPin, Crosshair, Scale, TrendingUp, Map, FileSearch,
   BookOpenText, Users, HeartPulse, Activity, Briefcase, IndianRupee,
-  KanbanSquare, UserCog, PanelLeftClose, PanelLeft, X, type LucideIcon,
+  KanbanSquare, UserCog, PanelLeftClose, PanelLeft, X, ListOrdered, type LucideIcon,
 } from 'lucide-react';
 import type { Role } from '@/lib/access';
 import { navFor, isActive } from '@/lib/navigation';
@@ -23,6 +23,7 @@ const ICONS: Record<string, LucideIcon> = {
   '/phlebos': Users,
   '/nurses': HeartPulse,
   '/quality': Activity,
+  '/discovery': ListOrdered,
   '/accounts': Briefcase,
   '/pricing': IndianRupee,
   '/crm': KanbanSquare,
