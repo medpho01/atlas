@@ -11,6 +11,13 @@
 -- Rough size: ~1,500 CV labs × ~150 nearby pincodes each ≈ 225K rows, ~40 MB.
 -- ============================================================================
 
+-- CASCADE takes three views with it, and this file does not put them back:
+--   analytics.mv_public_network_pincode   (sql/init/17_public_network.sql)
+--   analytics.mv_public_network_summary   (sql/init/17_public_network.sql)
+--   analytics.mv_city_readiness_segment   (sql/init/13a_readiness_segment.sql)
+-- Run those two files after this one, in that order, or the network and
+-- readiness pages lose their data silently — an absent view is not an error
+-- until something reads it.
 DROP MATERIALIZED VIEW IF EXISTS analytics.mv_pincode_cv_reach CASCADE;
 
 CREATE MATERIALIZED VIEW analytics.mv_pincode_cv_reach AS
@@ -32,6 +39,13 @@ WITH lab_geo AS (
     AND 'CENTER_VISIT' = ANY(pu.modalities)
     AND g.latitude IS NOT NULL
     AND g.longitude IS NOT NULL
+    -- The centre's own position must be real, not a prefix guess.
+    --
+    -- The covered pincode has always been held to this, but the centre was
+    -- not: any centre whose pincode had coordinates at all was accepted, so a
+    -- dozen of them were drawing their catchment from a made-up origin. A
+    -- circle is only as good as its centre.
+    AND g.geo_source = 'exact'
 )
 SELECT
   lg.entity_id,
@@ -54,10 +68,17 @@ SELECT
   ) AS distance_km
 FROM lab_geo lg
 JOIN analytics.mv_pincode_geo ap
-  -- Bounding-box prefilter: ~20 km in degrees ≈ 0.18 lat / 0.18 lng (varies by
-  -- latitude but close enough). Speeds the join up by ~50x vs naive cross-join.
+  -- Bounding-box prefilter, before the trigonometry. Speeds the join up by
+  -- ~50x against a naive cross-join.
+  --
+  -- Latitude is easy: 0.18 degrees is 20km anywhere. Longitude is not — a
+  -- degree of it shrinks with the cosine of the latitude, so a flat 0.18 was
+  -- only 17.6km at Delhi and the box quietly clipped the corners of its own
+  -- 20km claim. Harmless while we filter at 10km, wrong the moment anyone
+  -- raises the radius. Scaled properly now.
   ON ap.latitude  BETWEEN lg.lab_lat - 0.18 AND lg.lab_lat + 0.18
- AND ap.longitude BETWEEN lg.lab_lng - 0.18 AND lg.lab_lng + 0.18
+ AND ap.longitude BETWEEN lg.lab_lng - (20.0 / (111.32 * GREATEST(cos(radians(lg.lab_lat)), 0.1)))
+                      AND lg.lab_lng + (20.0 / (111.32 * GREATEST(cos(radians(lg.lab_lat)), 0.1)))
  AND ap.latitude IS NOT NULL
 WHERE 6371 * acos(
   GREATEST(-1, LEAST(1,
