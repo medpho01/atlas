@@ -10,27 +10,22 @@
 -- None of it depends on the request. It is computed here, nightly, and the
 -- page reads two tiny relations instead.
 --
--- Radii are baked in rather than read from env: this is the number the public
--- page states, and it should not be able to drift from what was measured.
+-- One radius, 5 km, everywhere. It was 5 in metros and 10 elsewhere, on the
+-- reasoning that roads are quicker outside the metros — but 10 km still
+-- credited a centre with pincodes nobody travels from for a blood test, and it
+-- was what pushed reported centre-visit reach above home sample. A single
+-- honest number beats a tiered one nobody can check.
+--
+-- Baked in rather than read from env: this is the number the public page
+-- states, and it should not be able to drift from what was measured.
 -- ---------------------------------------------------------------------------
 
 DROP MATERIALIZED VIEW IF EXISTS analytics.mv_public_network_pincode CASCADE;
 CREATE MATERIALIZED VIEW analytics.mv_public_network_pincode AS
-WITH centre_radius AS (
-  -- One row per centre — a couple of thousand — so the tier lookup happens
-  -- here rather than once per reach row.
-  SELECT p.entity_id,
-         (CASE WHEN ct.tier = 'Tier 1' THEN 5::numeric ELSE 10::numeric END) AS radius
-  FROM analytics.mv_provider_unified p
-  LEFT JOIN atlas.city_tier_canon ct ON ct.city_key = atlas.city_key(p.city)
-  WHERE p.kind IN ('LAB','HOSPITAL')
-),
-cv AS (
+WITH cv AS (
   SELECT r.covered_pincode, r.entity_id, r.kind
   FROM analytics.mv_pincode_cv_reach r
-  JOIN centre_radius cr ON cr.entity_id = r.entity_id
-  WHERE r.distance_km <= 10::numeric
-    AND r.distance_km <= cr.radius
+  WHERE r.distance_km <= 5::numeric
 ),
 cv_count AS (
   SELECT covered_pincode AS pincode,
@@ -66,19 +61,10 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_public_network_pincode
 -- The headline numbers. A single row, so the page never aggregates at all.
 DROP MATERIALIZED VIEW IF EXISTS analytics.mv_public_network_summary CASCADE;
 CREATE MATERIALIZED VIEW analytics.mv_public_network_summary AS
-WITH centre_radius AS (
-  SELECT p.entity_id,
-         (CASE WHEN ct.tier = 'Tier 1' THEN 5::numeric ELSE 10::numeric END) AS radius
-  FROM analytics.mv_provider_unified p
-  LEFT JOIN atlas.city_tier_canon ct ON ct.city_key = atlas.city_key(p.city)
-  WHERE p.kind IN ('LAB','HOSPITAL')
-),
-cv AS (
+WITH cv AS (
   SELECT DISTINCT r.entity_id, r.kind, r.covered_pincode
   FROM analytics.mv_pincode_cv_reach r
-  JOIN centre_radius cr ON cr.entity_id = r.entity_id
-  WHERE r.distance_km <= 10::numeric
-    AND r.distance_km <= cr.radius
+  WHERE r.distance_km <= 5::numeric
 ),
 hs AS (
   SELECT DISTINCT pincode FROM analytics.mv_pincode_coverage

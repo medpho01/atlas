@@ -15,27 +15,15 @@ import { query, queryOne } from './db';
  * the MV.
  */
 
-// Centre-visit catchment is a travel-time judgement, not a distance one. In a
-// metro, 10 km of traffic is not a trip anyone makes for a blood test, so the
-// radius tightens to 5 km; outside the metros roads are quicker and 10 km is
-// a normal catchment. Tier comes from atlas.city_tier, which Atlas already
-// classifies — 'Tier 1' is the metro set. Anything unclassified is treated as
-// non-metro, which is the honest default: we would rather understate a metro's
-// reach than claim a lab serves somewhere nobody would travel from.
-const METRO_RADIUS_KM     = Number(process.env.CV_METRO_RADIUS_KM ?? 5);
-const NON_METRO_RADIUS_KM = Number(process.env.CV_REACH_RADIUS_KM ?? 10);
+// One catchment radius, 5 km, everywhere.
+//
+// It used to be 5 km in metros and 10 elsewhere. The wider number credited a
+// centre with pincodes nobody would travel from for a blood test, and it was
+// what pushed reported centre-visit reach above home sample — which is a
+// modelling artefact, not a fact about the network.
+const CV_RADIUS_KM = Number(process.env.CV_REACH_RADIUS_KM ?? 5);
 
-/**
- * Centre-visit reach with the tier-aware radius applied.
- *
- * Tier is taken from the CENTRE's city rather than the covered pincode's: the
- * MV carries it, and a pincode within a few km of a metro lab is part of that
- * metro's travel problem whether or not its own city string says so.
- *
- * $1 = metro radius, $2 = non-metro radius. Callers that need extra columns
- * select them from `r`.
- */
-export const CV_RADII = { metro: METRO_RADIUS_KM, nonMetro: NON_METRO_RADIUS_KM };
+export const CV_RADIUS = CV_RADIUS_KM;
 
 export type NetworkStats = {
   pincodes_covered: number;
@@ -186,7 +174,7 @@ export async function getPincodeNetwork(pincode: string): Promise<PincodeLookup>
     return {
       pincode, city: null, state: null, latitude: null, longitude: null,
       center_visit: [], home_sample: [], found: false,
-      cv_radius_km: NON_METRO_RADIUS_KM,
+      cv_radius_km: CV_RADIUS_KM,
     };
   }
 
@@ -207,14 +195,12 @@ export async function getPincodeNetwork(pincode: string): Promise<PincodeLookup>
       r.state,
       ARRAY['CENTER_VISIT']::text[] AS modalities,
       r.distance_km::float8 AS distance_km,
-      (CASE WHEN ct.tier = 'Tier 1' THEN $2::numeric ELSE $3::numeric END)::float8 AS radius_km
+      $2::float8 AS radius_km
     FROM analytics.mv_pincode_cv_reach r
-    LEFT JOIN atlas.city_tier_canon ct ON ct.city_key = atlas.city_key(r.city)
     WHERE r.covered_pincode = $1
-      AND r.distance_km <= GREATEST($2::numeric, $3::numeric)
-      AND r.distance_km <= CASE WHEN ct.tier = 'Tier 1' THEN $2::numeric ELSE $3::numeric END
+      AND r.distance_km <= $2::numeric
     ORDER BY r.entity_id, r.distance_km
-  `, [pincode, METRO_RADIUS_KM, NON_METRO_RADIUS_KM]);
+  `, [pincode, CV_RADIUS_KM]);
 
   // Re-sort by distance after the DISTINCT ON dedup (DISTINCT ON requires its
   // ORDER BY to start with the distinct key).
@@ -246,8 +232,6 @@ export async function getPincodeNetwork(pincode: string): Promise<PincodeLookup>
     center_visit: cv.slice(0, 50),
     home_sample: hs,
     found: cv.length > 0 || hs.length > 0,
-    // Whichever radius the matched centres were judged against; falls back to
-    // the metro radius when nothing matched, since that is the stricter claim.
-    cv_radius_km: cv[0]?.radius_km ?? METRO_RADIUS_KM,
+    cv_radius_km: CV_RADIUS_KM,
   };
 }

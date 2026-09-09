@@ -1,6 +1,6 @@
 import type { Metadata } from 'next';
 import {
-  getNetworkStats, getPhleboStrength, getNurseStrength, CV_RADII,
+  getNetworkStats, getPhleboStrength, getNurseStrength, CV_RADIUS,
   type StaffStrength,
 } from '@/lib/publicNetwork';
 import { getSessionUser } from '@/lib/auth';
@@ -95,10 +95,8 @@ export default async function PublicNetworkPage() {
               <div className="text-[10px] uppercase tracking-wider font-semibold text-slate-500 mb-1.5">
                 Coverage radius
               </div>
-              <div className="flex items-center gap-4 text-[11px] text-slate-700">
-                <span><b className="tabular-nums">{CV_RADII.metro} km</b> metro</span>
-                <span className="text-slate-300">|</span>
-                <span><b className="tabular-nums">{CV_RADII.nonMetro} km</b> rest of India</span>
+              <div className="text-[11px] text-slate-700">
+                <b className="tabular-nums">{CV_RADIUS} km</b> from the centre
               </div>
             </div>
           </Panel>
