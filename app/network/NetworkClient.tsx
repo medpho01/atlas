@@ -1,7 +1,7 @@
 'use client';
 
 import dynamic from 'next/dynamic';
-import { useState, useTransition } from 'react';
+import { useEffect, useState, useTransition } from 'react';
 import { Search, MapPin, Home, Building2, X } from 'lucide-react';
 import type { NetworkPoint } from '@/components/PublicNetworkMap';
 import { NetworkMapControls, type Mode } from '@/components/NetworkMapControls';
@@ -32,7 +32,26 @@ type Lookup = {
   cv_radius_km: number;
 };
 
-export function NetworkClient({ points }: { points: NetworkPoint[] }) {
+export function NetworkClient({ initialPoints = [] }: { initialPoints?: NetworkPoint[] }) {
+  // Points arrive after first paint. Inlining them cost 846KB of HTML on every
+  // request; fetched here the map is the only thing waiting, and the response
+  // is cached by the browser.
+  const [points, setPoints] = useState<NetworkPoint[]>(initialPoints);
+  useEffect(() => {
+    if (initialPoints.length) return;
+    let live = true;
+    fetch('/api/public/network-points')
+      .then((r) => r.json())
+      .then((d: { points: [string, number, number, number, number][] }) => {
+        if (!live) return;
+        setPoints((d.points ?? []).map(([pincode, latitude, longitude, cv, hs]) => ({
+          pincode, latitude, longitude, cv, hs,
+        })));
+      })
+      .catch(() => {});
+    return () => { live = false; };
+  }, [initialPoints.length]);
+
   const [pinInput, setPinInput] = useState('');
   const [mode, setMode] = useState<Mode>('both');
   const [result, setResult] = useState<Lookup | null>(null);

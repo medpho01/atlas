@@ -1,6 +1,6 @@
 import type { Metadata } from 'next';
 import {
-  getNetworkStats, getMapPoints, getPhleboStrength, getNurseStrength, CV_RADII,
+  getNetworkStats, getPhleboStrength, getNurseStrength, CV_RADII,
   type StaffStrength,
 } from '@/lib/publicNetwork';
 import { getSessionUser } from '@/lib/auth';
@@ -23,9 +23,8 @@ export default async function PublicNetworkPage() {
   // Signed-in staff reach this from the sidebar, so the page already sits
   // inside the app shell — a second header and a forced light theme would just
   // fight it. Anonymous visitors still get the standalone branded page.
-  const [me, stats, points, phlebos, nurses] = await Promise.all([
-    getSessionUser(), getNetworkStats(), getMapPoints(),
-    getPhleboStrength(), getNurseStrength(),
+  const [me, stats, phlebos, nurses] = await Promise.all([
+    getSessionUser(), getNetworkStats(), getPhleboStrength(), getNurseStrength(),
   ]);
   const embedded = Boolean(me);
 
@@ -64,7 +63,13 @@ export default async function PublicNetworkPage() {
         </div>
       </section>
 
+      {/* The map is the thing people react to first, so it sits directly under
+          the headline rather than below four cards. */}
       <section className="px-6 pt-5 max-w-6xl mx-auto">
+        <NetworkClient />
+      </section>
+
+      <section className="px-6 pt-5 pb-8 max-w-6xl mx-auto">
         <div className="grid md:grid-cols-2 gap-5">
           <Panel title="Home sample collection" accent="bg-violet-50 text-violet-600" glyph="⌂">
             <Stats items={[
@@ -112,9 +117,7 @@ export default async function PublicNetworkPage() {
         </div>
       </section>
 
-      <section className="px-6 py-8 max-w-6xl mx-auto">
-        <NetworkClient points={points} />
-      </section>
+
     </>
   );
 

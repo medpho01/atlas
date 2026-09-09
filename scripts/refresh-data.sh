@@ -453,6 +453,22 @@ REFRESH MATERIALIZED VIEW analytics.mv_test_catalog;
 REFRESH MATERIALIZED VIEW analytics.mv_lab_packages;
 SQL
 
+# ---- Phase 4.2: public network -----------------------------------------------
+# The /network page reads only these two, built from mv_pincode_cv_reach above
+# so the page never derives tier-aware reach on a request. Guarded rather than
+# folded into the Phase 4 block: that block runs under ON_ERROR_STOP, so on a
+# database that has not applied sql/init/17_public_network.sql yet a missing
+# view would abort the entire refresh.
+if $PG -t -A -c "SELECT to_regclass('analytics.mv_public_network_summary')" | grep -q .; then
+  log "Phase 4.2 · public network views"
+  $PG -c "REFRESH MATERIALIZED VIEW analytics.mv_public_network_pincode;" >>"$LOG" 2>&1 \
+    || log "  WARN mv_public_network_pincode refresh failed"
+  $PG -c "REFRESH MATERIALIZED VIEW analytics.mv_public_network_summary;" >>"$LOG" 2>&1 \
+    || log "  WARN mv_public_network_summary refresh failed"
+else
+  log "Phase 4.2 · public network views absent — apply sql/init/17_public_network.sql"
+fi
+
 # ---- Phase 4.5: readiness ---------------------------------------------------
 # After the coverage MVs it reads, before the snapshot that reads tiers.
 # Guarded so an older database without these objects still completes.

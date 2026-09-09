@@ -35,38 +35,6 @@ const NON_METRO_RADIUS_KM = Number(process.env.CV_REACH_RADIUS_KM ?? 10);
  * $1 = metro radius, $2 = non-metro radius. Callers that need extra columns
  * select them from `r`.
  */
-/**
- * The tier-aware radius, resolved once per CENTRE.
- *
- * There are a couple of thousand centres and hundreds of thousands of reach
- * rows, so the tier lookup belongs on the small side. Doing it per reach row —
- * a function call on each — turned a 50ms index scan into 2.4s.
- *
- * $1 = metro radius, $2 = non-metro radius.
- */
-const CENTRE_RADIUS_CTE = `
-  centre_radius AS (
-    SELECT p.entity_id,
-           (CASE WHEN ct.tier = 'Tier 1' THEN $1::numeric ELSE $2::numeric END) AS radius
-    FROM analytics.mv_provider_unified p
-    LEFT JOIN atlas.city_tier ct ON ct.city_key = atlas.city_key(p.city)
-    WHERE p.kind IN ('LAB','HOSPITAL')
-  )`;
-
-/** Centre-visit reach with that radius applied. Expects centre_radius in scope. */
-const CV_REACH_CTE = `
-  cv AS (
-    SELECT r.*
-    FROM analytics.mv_pincode_cv_reach r
-    JOIN centre_radius cr ON cr.entity_id = r.entity_id
-    -- The constant bound is what lets the distance index make the first cut;
-    -- the per-centre one then tightens it.
-    WHERE r.distance_km <= GREATEST($1::numeric, $2::numeric)
-      AND r.distance_km <= cr.radius
-  )`;
-
-const RADII: [number, number] = [METRO_RADIUS_KM, NON_METRO_RADIUS_KM];
-
 export const CV_RADII = { metro: METRO_RADIUS_KM, nonMetro: NON_METRO_RADIUS_KM };
 
 export type NetworkStats = {
@@ -86,39 +54,17 @@ export type NetworkStats = {
 };
 
 async function networkStats(): Promise<NetworkStats> {
-  const row = await queryOne<NetworkStats>(`
-    WITH ${CENTRE_RADIUS_CTE},
-    ${CV_REACH_CTE},
-    cv_pin AS (SELECT DISTINCT covered_pincode AS pincode FROM cv),
-    hs AS (
-      SELECT DISTINCT pincode FROM analytics.mv_pincode_coverage
-      WHERE kind IN ('LAB','HOSPITAL') AND modality = 'HOME_SAMPLE' AND providers > 0
-    ),
-    any_lab AS (SELECT pincode FROM cv_pin UNION SELECT pincode FROM hs)
-    SELECT
-      (SELECT COUNT(*) FROM any_lab)::int                                   AS pincodes_covered,
-      -- All of India, not just the pincodes we geocode: mv_pincode_geo is
-      -- filtered down to what the network touches, so it would flatter the
-      -- percentage badly. pincode_directory is the full postal list.
-      (SELECT COUNT(DISTINCT pincode) FROM atlas.pincode_directory)::int    AS india_pincodes,
-
-      (SELECT COUNT(*) FROM hs)::int                                        AS home_sample_pincodes,
-      (SELECT COUNT(DISTINCT entity_id) FROM analytics.mv_provider_unified
-        WHERE kind IN ('LAB','HOSPITAL')
-          AND modalities @> ARRAY['HOME_SAMPLE']::text[])::int              AS home_sample_labs,
-
-      (SELECT COUNT(*) FROM cv_pin)::int                                    AS center_visit_pincodes,
-      (SELECT COUNT(DISTINCT entity_id) FROM cv)::int                       AS center_visit_centres,
-      (SELECT COUNT(DISTINCT entity_id) FROM cv WHERE kind = 'LAB')::int    AS center_visit_labs,
-      (SELECT COUNT(DISTINCT entity_id) FROM cv WHERE kind = 'HOSPITAL')::int AS center_visit_hospitals,
-
-      (SELECT COUNT(DISTINCT entity_id) FROM analytics.mv_provider_unified
-        WHERE kind IN ('LAB','HOSPITAL')
-          AND (modalities @> ARRAY['CENTER_VISIT']::text[]
-            OR modalities @> ARRAY['HOME_SAMPLE']::text[]))::int            AS distinct_labs,
-      (SELECT COUNT(DISTINCT city) FROM analytics.mv_provider_unified
-        WHERE kind IN ('LAB','HOSPITAL') AND city IS NOT NULL AND TRIM(city) <> '')::int AS distinct_cities;
-  `, RADII);
+  // One row, precomputed nightly by analytics.mv_public_network_summary. This
+  // used to derive tier-aware reach on the request and took over a second on a
+  // small database; caching only moved the cost onto whoever arrived first.
+  const row = await queryOne<NetworkStats>(
+    `SELECT pincodes_covered, india_pincodes,
+            home_sample_pincodes, home_sample_labs,
+            center_visit_pincodes, center_visit_centres,
+            center_visit_labs, center_visit_hospitals,
+            distinct_labs, distinct_cities
+     FROM analytics.mv_public_network_summary`,
+  );
   return row ?? {
     pincodes_covered: 0, india_pincodes: 0,
     home_sample_pincodes: 0, home_sample_labs: 0,
@@ -201,29 +147,10 @@ export type NetworkMapPoint = {
 };
 
 async function mapPoints(): Promise<NetworkMapPoint[]> {
-  return query<NetworkMapPoint>(`
-    WITH ${CENTRE_RADIUS_CTE},
-    ${CV_REACH_CTE},
-    cv_count AS (
-      SELECT covered_pincode AS pincode, COUNT(DISTINCT entity_id)::int AS cv
-      FROM cv GROUP BY covered_pincode
-    )
-    SELECT
-      g.pincode,
-      g.latitude,
-      g.longitude,
-      COALESCE(cv.cv, 0)::int AS cv,
-      COALESCE(hs.providers, 0)::int AS hs
-    FROM analytics.mv_pincode_geo g
-    LEFT JOIN cv_count cv ON cv.pincode = g.pincode
-    LEFT JOIN analytics.mv_pincode_coverage hs
-      ON hs.pincode = g.pincode
-      AND hs.kind IN ('LAB','HOSPITAL')
-      AND hs.modality = 'HOME_SAMPLE'
-    WHERE g.latitude IS NOT NULL
-      AND g.geo_source IN ('exact','prefix3')
-      AND (COALESCE(cv.cv, 0) > 0 OR COALESCE(hs.providers, 0) > 0)
-  `, RADII);
+  return query<NetworkMapPoint>(
+    `SELECT pincode, latitude, longitude, cv, hs
+     FROM analytics.mv_public_network_pincode`,
+  );
 }
 
 export type PincodeLab = {
