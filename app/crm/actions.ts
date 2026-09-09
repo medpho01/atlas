@@ -103,6 +103,83 @@ export async function createProvider(input: {
   return { ok: true, id: p!.id };
 }
 
+/**
+ * Who works this thread.
+ *
+ * Replaces the whole roster in one call rather than adding and removing one at
+ * a time: the UI edits a list, and a diffing endpoint would let two people
+ * editing at once leave the roster in a state neither of them chose.
+ */
+export async function setThreadMembers(input: {
+  threadId: number; userIds: number[];
+}): Promise<R> {
+  const { me, err } = await writer();
+  if (err) return { ok: false, error: err };
+  const ids = Array.from(new Set(input.userIds.filter((n) => Number.isFinite(n))));
+
+  await query(`DELETE FROM atlas.crm_thread_members WHERE thread_id = $1 AND NOT (user_id = ANY($2::int[]))`,
+    [input.threadId, ids]);
+  if (ids.length) {
+    await query(
+      `INSERT INTO atlas.crm_thread_members (thread_id, user_id, added_by)
+       SELECT $1, u, $3 FROM unnest($2::int[]) u
+       ON CONFLICT (thread_id, user_id) DO NOTHING`,
+      [input.threadId, ids, me!.id],
+    );
+  }
+  revalidatePath('/crm/threads');
+  revalidatePath('/crm');
+  return { ok: true };
+}
+
+/**
+ * Put existing provider cards on a thread.
+ *
+ * The provider record is shared, so this adds a thread membership rather than
+ * moving anything: a hospital can be worked in two campaigns at once and its
+ * history stays on one card. Cards already on the thread are left where they
+ * are — re-adding must not reset someone's stage back to the start.
+ */
+export async function addProvidersToThread(input: {
+  providerIds: number[]; threadId: number; assigneeId?: number | null;
+}): Promise<{ ok: boolean; error?: string; added?: number; already?: number }> {
+  const { me, err } = await writer();
+  if (err) return { ok: false, error: err };
+  const ids = Array.from(new Set(input.providerIds.filter((n) => Number.isFinite(n))));
+  if (!ids.length) return { ok: false, error: 'Pick at least one provider' };
+
+  const t = await queryOne<{ stages: { key: string }[] }>(
+    `SELECT f.stages FROM atlas.crm_threads t JOIN atlas.crm_funnels f ON f.id = t.funnel_id WHERE t.id = $1`,
+    [input.threadId],
+  );
+  if (!t) return { ok: false, error: 'Thread not found' };
+  const firstStage = t.stages?.[0]?.key ?? 'identified';
+
+  const before = await queryOne<{ n: number }>(
+    `SELECT COUNT(*)::int AS n FROM atlas.crm_thread_providers
+      WHERE thread_id = $1 AND provider_id = ANY($2::int[])`,
+    [input.threadId, ids],
+  );
+
+  await query(
+    `INSERT INTO atlas.crm_thread_providers (thread_id, provider_id, stage_key, added_by, assignee_id)
+     SELECT $1, p, $2, $3, $4 FROM unnest($5::int[]) p
+     ON CONFLICT (thread_id, provider_id) DO NOTHING`,
+    [input.threadId, firstStage, me!.id, input.assigneeId ?? null, ids],
+  );
+
+  for (const providerId of ids) {
+    await logActivity({
+      threadId: input.threadId, providerId, authorId: me!.id,
+      type: 'thread_added', body: 'Added to this thread',
+    });
+  }
+  revalidatePath(`/crm/${input.threadId}`);
+  revalidatePath('/crm');
+  const already = before?.n ?? 0;
+  return { ok: true, added: ids.length - already, already };
+}
+
 export async function moveStage(input: {
   threadId: number; providerId: number; toStage: string; note?: string;
 }): Promise<R> {

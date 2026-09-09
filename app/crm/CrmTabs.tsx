@@ -12,9 +12,10 @@ const TABS = [
   { href: '/crm', label: 'My queue' },
   { href: '/crm/team', label: 'Team' },
   { href: '/crm/threads', label: 'Threads' },
+  { href: '/crm/update', label: 'Daily update' },
 ] as const;
 
-export function CrmTabs({ active }: { active: '/crm' | '/crm/team' | '/crm/threads' }) {
+export function CrmTabs({ active }: { active: '/crm' | '/crm/team' | '/crm/threads' | '/crm/update' }) {
   return (
     <div className="flex items-center gap-1 mb-5 border-b border-ink-200">
       {TABS.map((t) => (
