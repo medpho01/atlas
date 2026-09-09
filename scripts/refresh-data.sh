@@ -410,6 +410,20 @@ ANALYZE src_local."Pharmacy";
 ANALYZE src_local."Request";
 SQL
 
+# ---- Phase 3.9: resolve pincode coordinates ---------------------------------
+# Must run BEFORE mv_pincode_geo, which now reads atlas.pincode_geo. Rebuilds
+# it from LabStack's own table, any imported dataset, and positions observed in
+# real addresses. Guarded: a database without sql/init/18_pincode_geo.sql still
+# refreshes, it just keeps yesterday's coordinates.
+if $PG -t -A -c "SELECT to_regproc('atlas.rebuild_pincode_geo')" | grep -q .; then
+  geo=$($PG -t -A -c "SELECT total FROM atlas.rebuild_pincode_geo();" 2>/dev/null || echo '')
+  if [ -n "$geo" ]; then
+    log "Phase 3.9 · pincode coordinates → $geo located"
+  else
+    log "  WARN pincode geo rebuild failed — keeping previous coordinates"
+  fi
+fi
+
 # ---- Phase 4: REFRESH MATERIALIZED VIEWs (dependency order) ----------------
 log "Phase 4/4 · REFRESH MATERIALIZED VIEW for all analytics.mv_*"
 $PG <<'SQL' >>"$LOG" 2>&1
