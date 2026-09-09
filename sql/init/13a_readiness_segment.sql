@@ -40,7 +40,8 @@ WITH lab_cfg AS (
 ),
 -- One row per (provider, segment). A lab offering both services is in both.
 seg AS (
-  SELECT atlas.city_key(p.city) AS city_key, p.pincode, s.segment
+  SELECT p.entity_id, atlas.city_key(p.city) AS city_key, p.pincode,
+         p.serviced_pincodes, s.segment
   FROM analytics.mv_provider_unified p
   LEFT JOIN lab_cfg l ON p.source_table = 'Lab' AND l.id = p.source_id
   CROSS JOIN LATERAL (
@@ -64,10 +65,50 @@ seg AS (
 
   -- Wellness has no lab configuration to read; it keeps its category as its
   -- segment so the page can show every tab from one relation.
-  SELECT atlas.city_key(w.city), w.pincode,
+  SELECT NULL::text, atlas.city_key(w.city), w.pincode, NULL::text[],
          CASE WHEN w.kind = 'INSTRUCTOR' THEN 'WELLNESS_ONLINE' ELSE 'WELLNESS_OFFLINE' END
   FROM atlas.wellness_provider w
   WHERE NULLIF(TRIM(w.city), '') IS NOT NULL
+),
+-- Where a segment actually reaches, which is not the same question per
+-- segment. Home sample is the pincodes a lab has declared it will collect
+-- from; centre visit is the pincodes within travelling distance of the
+-- building; everything else has no service area recorded, so the provider's
+-- own pincode is the only honest answer.
+--
+-- This was counting the provider's own pincode for every segment, which for
+-- home sample is badly wrong: Bengaluru's home-sample labs SIT in 26 pincodes
+-- and SERVE 118, and the page reported 28 covered and 114 with "no supply".
+city_pin AS (
+  SELECT atlas.city_key(city) AS city_key, pincode
+  FROM analytics.mv_pincode_city
+  WHERE NULLIF(TRIM(city), '') IS NOT NULL
+),
+cover AS (
+  SELECT DISTINCT g.city_key, g.segment, sp AS pincode
+  FROM seg g, LATERAL unnest(COALESCE(g.serviced_pincodes, ARRAY[]::text[])) sp
+  WHERE g.segment = 'LAB_HOME_SAMPLE' AND NULLIF(sp, '') IS NOT NULL
+
+  UNION
+
+  SELECT DISTINCT g.city_key, g.segment, r.covered_pincode
+  FROM seg g
+  JOIN analytics.mv_pincode_cv_reach r ON r.entity_id = g.entity_id
+  WHERE g.segment LIKE 'LAB\_CENTER%' AND r.distance_km <= 5::numeric
+
+  UNION
+
+  SELECT DISTINCT g.city_key, g.segment, g.pincode
+  FROM seg g
+  WHERE g.segment NOT LIKE 'LAB\_%' AND g.pincode IS NOT NULL
+),
+-- Only the city's own pincodes count towards its coverage. A Bengaluru lab
+-- that also serves Mysore is not making Bengaluru readier.
+cover_in_city AS (
+  SELECT c.city_key, c.segment, COUNT(DISTINCT c.pincode)::int AS pincodes_covered
+  FROM cover c
+  JOIN city_pin cp ON cp.city_key = c.city_key AND cp.pincode = c.pincode
+  GROUP BY c.city_key, c.segment
 ),
 city_pincodes AS (
   SELECT atlas.city_key(city) AS city_key, COUNT(DISTINCT pincode)::int AS total_pincodes
@@ -101,7 +142,8 @@ sla_by_city AS (
 per_seg AS (
   SELECT g.city_key, g.segment,
          COUNT(*)::int AS providers,
-         COUNT(DISTINCT g.pincode) FILTER (WHERE g.pincode IS NOT NULL)::int AS pincodes_covered,
+         COALESCE((SELECT ci.pincodes_covered FROM cover_in_city ci
+                    WHERE ci.city_key = g.city_key AND ci.segment = g.segment), 0)::int AS pincodes_covered,
          -- The centre/home split that mv_city_readiness carries per category
          -- is what a segment already is, so it collapses to the segment's own
          -- counts. Kept so the row shape matches and the shared gap logic can
@@ -111,9 +153,13 @@ per_seg AS (
          CASE WHEN g.segment IN ('LAB_HOME_SAMPLE','HOME_CARE')
               THEN COUNT(*) ELSE 0 END::int AS providers_home,
          CASE WHEN g.segment LIKE 'LAB\_CENTER%' OR g.segment = 'DOCTOR_CENTER'
-              THEN COUNT(DISTINCT g.pincode) ELSE 0 END::int AS pincodes_center,
+              THEN COALESCE((SELECT ci.pincodes_covered FROM cover_in_city ci
+                              WHERE ci.city_key = g.city_key AND ci.segment = g.segment), 0)
+              ELSE 0 END::int AS pincodes_center,
          CASE WHEN g.segment IN ('LAB_HOME_SAMPLE','HOME_CARE')
-              THEN COUNT(DISTINCT g.pincode) ELSE 0 END::int AS pincodes_home,
+              THEN COALESCE((SELECT ci.pincodes_covered FROM cover_in_city ci
+                              WHERE ci.city_key = g.city_key AND ci.segment = g.segment), 0)
+              ELSE 0 END::int AS pincodes_home,
          -- Tier, integration and SLA are lab facts, so they only apply to the
          -- lab segments. On a doctor or nurse segment they would silently
          -- borrow the diagnostics network's maturity; NULL instead, and the
@@ -183,7 +229,61 @@ SELECT w.city, w.city_key, w.band, w.segment,
      + (CASE WHEN w.sla_score         IS NULL THEN 0 ELSE 1 END)
      + (CASE WHEN w.price_score       IS NULL THEN 0 ELSE 1 END) AS subscores_present
 FROM weighted w
-LEFT JOIN atlas.city_tier_canon ct ON ct.city_key = w.city_key;
+LEFT JOIN atlas.city_tier_canon ct ON ct.city_key = w.city_key
+
+UNION ALL
+
+-- "All segments": the average of a city's segment scores, not a re-scoring of
+-- the union. A composite built from summed providers against summed norms
+-- reads as precise and is not — a lab appears in several segments, so the
+-- numerator and denominator count different things. The mean says exactly what
+-- it is: how ready this city is across the services it has, each weighted the
+-- same. Providers and pincodes are deduplicated, so those stay true counts.
+SELECT w.city, w.city_key, w.band, 'ALL' AS segment,
+       COALESCE(ct.tier, 'Unknown') AS city_tier,
+       (SELECT COUNT(DISTINCT g.entity_id)::int FROM seg g WHERE g.city_key = w.city_key) AS providers,
+       (SELECT COUNT(DISTINCT c.pincode)::int FROM cover c
+         JOIN city_pin cp ON cp.city_key = c.city_key AND cp.pincode = c.pincode
+        WHERE c.city_key = w.city_key)                                        AS pincodes_covered,
+       MAX(w.total_pincodes)                                                  AS total_pincodes,
+       SUM(w.providers_center)::int  AS providers_center,
+       SUM(w.providers_home)::int    AS providers_home,
+       MAX(w.pincodes_center)::int   AS pincodes_center,
+       MAX(w.pincodes_home)::int     AS pincodes_home,
+       MAX(w.tiers_present)          AS tiers_present,
+       SUM(w.min_providers)::int     AS min_providers,
+       SUM(w.min_pincodes)::int      AS min_pincodes,
+       MAX(w.tiers_expected)::int    AS tiers_expected,
+       ROUND(AVG(w.coverage_score), 3)    AS coverage_score,
+       ROUND(AVG(w.density_score), 3)     AS density_score,
+       ROUND(AVG(w.integration_score), 3) AS integration_score,
+       ROUND(AVG(w.sla_score), 3)         AS sla_score,
+       ROUND(AVG(w.price_score), 3)       AS price_score,
+       ROUND(AVG(w.score))::int           AS score,
+       MAX(w.subscores_present)           AS subscores_present
+FROM (
+  SELECT s.*,
+         ROUND(100 * (
+             COALESCE(s.coverage_score, 0)    * s.w_cov
+           + COALESCE(s.density_score, 0)     * s.w_den
+           + COALESCE(s.integration_score, 0) * s.w_int
+           + COALESCE(s.sla_score, 0)         * s.w_sla
+           + COALESCE(s.price_score, 0)       * s.w_pri
+         ) / NULLIF(
+             (CASE WHEN s.coverage_score    IS NULL THEN 0 ELSE s.w_cov END)
+           + (CASE WHEN s.density_score     IS NULL THEN 0 ELSE s.w_den END)
+           + (CASE WHEN s.integration_score IS NULL THEN 0 ELSE s.w_int END)
+           + (CASE WHEN s.sla_score         IS NULL THEN 0 ELSE s.w_sla END)
+           + (CASE WHEN s.price_score       IS NULL THEN 0 ELSE s.w_pri END), 0))::int AS score,
+           (CASE WHEN s.coverage_score    IS NULL THEN 0 ELSE 1 END)
+         + (CASE WHEN s.density_score     IS NULL THEN 0 ELSE 1 END)
+         + (CASE WHEN s.integration_score IS NULL THEN 0 ELSE 1 END)
+         + (CASE WHEN s.sla_score         IS NULL THEN 0 ELSE 1 END)
+         + (CASE WHEN s.price_score       IS NULL THEN 0 ELSE 1 END) AS subscores_present
+  FROM weighted s
+) w
+LEFT JOIN atlas.city_tier_canon ct ON ct.city_key = w.city_key
+GROUP BY w.city, w.city_key, w.band, ct.tier;
 
 CREATE UNIQUE INDEX IF NOT EXISTS mv_city_readiness_segment_key
   ON analytics.mv_city_readiness_segment (city_key, segment);

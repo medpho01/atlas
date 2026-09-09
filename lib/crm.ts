@@ -184,8 +184,49 @@ export async function getThreadStats(threadId: number): Promise<ThreadStats> {
   return { stage_counts, velocity };
 }
 
+/**
+ * The people who actually work the CRM.
+ *
+ * Everyone active used to appear, so the filter listed accounts and operations
+ * staff who have never touched a provider. Onboarding is the network team's
+ * job; admins are included because they cover and reassign.
+ */
 export async function listTeam(): Promise<{ id: number; name: string; role: string }[]> {
-  return query(`SELECT id, name, role FROM atlas.users WHERE active ORDER BY name`);
+  return query(`
+    SELECT id, name, role FROM atlas.users
+    WHERE active AND role IN ('network', 'admin')
+    ORDER BY name
+  `);
+}
+
+export type ThreadMember = { thread_id: number; user_id: number; name: string; role: string };
+
+/** Roster per thread, for the threads view and the member pickers. */
+export async function listThreadMembers(): Promise<ThreadMember[]> {
+  return query<ThreadMember>(`
+    SELECT m.thread_id, m.user_id, u.name, u.role
+    FROM atlas.crm_thread_members m
+    JOIN atlas.users u ON u.id = m.user_id
+    WHERE u.active
+    ORDER BY u.name
+  `);
+}
+
+/** The threads this person is on — what the add-provider form should offer. */
+export async function threadsForUser(userId: number): Promise<Thread[]> {
+  return query<Thread>(`
+    SELECT t.id, t.name, t.description, t.funnel_id, t.target_count, t.provider_kind,
+           t.region, t.status, t.created_at, f.stages, f.success_stage_key,
+           (SELECT COUNT(*) FROM atlas.crm_thread_providers tp WHERE tp.thread_id = t.id)::int AS provider_total,
+           (SELECT COUNT(*) FROM atlas.crm_thread_providers tp
+             WHERE tp.thread_id = t.id AND tp.stage_key = f.success_stage_key)::int AS onboarded_count,
+           '{}'::jsonb AS stage_counts
+    FROM atlas.crm_threads t
+    JOIN atlas.crm_funnels f ON f.id = t.funnel_id
+    JOIN atlas.crm_thread_members m ON m.thread_id = t.id AND m.user_id = $1
+    WHERE t.status <> 'done'
+    ORDER BY t.name
+  `, [userId]);
 }
 
 export async function logActivity(input: {

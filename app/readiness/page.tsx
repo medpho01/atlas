@@ -27,7 +27,7 @@ export default async function ReadinessPage({
 
   const segment: Segment = (SEGMENTS as readonly string[]).includes(searchParams.segment ?? '')
     ? (searchParams.segment as Segment)
-    : 'LAB_HOME_SAMPLE';
+    : 'ALL';
   const filter: CityFilter = (CITY_FILTERS as readonly string[]).includes(searchParams.cities ?? '')
     ? (searchParams.cities as CityFilter)
     : 'all';
@@ -44,7 +44,7 @@ export default async function ReadinessPage({
     const q = new URLSearchParams();
     const s = patch.segment ?? segment;
     const c = patch.cities ?? filter;
-    if (s !== 'LAB_HOME_SAMPLE') q.set('segment', s);
+    if (s !== 'ALL') q.set('segment', s);
     if (c !== 'all') q.set('cities', c);
     const qs = q.toString();
     return `/readiness${qs ? `?${qs}` : ''}`;

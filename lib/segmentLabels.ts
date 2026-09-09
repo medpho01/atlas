@@ -7,6 +7,7 @@
  * two copies that drift.
  */
 export const SEGMENTS = [
+  'ALL',
   'LAB_HOME_SAMPLE',
   'LAB_CENTER_RADIOLOGY',
   'LAB_CENTER_HOSPITAL',
@@ -19,6 +20,7 @@ export const SEGMENTS = [
 export type Segment = (typeof SEGMENTS)[number];
 
 export const SEGMENT_LABEL: Record<Segment, string> = {
+  ALL:                  'All segments',
   LAB_HOME_SAMPLE:      'Home sample',
   LAB_CENTER_RADIOLOGY: 'Centre visit · Radiology',
   LAB_CENTER_HOSPITAL:  'Centre visit · Hospitals',
@@ -31,6 +33,7 @@ export const SEGMENT_LABEL: Record<Segment, string> = {
 
 /** What this segment's supply is called in a sentence. */
 export const SEGMENT_SUPPLY_NOUN: Record<Segment, string> = {
+  ALL:                  'provider',
   LAB_HOME_SAMPLE:      'home-sample',
   LAB_CENTER_RADIOLOGY: 'diagnostic-centre',
   LAB_CENTER_HOSPITAL:  'hospital',
@@ -43,5 +46,5 @@ export const SEGMENT_SUPPLY_NOUN: Record<Segment, string> = {
 
 /** The four the network is actually built on; the rest are a second row. */
 export const PRIMARY_SEGMENTS: Segment[] = [
-  'LAB_HOME_SAMPLE', 'LAB_CENTER_RADIOLOGY', 'LAB_CENTER_HOSPITAL', 'DOCTOR_CENTER',
+  'ALL', 'LAB_HOME_SAMPLE', 'LAB_CENTER_RADIOLOGY', 'LAB_CENTER_HOSPITAL', 'DOCTOR_CENTER',
 ];
