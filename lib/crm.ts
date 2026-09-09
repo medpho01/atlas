@@ -199,6 +199,34 @@ export async function listTeam(): Promise<{ id: number; name: string; role: stri
   `);
 }
 
+/**
+ * Thread chips for a person's queue.
+ *
+ * Deliberately NOT derived from the rows on screen: those are already filtered
+ * by the selected thread, so picking one collapsed the list to itself and the
+ * chip row vanished, leaving no way back to the others. This asks the same
+ * question without the thread filter, so the chips are stable whatever is
+ * selected.
+ */
+export async function getThreadChips(opts: { assigneeId?: number | null; unassigned?: boolean }) {
+  const where: string[] = [];
+  const params: unknown[] = [];
+  if (opts.unassigned) {
+    where.push('tp.assignee_id IS NULL');
+  } else if (opts.assigneeId != null) {
+    params.push(opts.assigneeId);
+    where.push(`tp.assignee_id = $${params.length}`);
+  }
+  return query<{ id: number; name: string; n: number }>(`
+    SELECT t.id, t.name, COUNT(*)::int AS n
+    FROM atlas.crm_thread_providers tp
+    JOIN atlas.crm_threads t ON t.id = tp.thread_id
+    ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
+    GROUP BY t.id, t.name
+    ORDER BY n DESC, t.name
+  `, params);
+}
+
 export type ThreadMember = { thread_id: number; user_id: number; name: string; role: string };
 
 /** Roster per thread, for the threads view and the member pickers. */

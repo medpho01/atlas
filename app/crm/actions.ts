@@ -110,6 +110,80 @@ export async function createProvider(input: {
  * a time: the UI edits a list, and a diffing endpoint would let two people
  * editing at once leave the roster in a state neither of them chose.
  */
+/**
+ * Retire a thread, optionally moving its providers somewhere else first.
+ *
+ * A campaign that is finished or was created by mistake should not sit on the
+ * board forever, but deleting it would take its cards with it — crm_thread_
+ * providers cascades — and with them every stage anyone had moved a provider
+ * to. So the move happens first and the delete only proceeds once the cards
+ * are safe. Providers themselves are never deleted: the record is shared and
+ * its history belongs to the organisation, not to one campaign.
+ */
+export async function deleteThread(input: {
+  threadId: number; reassignToThreadId?: number | null;
+}): Promise<{ ok: boolean; error?: string; moved?: number }> {
+  const { me, err } = await writer();
+  if (err) return { ok: false, error: err };
+  if (me!.role !== 'admin') return { ok: false, error: 'Only an admin can delete a thread' };
+  if (input.reassignToThreadId === input.threadId) {
+    return { ok: false, error: 'Pick a different thread to move providers into' };
+  }
+
+  let moved = 0;
+  if (input.reassignToThreadId) {
+    const target = await queryOne<{ stages: { key: string }[] }>(
+      `SELECT f.stages FROM atlas.crm_threads t JOIN atlas.crm_funnels f ON f.id = t.funnel_id WHERE t.id = $1`,
+      [input.reassignToThreadId],
+    );
+    if (!target) return { ok: false, error: 'Target thread not found' };
+    const firstStage = target.stages?.[0]?.key ?? 'identified';
+
+    // Carry the stage across where the target funnel has the same stage key,
+    // otherwise start at the beginning. Guessing an equivalent stage between
+    // two different funnels would silently move someone's work.
+    const rows = await query<{ n: number }>(
+      `INSERT INTO atlas.crm_thread_providers (thread_id, provider_id, stage_key, added_by, assignee_id)
+       SELECT $2,
+              tp.provider_id,
+              CASE WHEN EXISTS (
+                SELECT 1 FROM atlas.crm_threads t2
+                JOIN atlas.crm_funnels f2 ON f2.id = t2.funnel_id
+                WHERE t2.id = $2
+                  AND f2.stages @> jsonb_build_array(jsonb_build_object('key', tp.stage_key))
+              ) THEN tp.stage_key ELSE $3 END,
+              $4, tp.assignee_id
+       FROM atlas.crm_thread_providers tp
+       WHERE tp.thread_id = $1
+       ON CONFLICT (thread_id, provider_id) DO NOTHING
+       RETURNING 1 AS n`,
+      [input.threadId, input.reassignToThreadId, firstStage, me!.id],
+    );
+    moved = rows.length;
+
+    // Keep the journey readable: activities pointed at the old thread would
+    // otherwise be orphaned when it goes.
+    await query(`UPDATE atlas.crm_activities SET thread_id = $2 WHERE thread_id = $1`,
+      [input.threadId, input.reassignToThreadId]);
+  }
+
+  await query(`DELETE FROM atlas.crm_threads WHERE id = $1`, [input.threadId]);
+  revalidatePath('/crm/threads');
+  revalidatePath('/crm');
+  return { ok: true, moved };
+}
+
+export async function renameThread(input: { threadId: number; name: string }): Promise<R> {
+  const { err } = await writer();
+  if (err) return { ok: false, error: err };
+  if (!input.name.trim()) return { ok: false, error: 'Name required' };
+  await query(`UPDATE atlas.crm_threads SET name = $1, updated_at = now() WHERE id = $2`,
+    [input.name.trim(), input.threadId]);
+  revalidatePath('/crm/threads');
+  revalidatePath('/crm');
+  return { ok: true };
+}
+
 export async function setThreadMembers(input: {
   threadId: number; userIds: number[];
 }): Promise<R> {

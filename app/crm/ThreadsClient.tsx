@@ -1,17 +1,50 @@
 'use client';
 
-import { useState, useTransition } from 'react';
+import { useMemo, useState, useTransition } from 'react';
 import Link from 'next/link';
 import { Plus, Target, ChevronRight, Settings2, X } from 'lucide-react';
-import { createThread, createFunnel, updateThread, setFunnelSuccessStage } from './actions';
-import type { Thread, Funnel } from '@/lib/crm';
+import { createThread, createFunnel, updateThread, setFunnelSuccessStage,
+         renameThread, setThreadMembers, deleteThread } from './actions';
+import type { Thread, Funnel, ThreadMember } from '@/lib/crm';
 import { PROVIDER_KINDS } from '@/lib/providerKinds';
 
-export function ThreadsClient({ threads, funnels, canWrite, isAdmin }: {
+function CardAction({ onClick, danger, children }: {
+  onClick: () => void; danger?: boolean; children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`text-[12px] rounded-md border px-2 py-1 transition ${
+        danger
+          ? 'border-danger-500/30 text-danger-500 hover:bg-danger-500/10'
+          : 'border-ink-200 text-ink-700 hover:bg-ink-100'
+      }`}
+    >
+      {children}
+    </button>
+  );
+}
+
+export function ThreadsClient({ threads, funnels, canWrite, isAdmin, members, team }: {
   threads: Thread[]; funnels: Funnel[]; canWrite: boolean; isAdmin: boolean;
+  members: ThreadMember[];
+  team: { id: number; name: string; role: string }[];
 }) {
   const [showCreate, setShowCreate] = useState(false);
   const [showFunnels, setShowFunnels] = useState(false);
+  const [renaming, setRenaming] = useState<Thread | null>(null);
+  const [assigning, setAssigning] = useState<Thread | null>(null);
+  const [deleting, setDeleting] = useState<Thread | null>(null);
+
+  const membersByThread = useMemo(() => {
+    const m = new Map<number, ThreadMember[]>();
+    for (const r of members) {
+      if (!m.has(r.thread_id)) m.set(r.thread_id, []);
+      m.get(r.thread_id)!.push(r);
+    }
+    return m;
+  }, [members]);
   const [form, setForm] = useState({
     name: '', description: '', funnelId: funnels[0]?.id ?? 0,
     targetCount: 50, providerKind: 'LAB', region: '',
@@ -126,10 +159,13 @@ export function ThreadsClient({ threads, funnels, canWrite, isAdmin }: {
           {threads.map((t) => {
             const pct = t.target_count > 0 ? Math.min(100, Math.round(100 * t.onboarded_count / t.target_count)) : 0;
             return (
-              <Link
+              /* Not a link any more. Clicking a card used to drop you into
+                 the Kanban board, which is the wrong default here: this tab is
+                 where you manage the campaign — its name, its people, whether
+                 it is running — and the board is one action among several. */
+              <div
                 key={t.id}
-                href={`/crm/${t.id}`}
-                className="rounded-2xl border border-ink-200 bg-surface p-4 hover:border-brand-400 transition group"
+                className="rounded-2xl border border-ink-200 bg-surface p-4 transition"
               >
                 <div className="flex items-start justify-between gap-2 mb-1">
                   <div className="font-semibold text-ink-900 text-[15px] group-hover:text-brand-700 dark:group-hover:text-brand-400 transition">
@@ -187,17 +223,71 @@ export function ThreadsClient({ threads, funnels, canWrite, isAdmin }: {
                     );
                   }) : null}
                 </div>
-                <div className="mt-2 text-[11px] text-ink-400 flex items-center justify-between">
-                  <span>{t.stages.length}-stage funnel</span>
-                  <ChevronRight className="w-3.5 h-3.5 group-hover:translate-x-0.5 transition" />
+                <div className="mt-2 text-[11px] text-ink-400">
+                  {t.stages.length}-stage funnel
                 </div>
-              </Link>
+
+                {/* Who is on it. Membership is the thread's own roster, not a
+                    roll-up of who happens to hold a card today. */}
+                <div className="mt-2 flex flex-wrap items-center gap-1">
+                  <span className="text-[10px] uppercase tracking-wide text-ink-400 mr-0.5">People</span>
+                  {(membersByThread.get(t.id) ?? []).map((m) => (
+                    <span key={m.user_id}
+                          className="text-[11px] rounded-full bg-ink-100 text-ink-700 px-2 py-0.5">
+                      {m.name}
+                    </span>
+                  ))}
+                  {!(membersByThread.get(t.id) ?? []).length && (
+                    <span className="text-[11px] text-ink-400">Nobody assigned</span>
+                  )}
+                </div>
+
+                <div className="mt-3 pt-3 border-t border-ink-100 flex flex-wrap items-center gap-1.5">
+                  <Link href={`/crm/${t.id}`}
+                        className="text-[12px] font-medium text-brand-600 hover:text-brand-700 mr-auto inline-flex items-center gap-0.5">
+                    Open board <ChevronRight className="w-3 h-3" />
+                  </Link>
+                  {canWrite && (
+                    <>
+                      <CardAction onClick={() => setRenaming(t)}>Rename</CardAction>
+                      <CardAction onClick={() => setAssigning(t)}>Assign people</CardAction>
+                      <CardAction onClick={() => setStatus(t.id, t.status === 'paused' ? 'active' : 'paused')}>
+                        {t.status === 'paused' ? 'Resume' : 'Pause'}
+                      </CardAction>
+                      {t.status !== 'done' && (
+                        <CardAction onClick={() => setStatus(t.id, 'done')}>Complete</CardAction>
+                      )}
+                      {isAdmin && (
+                        <CardAction danger onClick={() => setDeleting(t)}>Delete</CardAction>
+                      )}
+                    </>
+                  )}
+                </div>
+              </div>
             );
           })}
         </div>
       )}
 
       {showFunnels && <FunnelManager funnels={funnels} onClose={() => setShowFunnels(false)} />}
+      {renaming && (
+        <RenameThread thread={renaming} onClose={() => setRenaming(null)} />
+      )}
+      {assigning && (
+        <AssignPeople
+          thread={assigning}
+          team={team}
+          current={(membersByThread.get(assigning.id) ?? []).map((m) => m.user_id)}
+          onClose={() => setAssigning(null)}
+        />
+      )}
+      {deleting && (
+        <DeleteThread
+          thread={deleting}
+          others={threads.filter((t) => t.id !== deleting.id)}
+          onClose={() => setDeleting(null)}
+        />
+      )}
     </div>
   );
 }
@@ -331,5 +421,179 @@ function FunnelManager({ funnels, onClose }: { funnels: Funnel[]; onClose: () =>
         </div>
       </div>
     </div>
+  );
+}
+
+
+/** Small modal shell — the three thread dialogs share it. */
+function Dialog({ title, onClose, children }: {
+  title: string; onClose: () => void; children: React.ReactNode;
+}) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4" onClick={onClose}>
+      <div className="w-full max-w-md rounded-2xl border border-ink-200 bg-surface p-5"
+           onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-[15px] font-bold text-ink-900">{title}</h3>
+          <button onClick={onClose} className="text-ink-400 hover:text-ink-900"><X className="w-4 h-4" /></button>
+        </div>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function RenameThread({ thread, onClose }: { thread: Thread; onClose: () => void }) {
+  const [name, setName] = useState(thread.name);
+  const [err, setErr] = useState<string | null>(null);
+  const [pending, start] = useTransition();
+  return (
+    <Dialog title="Rename thread" onClose={onClose}>
+      <input
+        value={name}
+        onChange={(e) => setName(e.target.value)}
+        className="w-full h-9 px-3 text-sm rounded-md border border-ink-200 bg-surface"
+      />
+      {err && <p className="text-sm text-danger-500 mt-2">{err}</p>}
+      <div className="flex gap-2 mt-3">
+        <button
+          disabled={pending || !name.trim()}
+          onClick={() => start(async () => {
+            const r = await renameThread({ threadId: thread.id, name });
+            if (!r.ok) { setErr(r.error ?? 'Failed'); return; }
+            onClose(); window.location.reload();
+          })}
+          className="px-4 h-9 text-sm font-semibold rounded-md bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-40"
+        >
+          {pending ? 'Saving…' : 'Save'}
+        </button>
+        <button onClick={onClose} className="px-3 h-9 text-sm rounded-md border border-ink-200 text-ink-700 hover:bg-ink-50">
+          Cancel
+        </button>
+      </div>
+    </Dialog>
+  );
+}
+
+/**
+ * A thread can have any number of people on it — that is the point of a
+ * roster, and a campaign is rarely one person's job.
+ */
+function AssignPeople({ thread, team, current, onClose }: {
+  thread: Thread; team: { id: number; name: string; role: string }[];
+  current: number[]; onClose: () => void;
+}) {
+  const [picked, setPicked] = useState<number[]>(current);
+  const [err, setErr] = useState<string | null>(null);
+  const [pending, start] = useTransition();
+  const toggle = (id: number) =>
+    setPicked((p) => (p.includes(id) ? p.filter((x) => x !== id) : [...p, id]));
+
+  return (
+    <Dialog title={`People on ${thread.name}`} onClose={onClose}>
+      <div className="max-h-72 overflow-y-auto space-y-1">
+        {team.map((t) => (
+          <label key={t.id}
+                 className="flex items-center gap-2 text-sm rounded-md px-2 py-1.5 hover:bg-ink-100 cursor-pointer">
+            <input type="checkbox" checked={picked.includes(t.id)} onChange={() => toggle(t.id)} />
+            <span className="text-ink-900">{t.name}</span>
+            <span className="ml-auto text-[11px] text-ink-400">{t.role}</span>
+          </label>
+        ))}
+        {!team.length && <p className="text-sm text-ink-500 p-2">No network users yet.</p>}
+      </div>
+      {err && <p className="text-sm text-danger-500 mt-2">{err}</p>}
+      <div className="flex gap-2 mt-3">
+        <button
+          disabled={pending}
+          onClick={() => start(async () => {
+            const r = await setThreadMembers({ threadId: thread.id, userIds: picked });
+            if (!r.ok) { setErr(r.error ?? 'Failed'); return; }
+            onClose(); window.location.reload();
+          })}
+          className="px-4 h-9 text-sm font-semibold rounded-md bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-40"
+        >
+          {pending ? 'Saving…' : `Save ${picked.length} ${picked.length === 1 ? 'person' : 'people'}`}
+        </button>
+        <button onClick={onClose} className="px-3 h-9 text-sm rounded-md border border-ink-200 text-ink-700 hover:bg-ink-50">
+          Cancel
+        </button>
+      </div>
+    </Dialog>
+  );
+}
+
+/**
+ * Deleting takes the thread's cards with it, so the first question is where
+ * the providers should go. Moving them is the default; dropping them is a
+ * deliberate second choice.
+ */
+function DeleteThread({ thread, others, onClose }: {
+  thread: Thread; others: Thread[]; onClose: () => void;
+}) {
+  const [target, setTarget] = useState<number | ''>(others[0]?.id ?? '');
+  const [drop, setDrop] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [pending, start] = useTransition();
+
+  return (
+    <Dialog title={`Delete ${thread.name}`} onClose={onClose}>
+      <p className="text-sm text-ink-600 mb-3">
+        {thread.provider_total} provider{thread.provider_total === 1 ? '' : 's'} are on this thread.
+        The provider records are shared and are never deleted — only their place on this campaign.
+      </p>
+
+      {others.length > 0 && (
+        <label className="flex items-start gap-2 text-sm mb-2">
+          <input type="radio" checked={!drop} onChange={() => setDrop(false)} className="mt-1" />
+          <span className="flex-1">
+            Move them to
+            <select
+              value={target}
+              onChange={(e) => { setTarget(Number(e.target.value)); setDrop(false); }}
+              className="ml-2 h-8 px-2 text-sm rounded-md border border-ink-200 bg-surface"
+            >
+              {others.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+            </select>
+            <span className="block text-[11px] text-ink-500 mt-1">
+              Stages carry across where the target funnel has the same stage, otherwise they start
+              at the beginning — guessing an equivalent stage between two funnels would quietly move
+              someone&rsquo;s work.
+            </span>
+          </span>
+        </label>
+      )}
+
+      <label className="flex items-start gap-2 text-sm">
+        <input type="radio" checked={drop} onChange={() => setDrop(true)} className="mt-1" />
+        <span>
+          Just delete the thread
+          <span className="block text-[11px] text-ink-500">
+            The providers stay in the directory but lose their stage on this campaign.
+          </span>
+        </span>
+      </label>
+
+      {err && <p className="text-sm text-danger-500 mt-2">{err}</p>}
+      <div className="flex gap-2 mt-4">
+        <button
+          disabled={pending}
+          onClick={() => start(async () => {
+            const r = await deleteThread({
+              threadId: thread.id,
+              reassignToThreadId: drop ? null : (target === '' ? null : Number(target)),
+            });
+            if (!r.ok) { setErr(r.error ?? 'Failed'); return; }
+            onClose(); window.location.reload();
+          })}
+          className="px-4 h-9 text-sm font-semibold rounded-md bg-danger-500 text-white hover:opacity-90 disabled:opacity-40"
+        >
+          {pending ? 'Deleting…' : 'Delete thread'}
+        </button>
+        <button onClick={onClose} className="px-3 h-9 text-sm rounded-md border border-ink-200 text-ink-700 hover:bg-ink-50">
+          Cancel
+        </button>
+      </div>
+    </Dialog>
   );
 }

@@ -4,7 +4,7 @@ import { getSessionUser } from '@/lib/auth';
 import { canAccess } from '@/lib/access';
 import { RoleBlocked } from '@/components/RoleBlocked';
 import { listTeam } from '@/lib/crm';
-import { getDailyUpdate, formatUpdate } from '@/lib/crmUpdate';
+import { getDailyUpdate } from '@/lib/crmUpdate';
 import { CrmTabs } from '../CrmTabs';
 import { ChipButton } from '@/components/ui/Toggle';
 import { UpdateClient } from './UpdateClient';
@@ -34,7 +34,6 @@ export default async function UpdatePage({
   const viewingId = Number(searchParams.who) || me.id;
 
   const update = await getDailyUpdate(viewingId, day);
-  const text = formatUpdate(update);
 
   const href = (patch: { day?: string; who?: string }) => {
     const q = new URLSearchParams();
@@ -81,7 +80,7 @@ export default async function UpdatePage({
         ))}
       </div>
 
-      <UpdateClient update={update} text={text} />
+      <UpdateClient update={update} />
     </main>
   );
 }

@@ -3,7 +3,7 @@ import { redirect } from 'next/navigation';
 import { getSessionUser } from '@/lib/auth';
 import { canAccess } from '@/lib/access';
 import { RoleBlocked } from '@/components/RoleBlocked';
-import { listThreads, listFunnels, canWriteCrm } from '@/lib/crm';
+import { listThreads, listFunnels, canWriteCrm, listThreadMembers, listTeam } from '@/lib/crm';
 import { ThreadsClient } from '../ThreadsClient';
 import { CrmTabs } from '../CrmTabs';
 
@@ -16,7 +16,9 @@ export default async function CrmPage() {
     return <RoleBlocked area="The network CRM" detail="the network and admin teams" />;
   }
 
-  const [threads, funnels] = await Promise.all([listThreads(), listFunnels()]);
+  const [threads, funnels, members, team] = await Promise.all([
+    listThreads(), listFunnels(), listThreadMembers(), listTeam(),
+  ]);
 
   return (
     <main className="mx-auto max-w-7xl px-6 py-8">
@@ -30,7 +32,8 @@ export default async function CrmPage() {
         track their journey stage by stage, and collect the document checklist so console onboarding
         can pick them up the moment they're ready.
       </p>
-      <ThreadsClient threads={threads} funnels={funnels} canWrite={canWriteCrm(me)} isAdmin={me?.role === 'admin'} />
+      <ThreadsClient threads={threads} funnels={funnels} canWrite={canWriteCrm(me)}
+        isAdmin={me?.role === 'admin'} members={members} team={team} />
     </main>
   );
 }

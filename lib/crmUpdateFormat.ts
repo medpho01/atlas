@@ -1,0 +1,56 @@
+/**
+ * The update's shape and its text, in a module with no server-only import.
+ *
+ * The daily-update page renders the text client-side as the free-text sections
+ * are typed, so it needs the formatter — and lib/crmUpdate.ts opens a database
+ * connection. Keeping one formatter shared means the copy button and the
+ * server-rendered draft can never disagree.
+ */
+
+export type UpdateStage = { key: string; label: string; count: number };
+export type UpdateThread = {
+  thread_id: number;
+  name: string;
+  stages: UpdateStage[];
+  total: number;
+};
+
+export type DailyUpdate = {
+  name: string;
+  date: string;
+  threads: UpdateThread[];
+  requests_progressed: number;
+};
+
+/** The text people paste into the group. Kept here so it is the same everywhere. */
+export function formatUpdate(
+  u: DailyUpdate,
+  extras: { misc?: string; blockers?: string; tomorrow?: string } = {},
+): string {
+  const date = new Date(`${u.date}T00:00:00`).toLocaleDateString('en-GB', {
+    day: 'numeric', month: 'short', year: 'numeric',
+  });
+
+  const lines: string[] = [`Name: ${u.name}`, `Date: ${date}`, '', "✅ Today's Accomplishments:", ''];
+
+  u.threads.forEach((t, i) => {
+    lines.push(`${i + 1}. Thread - ${t.name}`);
+    t.stages.forEach((st, j) => {
+      lines.push(`   ${j + 1}. ${st.label}: ${st.count}`);
+    });
+    if (u.requests_progressed > 0 && /request|nsa/i.test(t.name)) {
+      lines.push(`   ${t.stages.length + 1}. Requests closed / progressed / moved to orders: ${u.requests_progressed}`);
+    }
+  });
+
+  if (extras.misc?.trim()) {
+    lines.push('', '[Miscellaneous]', extras.misc.trim());
+  }
+  // Always present, defaulting to Nil: a blockers section that only appears
+  // when someone is blocked makes silence ambiguous — nobody can tell whether
+  // the day was clear or the section was forgotten.
+  lines.push('', '⚠️ Help Needed / Blockers', extras.blockers?.trim() || 'Nil');
+  lines.push('', "🎯 Tomorrow's Plan:", '');
+  lines.push(extras.tomorrow?.trim() || '1. ');
+  return lines.join('\n');
+}

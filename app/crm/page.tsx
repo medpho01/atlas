@@ -4,7 +4,7 @@ import { requireView } from '@/lib/guard';
 import { RoleBlocked } from '@/components/RoleBlocked';
 import { Card, CardBody, CardHeader } from '@/components/ui/Card';
 import { ChipButton } from '@/components/ui/Toggle';
-import { getQueue, getQueueFunnel, listTeam } from '@/lib/crm';
+import { getQueue, getQueueFunnel, listTeam, getThreadChips } from '@/lib/crm';
 import { CrmTabs } from './CrmTabs';
 import { QueueFunnel } from './QueueFunnel';
 import { QueueBoard } from './QueueBoard';
@@ -41,6 +41,8 @@ export default async function MyQueuePage({
     getQueueFunnel({ assigneeId: viewingId, unassigned, threadId: threadFilter }),
     listTeam(),
   ]);
+  // Unfiltered, so selecting a thread never removes the others from the row.
+  const threadChips = await getThreadChips({ assigneeId: viewingId, unassigned });
 
   // Onboarded rows are in the list now, so "open" and "stale" are derived here
   // rather than by the query having quietly dropped them. Staleness only means
@@ -52,11 +54,7 @@ export default async function MyQueuePage({
 
   // Which campaigns this person's work spans — the thread board's context,
   // carried into the person view so the two aren't different worlds.
-  const threads = [...rows.reduce((m, r) => {
-    m.set(r.thread_id, { id: r.thread_id, name: r.thread_name, n: (m.get(r.thread_id)?.n ?? 0) + 1 });
-    return m;
-  }, new Map<number, { id: number; name: string; n: number }>()).values()]
-    .sort((a, b) => b.n - a.n);
+  const threads = threadChips;
   const whoLabel = unassigned
     ? 'Nobody'
     : viewingId === me.id
@@ -98,7 +96,7 @@ export default async function MyQueuePage({
           ))}
         </div>
 
-        {threads.length > 1 && (
+        {threads.length > 0 && (
           <div className="flex flex-wrap items-center gap-1.5">
             <span className="text-[11px] uppercase tracking-wide text-ink-400 mr-1">Thread</span>
             <ChipButton href={href({ thread: undefined })} active={!threadFilter}>

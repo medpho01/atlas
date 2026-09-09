@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import { Copy, Check } from 'lucide-react';
-import type { DailyUpdate } from '@/lib/crmUpdate';
+import { formatUpdate, type DailyUpdate } from '@/lib/crmUpdateFormat';
 
 /**
  * The numbers are read-only — they come from the board and editing them here
@@ -10,26 +10,19 @@ import type { DailyUpdate } from '@/lib/crmUpdate';
  * it no funnel records, and an update that cannot say so gets written by hand
  * instead, which is the thing this replaces.
  */
-export function UpdateClient({
-  update, text: initialText,
-}: {
-  update: DailyUpdate;
-  text: string;
-}) {
+export function UpdateClient({ update }: { update: DailyUpdate }) {
   const [misc, setMisc] = useState('');
+  const [blockers, setBlockers] = useState('');
   const [tomorrow, setTomorrow] = useState('');
   const [copied, setCopied] = useState(false);
 
-  const text = useMemo(() => {
-    let out = initialText;
-    if (misc.trim()) {
-      out = out.replace("\n\n🎯 Tomorrow's Plan:", `\n\n[Miscellaneous]\n${misc.trim()}\n\n🎯 Tomorrow's Plan:`);
-    }
-    if (tomorrow.trim()) {
-      out = out.replace(/(🎯 Tomorrow's Plan:\n\n)[\s\S]*$/, `$1${tomorrow.trim()}`);
-    }
-    return out;
-  }, [initialText, misc, tomorrow]);
+  // Rebuilt from the same formatter the server used, rather than patched with
+  // string replacement — the sections have to come out in a fixed order and
+  // splicing them in by hand got that wrong as soon as one was empty.
+  const text = useMemo(
+    () => formatUpdate(update, { misc, blockers, tomorrow }),
+    [update, misc, blockers, tomorrow],
+  );
 
   const copy = async () => {
     try {
@@ -90,6 +83,18 @@ export function UpdateClient({
             onChange={(e) => setMisc(e.target.value)}
             rows={3}
             placeholder="Other network tasks — calls, escalations, anything the funnel does not record"
+            className="mt-1 w-full rounded-md border border-ink-200 bg-surface p-2 text-sm"
+          />
+        </div>
+        <div>
+          <label className="text-[11px] uppercase tracking-wide text-ink-400 font-semibold">
+            Help needed / blockers
+          </label>
+          <textarea
+            value={blockers}
+            onChange={(e) => setBlockers(e.target.value)}
+            rows={2}
+            placeholder="Nil"
             className="mt-1 w-full rounded-md border border-ink-200 bg-surface p-2 text-sm"
           />
         </div>
