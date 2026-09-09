@@ -197,6 +197,41 @@ ALIGN
   fi
 done
 
+# ---- Phase 0.7: snapshot columns the source has dropped ----------------------
+# The mirror image of 0.6. When the source drops a column, 0.6 removes it from
+# the foreign table, and Phase 2a — which builds its column list from src —
+# stops supplying it. If the snapshot column is NOT NULL with no default, EVERY
+# row of the insert then fails, instantly and identically on all three retries
+# (this is exactly how Master."isTestProfile" emptied the whole test catalogue).
+#
+# We do not drop these columns: Atlas views legitimately read some of them
+# (Master."isTestProfile" -> is_profile in the pricing MVs). We make them
+# nullable so the copy survives, and leave any backfill to Phase 2a.5.
+log "Phase 0.7/4 · relaxing snapshot columns the source no longer sends"
+$PG >>"$LOG" 2>&1 <<'ORPHAN' || log "  WARN: orphan-column relax failed"
+DO $$
+DECLARE r record;
+BEGIN
+  FOR r IN
+    SELECT c.relname AS tbl, a.attname AS col
+    FROM pg_attribute a
+    JOIN pg_class c ON c.oid = a.attrelid
+    JOIN pg_namespace n ON n.oid = c.relnamespace
+    WHERE n.nspname = 'src_local' AND a.attnum > 0 AND NOT a.attisdropped
+      AND a.attnotnull
+      AND NOT EXISTS (
+        SELECT 1 FROM pg_attribute a2
+        JOIN pg_class c2 ON c2.oid = a2.attrelid
+        JOIN pg_namespace n2 ON n2.oid = c2.relnamespace
+        WHERE n2.nspname = 'src' AND c2.relname = c.relname
+          AND a2.attname = a.attname AND a2.attnum > 0 AND NOT a2.attisdropped)
+  LOOP
+    EXECUTE format('ALTER TABLE src_local.%I ALTER COLUMN %I DROP NOT NULL', r.tbl, r.col);
+    RAISE NOTICE 'src_local.%: dropped NOT NULL on orphaned column %', r.tbl, r.col;
+  END LOOP;
+END $$;
+ORPHAN
+
 # ---- Phase 1: TRUNCATE -----------------------------------------------------
 log "Phase 1/4 · TRUNCATE src_local tables"
 $PG <<'SQL' || fail "Truncate failed"
@@ -233,6 +268,26 @@ for t in Chain ProviderType Pharmacy Store PincodeToLatLong Lab Provider Profile
   done
   [ "$ok" -eq 0 ] && log "  WARN: $t copy failed after 3 attempts (MVs will be partially stale)"
 done
+
+# ---- Phase 2a.5: derive what the source stopped sending ---------------------
+# The source dropped Master."isTestProfile", but the pricing MVs, the request
+# parser and enrich-catalogue all read it as is_profile. A profile is a test
+# that bundles other tests, which is precisely what a non-empty subTests says,
+# so we reconstruct it rather than let every test report as NULL. Phase 0.7
+# made the column nullable; this fills it. No-op once the source stops carrying
+# subTests too, or if it ever brings isTestProfile back.
+if $PG -t -A -c "SELECT 1 FROM information_schema.columns
+                  WHERE table_schema='src_local' AND table_name='Master'
+                    AND column_name='isTestProfile';" 2>/dev/null | grep -q 1 \
+   && ! $PG -t -A -c "SELECT 1 FROM information_schema.columns
+                       WHERE table_schema='src' AND table_name='Master'
+                         AND column_name='isTestProfile';" 2>/dev/null | grep -q 1; then
+  $PG -c "UPDATE src_local.\"Master\"
+             SET \"isTestProfile\" = COALESCE(array_length(\"subTests\", 1), 0) > 0
+           WHERE \"isTestProfile\" IS NULL;" >>"$LOG" 2>&1 \
+    && log "  Master.isTestProfile derived from subTests (source no longer sends it)" \
+    || log "  WARN: could not derive Master.isTestProfile"
+fi
 
 # Loud alert for any snapshot that ended the phase empty while its source
 # has rows — a silent version of this emptied /accounts for days.

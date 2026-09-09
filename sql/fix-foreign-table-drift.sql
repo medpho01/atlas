@@ -107,6 +107,40 @@ BEGIN
 END
 $fix$;
 
+-- The mirror image of the repair above. A column the source has dropped is no
+-- longer in src, so the snapshot copy (which builds its column list from src)
+-- stops supplying it. A NOT NULL snapshot column with no default then rejects
+-- EVERY row — the copy fails instantly and identically on each retry, which is
+-- how Master."isTestProfile" emptied the entire test catalogue.
+--
+-- We keep the columns: Atlas views read some of them. We just make them
+-- nullable so the copy can proceed, and let refresh-data.sh's Phase 2a.5
+-- reconstruct the values it knows how to derive.
+DO $orphans$
+DECLARE r record; n int := 0;
+BEGIN
+  FOR r IN
+    SELECT c.relname AS tbl, a.attname AS col
+    FROM pg_attribute a
+    JOIN pg_class c ON c.oid = a.attrelid
+    JOIN pg_namespace n ON n.oid = c.relnamespace
+    WHERE n.nspname = 'src_local' AND a.attnum > 0 AND NOT a.attisdropped
+      AND a.attnotnull
+      AND NOT EXISTS (
+        SELECT 1 FROM pg_attribute a2
+        JOIN pg_class c2 ON c2.oid = a2.attrelid
+        JOIN pg_namespace n2 ON n2.oid = c2.relnamespace
+        WHERE n2.nspname = 'src' AND c2.relname = c.relname
+          AND a2.attname = a.attname AND a2.attnum > 0 AND NOT a2.attisdropped)
+  LOOP
+    EXECUTE format('ALTER TABLE src_local.%I ALTER COLUMN %I DROP NOT NULL', r.tbl, r.col);
+    RAISE NOTICE 'src_local.%: dropped NOT NULL on orphaned column %', r.tbl, r.col;
+    n := n + 1;
+  END LOOP;
+  RAISE NOTICE 'orphaned NOT NULL columns relaxed: %', n;
+END
+$orphans$;
+
 \echo ''
 \echo '--- verifying every foreign table now survives a full-width read:'
 DO $verify$

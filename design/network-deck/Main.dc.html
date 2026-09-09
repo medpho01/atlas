@@ -95,7 +95,7 @@
     <span><b style="color: #454C5B; font-weight: 600;">Serviceable</b> = pincodes entered against the lab, plus the 20&thinsp;km catchment of each centre</span>
     <span><b style="color: #454C5B; font-weight: 600;">Depth</b> = median providers per serviceable pincode</span>
     <span><b style="color: #454C5B; font-weight: 600;">*</b> counted at the provider&rsquo;s own location, without a travel radius &mdash; a floor, not a reach</span>
-    <span style="color: #d97706;">Specialised tests and Pharmacy are filled by hand</span>
+    <span style="color: #d97706;">Specialised tests, Processing labs and Pharmacy are filled by hand</span>
   </div>
 </div>
 </x-dc>
@@ -123,11 +123,12 @@ class Component extends DCLogic {
         { family: 'Place-bound capacity', note: 'serviceable pincodes', dot: '#1f4ed6', rows: [
           row('Centre visit',                '2,131', '+78', '8,910', '5.0'),
           row('Home sample collection',      '257',   '+40', '8,822', '5.0'),
-          row('Processing labs',             '14',    '+4',  '1,511', '1.0'),
+
           row('PPMC network',                '42',    '+17', '1,330', '1.0'),
           row('Offline doctor consultation', '909',    '+141', '53*',    '—'),
           row('Dental network',              '30',     '+4',   '11*',    '—'),
           row('Specialised tests',           'manual', '—',    'manual', '—'),
+          row('Processing labs',             'manual', '—',    'manual', '—'),
           row('Pharmacy',                    'manual', '—',    'manual', '—'),
         ]},
         { family: 'People', note: 'headcount, and where they are', dot: '#16a34a', rows: [
