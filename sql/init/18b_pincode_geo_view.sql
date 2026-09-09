@@ -9,6 +9,31 @@
 -- Idempotent and transactional: if anything fails, nothing changes.
 
 \set ON_ERROR_STOP on
+
+-- Resolve coordinates FIRST.
+--
+-- This view reads atlas.pincode_geo, and the prefix fallbacks are averages of
+-- what is in it — so if it is empty, every pincode resolves to 'none' and the
+-- dependent views are rebuilt against nothing. Centre-visit reach silently
+-- becomes zero and the map goes blank, with no error anywhere, which is
+-- exactly what happened when the refresh that populates it ran from an image
+-- that did not yet have the step. Idempotent, so running it here costs a
+-- minute and removes the ordering trap entirely.
+SELECT * FROM atlas.rebuild_pincode_geo();
+
+DO $check$
+DECLARE n int;
+BEGIN
+  SELECT COUNT(*) INTO n FROM atlas.pincode_geo;
+  IF n = 0 THEN
+    RAISE EXCEPTION 'atlas.pincode_geo is empty after a rebuild — refusing to swap the view, '
+                    'because every pincode would resolve to no coordinates at all. '
+                    'Check that src_local."PincodeToLatLong" has been copied by a refresh.';
+  END IF;
+  RAISE NOTICE 'atlas.pincode_geo holds % located pincodes', n;
+END
+$check$;
+
 BEGIN;
 
 CREATE TEMP TABLE _saved AS

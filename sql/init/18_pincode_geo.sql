@@ -129,3 +129,9 @@ BEGIN
          COUNT(*)::int
   FROM atlas.pincode_geo;
 END $$;
+
+-- Populate on install. Creating the table without filling it leaves every
+-- pincode unlocated, and the view that reads it then resolves everything to
+-- 'none' — no coordinates, no centre-visit reach, an empty map. Nothing warns
+-- you, because an empty table is not an error.
+SELECT * FROM atlas.rebuild_pincode_geo();
