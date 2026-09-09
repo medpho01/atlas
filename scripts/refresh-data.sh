@@ -28,6 +28,14 @@ set -u
 
 PG="psql -h atlas-db -U atlas -d atlas -v ON_ERROR_STOP=1 -X -q"
 LOG=/var/log/atlas-refresh.log
+# The log volume has come back non-writable before, and because every psql
+# call redirects into $LOG, that silently threw away the only copy of each
+# error — twice now we have had to reproduce a failure by hand to read it.
+# Fall back to somewhere writable rather than lose them.
+if ! ( : >>"$LOG" ) 2>/dev/null; then
+  LOG=/tmp/atlas-refresh.log
+  : >>"$LOG" 2>/dev/null || LOG=/dev/null
+fi
 BIG_TABLE_WINDOW='18 months'
 CHUNK_SIZE=1000
 # Iterate id ranges blindly from 0 up to this ceiling. Past the real MAX(id)
@@ -45,6 +53,26 @@ CHUNK_TIMEOUT_MS=60000
 
 log()  { echo "[$(date -Iseconds)] $*" | tee -a "$LOG" >&2; }
 fail() { log "FATAL: $*"; exit 1; }
+
+# ---- Single-instance lock ---------------------------------------------------
+# Two refreshes at once interleave TRUNCATE and INSERT on the same src_local
+# tables, and the second one dies on "duplicate key ... _pkey" for whatever it
+# happens to collide on. That looks exactly like schema corruption and is not,
+# so refuse the second run instead of letting it corrupt the diagnosis. A manual
+# run while the nightly loop is mid-flight is the usual way this happens.
+LOCK=/tmp/atlas-refresh.lock
+if ! mkdir "$LOCK" 2>/dev/null; then
+  holder=$(cat "$LOCK/pid" 2>/dev/null || echo unknown)
+  if [ "$holder" != unknown ] && ! kill -0 "$holder" 2>/dev/null; then
+    log "  stale lock from dead pid $holder — taking over"
+    rm -f "$LOCK/pid"
+  else
+    log "FATAL: another refresh is already running (pid $holder). Refusing to run two at once."
+    exit 1
+  fi
+fi
+echo $$ > "$LOCK/pid"
+trap 'rm -rf "$LOCK"' EXIT INT TERM
 
 log "=========================================="
 log "Atlas data refresh starting"
@@ -256,16 +284,23 @@ for t in Chain ProviderType Pharmacy Store PincodeToLatLong Lab Provider Profile
                         FROM information_schema.columns
                         WHERE table_schema='src' AND table_name='$t';")
   ok=0
+  err=$(mktemp)
   for try in 1 2 3; do
-    if $PG -c "INSERT INTO src_local.\"$t\" ($cols) SELECT $cols FROM src.\"$t\";" >>"$LOG" 2>&1; then
+    if $PG -c "INSERT INTO src_local.\"$t\" ($cols) SELECT $cols FROM src.\"$t\";" >"$err" 2>&1; then
+      cat "$err" >>"$LOG"
       n=$($PG -t -A -c "SELECT COUNT(*) FROM src_local.\"$t\";")
       log "  $t → $n rows"
       ok=1
       break
     fi
-    log "  $t attempt $try failed, retrying in 5s"
+    cat "$err" >>"$LOG"
+    # Say WHY, in the operator's terminal. The error used to go only to $LOG,
+    # so a copy that failed identically on all three attempts looked like a
+    # flake when it was in fact a deterministic schema problem.
+    log "  $t attempt $try failed: $(head -3 "$err" | tr '\n' ' ')"
     sleep 5
   done
+  rm -f "$err"
   [ "$ok" -eq 0 ] && log "  WARN: $t copy failed after 3 attempts (MVs will be partially stale)"
 done
 
