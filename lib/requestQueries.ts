@@ -410,7 +410,7 @@ export async function getPincodeIntel(pincode: string) {
     CROSS JOIN r CROSS JOIN c
     LEFT JOIN n ON true
     LEFT JOIN analytics.mv_pincode_summary ps ON ps.pincode = $1
-    LEFT JOIN atlas.city_tier ct ON ct.city_key = atlas.city_key(d.city)
+    LEFT JOIN atlas.city_tier_canon ct ON ct.city_key = atlas.city_key(d.city)
   `, [pincode]);
 }
 

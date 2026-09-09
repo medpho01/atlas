@@ -90,3 +90,30 @@ LANGUAGE sql STABLE PARALLEL SAFE AS $$
     TRIM(raw)
   )
 $$;
+
+-- ---------------------------------------------------------------------------
+-- City tiers, keyed the way everything else keys cities.
+--
+-- atlas.city_tier is written by scripts/enrich-city-tiers.ts, which keys rows
+-- on the RAW normalised city name. Everything that reads it joins with
+-- atlas.city_key(), which resolves aliases first. So a lab in "Bangalore"
+-- looked up 'bengaluru' and found nothing, because the tier row is 'bangalore'
+-- — 207 labs across Bangalore, Gurgaon, Allahabad, Calicut and others silently
+-- had no tier at all. On the public network page that meant every one of them
+-- was treated as non-metro and given the wider catchment radius, which is why
+-- tightening metros to 5km barely moved the number.
+--
+-- The view resolves the key on read, so it is correct whichever way a row was
+-- written. Where an alias and its canonical name both carry a tier, a human
+-- classification wins, then the more confident one.
+-- ---------------------------------------------------------------------------
+CREATE OR REPLACE VIEW atlas.city_tier_canon AS
+SELECT DISTINCT ON (atlas.city_key(city))
+       atlas.city_key(city) AS city_key,
+       tier,
+       source,
+       confidence
+FROM atlas.city_tier
+ORDER BY atlas.city_key(city),
+         (source = 'human') DESC,
+         confidence DESC NULLS LAST;

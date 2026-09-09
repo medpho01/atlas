@@ -54,7 +54,7 @@ BEGIN
     COUNT(*) FILTER (WHERE p.active)::int,
     false
   FROM analytics.mv_provider_unified p
-  LEFT JOIN atlas.city_tier ct
+  LEFT JOIN atlas.city_tier_canon ct
     ON ct.city_key = atlas.city_key(p.city)
   GROUP BY 1, 2, 3, 4
   ON CONFLICT (week_start, city, kind) DO UPDATE SET
@@ -105,7 +105,7 @@ BEGIN
   -- at the join between reconstructed and observed weeks.
   JOIN analytics.mv_provider_unified pu
     ON pu.source_table = 'Lab' AND pu.source_id = l.id
-  LEFT JOIN atlas.city_tier ct
+  LEFT JOIN atlas.city_tier_canon ct
     ON ct.city_key = atlas.city_key(l.city)
   GROUP BY 1, 2, 3, 4
   -- An observed row always wins: never overwrite live data with a guess.

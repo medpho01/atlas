@@ -22,7 +22,7 @@ WITH centre_radius AS (
   SELECT p.entity_id,
          (CASE WHEN ct.tier = 'Tier 1' THEN 5::numeric ELSE 10::numeric END) AS radius
   FROM analytics.mv_provider_unified p
-  LEFT JOIN atlas.city_tier ct ON ct.city_key = atlas.city_key(p.city)
+  LEFT JOIN atlas.city_tier_canon ct ON ct.city_key = atlas.city_key(p.city)
   WHERE p.kind IN ('LAB','HOSPITAL')
 ),
 cv AS (
@@ -70,7 +70,7 @@ WITH centre_radius AS (
   SELECT p.entity_id,
          (CASE WHEN ct.tier = 'Tier 1' THEN 5::numeric ELSE 10::numeric END) AS radius
   FROM analytics.mv_provider_unified p
-  LEFT JOIN atlas.city_tier ct ON ct.city_key = atlas.city_key(p.city)
+  LEFT JOIN atlas.city_tier_canon ct ON ct.city_key = atlas.city_key(p.city)
   WHERE p.kind IN ('LAB','HOSPITAL')
 ),
 cv AS (

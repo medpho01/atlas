@@ -109,7 +109,7 @@ type CityRow = { city_key: string; city: string; states: string | null; labs: nu
  */
 async function pending(): Promise<CityRow[]> {
   const { rows } = await pool.query<CityRow>(`
-    SELECT regexp_replace(lower(TRIM(l.city)), '[^a-z0-9]', '', 'g') AS city_key,
+    SELECT atlas.city_key(l.city) AS city_key,
            MIN(TRIM(l.city)) AS city,
            string_agg(DISTINCT NULLIF(TRIM(l.state), '-'), ', ') AS states,
            COUNT(*)::int     AS labs
@@ -121,7 +121,7 @@ async function pending(): Promise<CityRow[]> {
         $1::boolean
         OR NOT EXISTS (
           SELECT 1 FROM atlas.city_tier ct
-          WHERE ct.city_key = regexp_replace(lower(TRIM(l.city)), '[^a-z0-9]', '', 'g')
+          WHERE ct.city_key = atlas.city_key(l.city)
             AND (ct.source = 'human' OR ct.prompt_version >= $2)
         )
       )

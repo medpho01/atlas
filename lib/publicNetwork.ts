@@ -209,7 +209,7 @@ export async function getPincodeNetwork(pincode: string): Promise<PincodeLookup>
       r.distance_km::float8 AS distance_km,
       (CASE WHEN ct.tier = 'Tier 1' THEN $2::numeric ELSE $3::numeric END)::float8 AS radius_km
     FROM analytics.mv_pincode_cv_reach r
-    LEFT JOIN atlas.city_tier ct ON ct.city_key = atlas.city_key(r.city)
+    LEFT JOIN atlas.city_tier_canon ct ON ct.city_key = atlas.city_key(r.city)
     WHERE r.covered_pincode = $1
       AND r.distance_km <= GREATEST($2::numeric, $3::numeric)
       AND r.distance_km <= CASE WHEN ct.tier = 'Tier 1' THEN $2::numeric ELSE $3::numeric END

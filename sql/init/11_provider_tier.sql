@@ -68,7 +68,7 @@ SELECT
 -- Chain has no snapshot and is small, so it stays on the live foreign table.
 FROM src_local."Lab" l
 LEFT JOIN src."Chain" c ON c.id = l.chain_id
-LEFT JOIN atlas.city_tier ct
+LEFT JOIN atlas.city_tier_canon ct
   ON ct.city_key = atlas.city_key(l.city)
 LEFT JOIN per_lab p ON p.lab_id = l.id
 LEFT JOIN analytics.mv_lab_quality_v2 q ON q.lab_id = l.id
