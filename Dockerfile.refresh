@@ -17,7 +17,8 @@ COPY scripts/refresh-loop.sh /loop.sh
 COPY scripts/commitment-loop.sh /commitment-loop.sh
 COPY scripts/load-pincode-geo.sh /load-pincode-geo.sh
 COPY scripts/refresh-views.sh /refresh-views.sh
-RUN chmod +x /refresh.sh /loop.sh /commitment-loop.sh /load-pincode-geo.sh /refresh-views.sh \
+COPY scripts/check-pincode-geo.sh /check-pincode-geo.sh
+RUN chmod +x /refresh.sh /loop.sh /commitment-loop.sh /load-pincode-geo.sh /refresh-views.sh /check-pincode-geo.sh \
  && mkdir -p /var/log \
  && touch /var/log/atlas-refresh.log
 
