@@ -161,14 +161,32 @@ export function BoardClient({
         <span className="ml-auto text-[12px] text-ink-500">{filtered.length} providers shown</span>
       </div>
 
-      {/* Board */}
-      <div className="flex gap-3 overflow-x-auto pb-4 items-start">
+      {/* Board
+          Three things were off with the horizontal scroll:
+
+          overscroll-x-contain — without it a trackpad swipe past the last
+          column chains to the browser and triggers back-navigation. You go to
+          look at "Onboarded" and leave the page.
+
+          -mx/px bleed — the scroller used to start and end inside the page
+          padding, so columns were clipped on a line 24px inside the window with
+          dead gutters either side. Now the track runs edge to edge and the
+          padding is inside it, so the first and last column sit correctly and
+          cards scroll under the margin rather than being cut at it.
+
+          snap-proximity — nine columns at 260px never land anywhere sensible
+          otherwise. Proximity rather than mandatory: mandatory fights you when
+          you are scrolling deliberately across several columns. */}
+      <div className="flex gap-3 items-start pb-4
+                      overflow-x-auto overscroll-x-contain
+                      snap-x snap-proximity scroll-px-6
+                      -mx-6 px-6">
         {stages.map((s) => {
           const cards = byStage.get(s.key) ?? [];
           const isTerminalGood = s.key === thread.success_stage_key;
           const isTerminalBad = !isTerminalGood && /stall|drop|lost|reject|dead/i.test(s.key + s.label);
           return (
-            <div key={s.key} className="w-[260px] shrink-0">
+            <div key={s.key} className="w-[260px] shrink-0 snap-start">
               <div className={`px-3 py-2 rounded-t-xl border border-b-0 text-[12px] font-semibold flex items-center justify-between ${
                 isTerminalGood ? 'bg-success-50 text-success-600 border-success-100'
                 : isTerminalBad ? 'bg-danger-50 text-danger-500 border-danger-100'
