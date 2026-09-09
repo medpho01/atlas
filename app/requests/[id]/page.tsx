@@ -5,10 +5,13 @@ import { RoleBlocked } from '@/components/RoleBlocked';
 import { FileText, ArrowLeft } from 'lucide-react';
 import { Card, CardHeader, CardBody } from '@/components/ui/Card';
 import { PageHeader } from '@/components/ui/PageHeader';
+import { Pill } from '@/components/ui/Toggle';
 import {
-  getRequest, getRequestItems, getCoveringLabs, getDiscoveredLabs, getPackageTests,
+  getRequest, getRequestItems, getCoveringLabs, getPackageTests,
   getPincodeIntel,
 } from '@/lib/requestQueries';
+import { getDiscoveryCandidates } from '@/lib/discoveryQueries';
+import { rankProviders, type RankableProvider } from '@/lib/providerRanking';
 import { lastDiscoveryRun } from '@/lib/discoverLabs';
 import {
   STATE_SHORT, STATE_TONE, TONE_CHIP, BASIS_LABEL, BASIS_STRENGTH, DISCIPLINE_LABEL,
@@ -35,10 +38,10 @@ export default async function RequestDetail({ params }: { params: { id: string }
   const r = await getRequest(id);
   if (!r) notFound();
 
-  const [items, labs, leads, packs, lastRun, intel] = await Promise.all([
+  const [items, labs, candidates, packs, lastRun, intel] = await Promise.all([
     getRequestItems(id),
     getCoveringLabs(id),
-    r.pincode ? getDiscoveredLabs(r.pincode) : Promise.resolve([]),
+    r.pincode ? getDiscoveryCandidates(r.pincode) : Promise.resolve([]),
     getPackageTests(id),
     r.pincode ? lastDiscoveryRun(r.pincode) : Promise.resolve(null),
     r.pincode ? getPincodeIntel(r.pincode) : Promise.resolve(null),
@@ -48,6 +51,28 @@ export default async function RequestDetail({ params }: { params: { id: string }
   // lab exists there is a real relationship to use, and an unverified search
   // result would only compete with it.
   const noLabHere = labs.length === 0 || labs.every((l) => (l.missing ?? 1) > 0);
+
+  // Same ranking engine as /discovery, applied inline instead of linked out to
+  // it. Every lead here already shares this request's exact pincode, so
+  // proximity is real but genuinely non-discriminating within it — one
+  // pincode has one centroid, so every lead ties on distance (see
+  // lib/discoveryQueries.ts). Accreditation, services and reviews stay
+  // unknown for the same reason they do on /discovery: that data doesn't
+  // exist on discovered_lab yet.
+  const rankable: (RankableProvider & { id: number; crm_provider_id: number | null; source_url: string | null })[] =
+    candidates.map((c) => ({
+      id: c.id,
+      name: c.name,
+      address: c.address,
+      phone: c.phone,
+      services: null,
+      accredited: null,
+      distanceKm: c.distance_km,
+      reviewScore: null,
+      crm_provider_id: c.crm_provider_id,
+      source_url: c.source_url,
+    }));
+  const ranked = rankProviders(rankable);
 
   const tone = STATE_TONE[r.state] ?? 'ink';
 
@@ -201,11 +226,11 @@ export default async function RequestDetail({ params }: { params: { id: string }
             </CardBody>
           </Card>
 
-          {(noLabHere || leads.length > 0) && r.pincode && (
+          {(noLabHere || candidates.length > 0) && r.pincode && (
             <Card>
               <CardHeader
                 title="Labs found on the open web"
-                subtitle="Unverified search results — leads to call, not network records." />
+                subtitle="Unverified search results, ranked — closest and most-complete leads first." />
               <CardBody className="pt-0">
                 <div className="mb-3">
                   <FindLabs pincode={r.pincode} city={r.city} state={r.state_name}
@@ -218,7 +243,7 @@ export default async function RequestDetail({ params }: { params: { id: string }
                     </p>
                   )}
                 </div>
-                {leads.length === 0 && (
+                {ranked.length === 0 && (
                   <p className="text-xs text-ink-500">
                     Nothing found yet for {r.pincode}. Searching costs a few seconds and the
                     results are cached, so it is worth doing once per pincode rather than once
@@ -226,25 +251,41 @@ export default async function RequestDetail({ params }: { params: { id: string }
                   </p>
                 )}
                 <ul className="text-sm divide-y divide-ink-100">
-                  {leads.map((l) => (
-                    <li key={l.id} className="py-2">
-                      <div className="flex items-baseline gap-2">
-                        <span className="font-medium text-ink-900">{l.name}</span>
-                        <span className="text-[10px] uppercase tracking-wide text-warn-600
-                                         border border-warn-100 bg-warn-50 rounded px-1">
-                          unverified
-                        </span>
-                        <span className="ml-auto">
-                          <LeadActions leadId={l.id} promoted={!!l.crm_provider_id} />
-                        </span>
-                      </div>
-                      <div className="text-xs text-ink-600">{l.address}</div>
-                      {l.phone && <div className="text-xs text-ink-700 num">{l.phone}</div>}
-                      {l.source_url && (
-                        <div className="text-[10px] text-ink-400 truncate">{l.source_url}</div>
-                      )}
-                    </li>
-                  ))}
+                  {ranked.map((s) => {
+                    const l = s.provider;
+                    return (
+                      <li key={l.id} className="py-2">
+                        <div className="flex items-baseline gap-2 flex-wrap">
+                          <span className="inline-flex items-center justify-center w-5 h-5 rounded-full
+                                           bg-ink-100 text-ink-700 text-[11px] font-semibold shrink-0">
+                            {s.rank}
+                          </span>
+                          <span className="font-medium text-ink-900">{l.name}</span>
+                          <span className="text-[10px] uppercase tracking-wide text-warn-600
+                                           border border-warn-100 bg-warn-50 rounded px-1">
+                            unverified
+                          </span>
+                          <span className="text-[11px] text-ink-400 tabular-nums">[{s.score.toFixed(3)}]</span>
+                          <span className="ml-auto">
+                            <LeadActions leadId={l.id} promoted={!!l.crm_provider_id} />
+                          </span>
+                        </div>
+                        {l.address && <div className="text-xs text-ink-600 mt-0.5">{l.address}</div>}
+                        {l.phone && <div className="text-xs text-ink-700 num">{l.phone}</div>}
+                        <div className="text-xs text-ink-700 mt-1">{s.explanation}</div>
+                        {s.missing.length > 0 && (
+                          <div className="mt-1 flex flex-wrap gap-1">
+                            {s.missing.map((m) => (
+                              <Pill key={m} tone="neutral">Unknown: {m.replace('_', ' ')}</Pill>
+                            ))}
+                          </div>
+                        )}
+                        {l.source_url && (
+                          <div className="text-[10px] text-ink-400 truncate mt-0.5">{l.source_url}</div>
+                        )}
+                      </li>
+                    );
+                  })}
                 </ul>
               </CardBody>
             </Card>
