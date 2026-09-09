@@ -36,7 +36,6 @@ export default async function ReadinessPage({
     <div className="px-6 lg:px-8 py-6 max-w-[1600px] mx-auto">
       <PageHeader
         title="City Readiness"
-        subtitle="Could we sell into this city tomorrow? One score per city, and the specific gaps behind it."
         actions={
           <InfoTip
             title="City Readiness"
