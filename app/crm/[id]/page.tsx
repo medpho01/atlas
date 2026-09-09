@@ -4,7 +4,7 @@ import { ArrowLeft, Target } from 'lucide-react';
 import { getSessionUser } from '@/lib/auth';
 import { canAccess } from '@/lib/access';
 import { RoleBlocked } from '@/components/RoleBlocked';
-import { getThread, getThreadProviders, getChecklist, listTeam, getThreadStats, canWriteCrm } from '@/lib/crm';
+import { getThread, getThreadProviders, getChecklist, listTeam, getThreadStats, canWriteCrm, listThreads } from '@/lib/crm';
 import { BoardClient } from './BoardClient';
 import { ThreadStats } from './ThreadStats';
 
@@ -30,12 +30,18 @@ export default async function ThreadPage({
   const thread = await getThread(threadId);
   if (!thread) notFound();
 
-  const [providers, checklist, team, stats] = await Promise.all([
+  const [providers, checklist, team, stats, allThreads] = await Promise.all([
     getThreadProviders(threadId),
     getChecklist(threadId),
     listTeam(),
     getThreadStats(threadId),
+    listThreads(),
   ]);
+  // Somewhere to send selected cards. Finished campaigns are left out — adding
+  // work to a thread marked done is almost never the intent.
+  const otherThreads = allThreads
+    .filter((t) => t.id !== threadId && t.status !== 'done')
+    .map((t) => ({ id: t.id, name: t.name }));
 
   return (
     <main className="mx-auto max-w-[1500px] px-6 py-6">
@@ -55,6 +61,7 @@ export default async function ThreadPage({
       <ThreadStats thread={thread} stats={stats} />
 
       <BoardClient
+        otherThreads={otherThreads}
         thread={thread}
         initialProviders={providers}
         checklist={checklist}

@@ -6,7 +6,7 @@ import {
   ArrowRight, StickyNote, Clock, Phone, Mail, MapPin, Upload as UploadIcon, Settings2, Trash2,
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
-import { createProvider, moveStage, assignProvider, addNote, updateProvider, bulkCreateProviders, addChecklistItem, removeChecklistItem, removeFromThread, bulkUpdateProviders, checkProviderDuplicates, type DupStatus } from '../actions';
+import { createProvider, moveStage, assignProvider, addNote, updateProvider, bulkCreateProviders, addChecklistItem, removeChecklistItem, removeFromThread, bulkUpdateProviders, checkProviderDuplicates, addProvidersToThread, type DupStatus } from '../actions';
 import type { Thread, ThreadProvider, ChecklistItem, ProviderDoc, Activity, FunnelStage } from '@/lib/crm';
 import { PROVIDER_KINDS } from '@/lib/providerKinds';
 import { ProviderDrawer } from '../ProviderDrawer';
@@ -15,6 +15,7 @@ type Team = { id: number; name: string; role: string }[];
 
 export function BoardClient({
   thread, initialProviders, checklist, team, canWrite, myId, openProviderId, focusAssigneeId,
+  otherThreads = [],
 }: {
   thread: Thread;
   initialProviders: ThreadProvider[];
@@ -26,6 +27,8 @@ export function BoardClient({
   openProviderId?: number | null;
   /** …and keep the person filter the queue was showing. */
   focusAssigneeId?: number | null;
+  /** Every other live thread, so cards can be put on one without leaving. */
+  otherThreads?: { id: number; name: string }[];
 }) {
   const [providers, setProviders] = useState(initialProviders);
   const [openId, setOpenId] = useState<number | null>(openProviderId ?? null);
@@ -37,6 +40,9 @@ export function BoardClient({
   const [assigneeFilter, setAssigneeFilter] = useState<number | 'all' | 'mine'>(focusAssigneeId ?? 'all');
   const [pending, startTransition] = useTransition();
   const [err, setErr] = useState<string | null>(null);
+  // Confirmation for actions whose result is not visible on this board — a
+  // card added to another thread does not change anything you can see here.
+  const [note, setNote] = useState<string | null>(null);
 
   const stages: FunnelStage[] = thread.stages;
   const open = providers.find((p) => p.id === openId) ?? null;
@@ -282,6 +288,38 @@ export function BoardClient({
             {stages.map((st) => <option key={st.key} value={st.key}>{st.label}</option>)}
           </select>
 
+          {/* Adds, rather than moves: a provider can be worked in two
+              campaigns at once and the record is shared, so putting it on
+              another thread must not take it off this one. Use Remove for
+              that, deliberately and separately. */}
+          {otherThreads.length > 0 && (
+            <select
+              defaultValue=""
+              onChange={(e) => {
+                const id = Number(e.target.value);
+                e.target.value = '';
+                if (!id) return;
+                startTransition(async () => {
+                  setErr(null);
+                  const res = await addProvidersToThread({
+                    providerIds: [...picked], threadId: id,
+                  });
+                  if (!res.ok) { setErr(res.error ?? 'Failed'); return; }
+                  const name = otherThreads.find((t) => t.id === id)?.name ?? 'thread';
+                  setNote(res.already
+                    ? `Added ${res.added} to ${name} · ${res.already} were already there`
+                    : `Added ${res.added} to ${name}`);
+                  setPicked(new Set());
+                });
+              }}
+              disabled={pending}
+              className="h-8 px-2 text-[12px] rounded-md border border-ink-200 bg-surface"
+            >
+              <option value="" disabled>Add to thread…</option>
+              {otherThreads.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+            </select>
+          )}
+
           {confirmBulkRemove ? (
             <span className="inline-flex items-center gap-1.5">
               <span className="text-[12px] text-ink-700">Remove {picked.size} from thread?</span>
@@ -300,7 +338,8 @@ export function BoardClient({
             </button>
           )}
 
-          <button onClick={() => setPicked(new Set())} className="ml-auto text-[12px] text-ink-500 hover:text-ink-900">
+          {note && <span className="text-[12px] text-success-600">{note}</span>}
+          <button onClick={() => { setPicked(new Set()); setNote(null); }} className="ml-auto text-[12px] text-ink-500 hover:text-ink-900">
             Clear
           </button>
         </div>
