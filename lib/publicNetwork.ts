@@ -1,4 +1,5 @@
 import 'server-only';
+import { unstable_cache } from 'next/cache';
 import { query, queryOne } from './db';
 
 /**
@@ -34,12 +35,35 @@ const NON_METRO_RADIUS_KM = Number(process.env.CV_REACH_RADIUS_KM ?? 10);
  * $1 = metro radius, $2 = non-metro radius. Callers that need extra columns
  * select them from `r`.
  */
-const CV_REACH_SQL = `
-  SELECT r.*
-  FROM analytics.mv_pincode_cv_reach r
-  LEFT JOIN atlas.city_tier ct ON ct.city_key = atlas.city_key(r.city)
-  WHERE r.distance_km <= CASE WHEN ct.tier = 'Tier 1' THEN $1::numeric ELSE $2::numeric END
-`;
+/**
+ * The tier-aware radius, resolved once per CENTRE.
+ *
+ * There are a couple of thousand centres and hundreds of thousands of reach
+ * rows, so the tier lookup belongs on the small side. Doing it per reach row —
+ * a function call on each — turned a 50ms index scan into 2.4s.
+ *
+ * $1 = metro radius, $2 = non-metro radius.
+ */
+const CENTRE_RADIUS_CTE = `
+  centre_radius AS (
+    SELECT p.entity_id,
+           (CASE WHEN ct.tier = 'Tier 1' THEN $1::numeric ELSE $2::numeric END) AS radius
+    FROM analytics.mv_provider_unified p
+    LEFT JOIN atlas.city_tier ct ON ct.city_key = atlas.city_key(p.city)
+    WHERE p.kind IN ('LAB','HOSPITAL')
+  )`;
+
+/** Centre-visit reach with that radius applied. Expects centre_radius in scope. */
+const CV_REACH_CTE = `
+  cv AS (
+    SELECT r.*
+    FROM analytics.mv_pincode_cv_reach r
+    JOIN centre_radius cr ON cr.entity_id = r.entity_id
+    -- The constant bound is what lets the distance index make the first cut;
+    -- the per-centre one then tightens it.
+    WHERE r.distance_km <= GREATEST($1::numeric, $2::numeric)
+      AND r.distance_km <= cr.radius
+  )`;
 
 const RADII: [number, number] = [METRO_RADIUS_KM, NON_METRO_RADIUS_KM];
 
@@ -61,9 +85,10 @@ export type NetworkStats = {
   distinct_cities: number;
 };
 
-export async function getNetworkStats(): Promise<NetworkStats> {
+async function networkStats(): Promise<NetworkStats> {
   const row = await queryOne<NetworkStats>(`
-    WITH cv AS (${CV_REACH_SQL}),
+    WITH ${CENTRE_RADIUS_CTE},
+    ${CV_REACH_CTE},
     cv_pin AS (SELECT DISTINCT covered_pincode AS pincode FROM cv),
     hs AS (
       SELECT DISTINCT pincode FROM analytics.mv_pincode_coverage
@@ -151,8 +176,21 @@ async function staffStrength(view: 'phlebos_all' | 'nurses_all'): Promise<StaffS
   }
 }
 
-export const getPhleboStrength = () => staffStrength('phlebos_all');
-export const getNurseStrength  = () => staffStrength('nurses_all');
+/**
+ * The page is force-dynamic (it needs the session to decide its chrome), which
+ * overrides `revalidate` — so before this every single visitor recomputed all
+ * four queries against the reach MV, and concurrent visitors piled onto the
+ * database. The underlying data changes once a night, so it is cached here
+ * instead, independently of how the page itself renders.
+ */
+const CACHE_TTL_SECONDS = 300;
+const cached = <T>(key: string, fn: () => Promise<T>) =>
+  unstable_cache(fn, ['public-network', key], { revalidate: CACHE_TTL_SECONDS });
+
+export const getNetworkStats    = cached('stats',   networkStats);
+export const getMapPoints       = cached('points',  mapPoints);
+export const getPhleboStrength  = cached('phlebos', () => staffStrength('phlebos_all'));
+export const getNurseStrength   = cached('nurses',  () => staffStrength('nurses_all'));
 
 export type NetworkMapPoint = {
   pincode: string;
@@ -162,9 +200,10 @@ export type NetworkMapPoint = {
   hs: number;            // labs serving this pincode via home sample
 };
 
-export async function getMapPoints(): Promise<NetworkMapPoint[]> {
+async function mapPoints(): Promise<NetworkMapPoint[]> {
   return query<NetworkMapPoint>(`
-    WITH cv AS (${CV_REACH_SQL}),
+    WITH ${CENTRE_RADIUS_CTE},
+    ${CV_REACH_CTE},
     cv_count AS (
       SELECT covered_pincode AS pincode, COUNT(DISTINCT entity_id)::int AS cv
       FROM cv GROUP BY covered_pincode
@@ -245,6 +284,7 @@ export async function getPincodeNetwork(pincode: string): Promise<PincodeLookup>
     FROM analytics.mv_pincode_cv_reach r
     LEFT JOIN atlas.city_tier ct ON ct.city_key = atlas.city_key(r.city)
     WHERE r.covered_pincode = $1
+      AND r.distance_km <= GREATEST($2::numeric, $3::numeric)
       AND r.distance_km <= CASE WHEN ct.tier = 'Tier 1' THEN $2::numeric ELSE $3::numeric END
     ORDER BY r.entity_id, r.distance_km
   `, [pincode, METRO_RADIUS_KM, NON_METRO_RADIUS_KM]);
