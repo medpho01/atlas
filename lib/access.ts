@@ -10,10 +10,10 @@
  * Nav and enforcement drifting apart is the failure mode this prevents.
  */
 
-export type Role = 'admin' | 'network' | 'accounts' | 'operations' | 'editor' | 'viewer';
+export type Role = 'admin' | 'network_lead' | 'network' | 'accounts' | 'operations' | 'editor' | 'viewer';
 
 /** Roles a new user can be given. editor/viewer are legacy — see LEGACY_ROLES. */
-export const ACTIVE_ROLES: Role[] = ['admin', 'network', 'accounts', 'operations'];
+export const ACTIVE_ROLES: Role[] = ['admin', 'network_lead', 'network', 'accounts', 'operations'];
 
 /**
  * Pre-dating the four-profile model. Kept so nobody on prod loses access at
@@ -24,6 +24,7 @@ export const LEGACY_ROLES: Role[] = ['editor', 'viewer'];
 
 export const ROLE_LABEL: Record<Role, string> = {
   admin: 'Admin',
+  network_lead: 'Network lead',
   network: 'Network',
   accounts: 'Accounts',
   operations: 'Operations',
@@ -33,7 +34,8 @@ export const ROLE_LABEL: Record<Role, string> = {
 
 export const ROLE_BLURB: Record<Role, string> = {
   admin: 'Everything, plus provisioning people and roles.',
-  network: 'Grows supply — owns the provider directory, rates and onboarding.',
+  network_lead: 'Runs the onboarding team — sees everyone\u2019s pipeline, owns threads and who works them.',
+  network: 'Grows supply — works the providers assigned to them.',
   accounts: 'Grows demand — owns account health and can read the network side.',
   operations: 'Fulfils today’s orders — reads coverage and the directory.',
   editor: 'Legacy role. Behaves like Network. Reassign and retire.',
@@ -74,18 +76,18 @@ const REQUIRES: Partial<Record<Feature, Feature>> = {
 };
 
 const MATRIX: Record<Feature, Record<Role, Capability>> = {
-  overview:         { admin: 'manage', network: 'view',   accounts: 'view',   operations: 'view',   editor: 'view',   viewer: 'view' },
-  coverage:         { admin: 'manage', network: 'view',   accounts: 'view',   operations: 'view',   editor: 'view',   viewer: 'view' },
-  directory:        { admin: 'manage', network: 'manage', accounts: 'view',   operations: 'view',   editor: 'manage', viewer: 'view' },
-  accountHealth:    { admin: 'manage', network: 'view',   accounts: 'manage', operations: 'none',   editor: 'view',   viewer: 'view' },
-  catalogue:        { admin: 'manage', network: 'manage', accounts: 'view',   operations: 'none',   editor: 'manage', viewer: 'view' },
-  pricing:          { admin: 'manage', network: 'manage', accounts: 'view',   operations: 'none',   editor: 'manage', viewer: 'view' },
-  providerPipeline: { admin: 'manage', network: 'manage', accounts: 'view',   operations: 'none',   editor: 'manage', viewer: 'view' },
+  overview:         { admin: 'manage', network_lead: 'view', network: 'view',   accounts: 'view',   operations: 'view',   editor: 'view',   viewer: 'view' },
+  coverage:         { admin: 'manage', network_lead: 'view', network: 'view',   accounts: 'view',   operations: 'view',   editor: 'view',   viewer: 'view' },
+  directory:        { admin: 'manage', network_lead: 'manage', network: 'manage', accounts: 'view',   operations: 'view',   editor: 'manage', viewer: 'view' },
+  accountHealth:    { admin: 'manage', network_lead: 'view', network: 'view',   accounts: 'manage', operations: 'none',   editor: 'view',   viewer: 'view' },
+  catalogue:        { admin: 'manage', network_lead: 'manage', network: 'manage', accounts: 'view',   operations: 'none',   editor: 'manage', viewer: 'view' },
+  pricing:          { admin: 'manage', network_lead: 'manage', network: 'manage', accounts: 'view',   operations: 'none',   editor: 'manage', viewer: 'view' },
+  providerPipeline: { admin: 'manage', network_lead: 'manage', network: 'manage', accounts: 'view',   operations: 'none',   editor: 'manage', viewer: 'view' },
   // Operations gets 'manage' on requests: quoting is their job, and this is
   // the one screen where they act rather than read.
-  requests:         { admin: 'manage', network: 'manage', accounts: 'view',   operations: 'manage', editor: 'view',   viewer: 'none' },
-  commitments:      { admin: 'manage', network: 'manage', accounts: 'view',   operations: 'view',   editor: 'view',   viewer: 'none' },
-  admin:            { admin: 'manage', network: 'none',   accounts: 'none',   operations: 'none',   editor: 'none',   viewer: 'none' },
+  requests:         { admin: 'manage', network_lead: 'manage', network: 'manage', accounts: 'view',   operations: 'manage', editor: 'view',   viewer: 'none' },
+  commitments:      { admin: 'manage', network_lead: 'manage', network: 'manage', accounts: 'view',   operations: 'view',   editor: 'view',   viewer: 'none' },
+  admin:            { admin: 'manage', network_lead: 'none', network: 'none',   accounts: 'none',   operations: 'none',   editor: 'none',   viewer: 'none' },
 };
 
 type UserLike = { role: Role } | null | undefined;

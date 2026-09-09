@@ -3,7 +3,7 @@ import { redirect } from 'next/navigation';
 import { getSessionUser } from '@/lib/auth';
 import { canAccess } from '@/lib/access';
 import { RoleBlocked } from '@/components/RoleBlocked';
-import { listThreads, listFunnels, canWriteCrm, listThreadMembers, listTeam } from '@/lib/crm';
+import { listThreads, listFunnels, canWriteCrm, listThreadMembers, listTeam, canLeadCrm } from '@/lib/crm';
 import { ThreadsClient } from '../ThreadsClient';
 import { CrmTabs } from '../CrmTabs';
 
@@ -16,6 +16,7 @@ export default async function CrmPage() {
     return <RoleBlocked area="The network CRM" detail="the network and admin teams" />;
   }
 
+  const isLead = canLeadCrm(me);
   const [threads, funnels, members, team] = await Promise.all([
     listThreads(), listFunnels(), listThreadMembers(), listTeam(),
   ]);
@@ -26,13 +27,13 @@ export default async function CrmPage() {
         <KanbanSquare className="w-5 h-5 text-brand-600" />
         <h1 className="text-2xl font-bold text-ink-900">Network CRM</h1>
       </div>
-      <CrmTabs active="/crm/threads" />
+      <CrmTabs active="/crm/threads" isLead={isLead} />
       <p className="text-sm text-ink-600 mb-6 max-w-3xl">
         Threads are onboarding campaigns with a target and a funnel. Assign providers to the team,
         track their journey stage by stage, and collect the document checklist so console onboarding
         can pick them up the moment they're ready.
       </p>
-      <ThreadsClient threads={threads} funnels={funnels} canWrite={canWriteCrm(me)}
+      <ThreadsClient threads={threads} funnels={funnels} canWrite={isLead}
         isAdmin={me?.role === 'admin'} members={members} team={team} />
     </main>
   );

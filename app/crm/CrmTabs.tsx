@@ -15,10 +15,14 @@ const TABS = [
   { href: '/crm/update', label: 'Daily update' },
 ] as const;
 
-export function CrmTabs({ active }: { active: '/crm' | '/crm/team' | '/crm/threads' | '/crm/update' }) {
+export function CrmTabs({ active, isLead = true }: {
+  active: '/crm' | '/crm/team' | '/crm/threads' | '/crm/update';
+  /** Team is other people's workload, so members do not get the tab. */
+  isLead?: boolean;
+}) {
   return (
     <div className="flex items-center gap-1 mb-5 border-b border-ink-200">
-      {TABS.map((t) => (
+      {TABS.filter((t) => isLead || t.href !== '/crm/team').map((t) => (
         <Link
           key={t.href}
           href={t.href}

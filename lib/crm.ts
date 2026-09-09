@@ -3,8 +3,20 @@ import { query, queryOne } from './db';
 import type { User } from './auth';
 
 /** Roles allowed to mutate CRM state. Everyone logged-in can read. */
-export const CRM_WRITE_ROLES: User['role'][] = ['admin', 'network'];
+export const CRM_WRITE_ROLES: User['role'][] = ['admin', 'network_lead', 'network', 'editor'];
 export const canWriteCrm = (u: User | null): boolean => !!u && CRM_WRITE_ROLES.includes(u.role);
+
+/**
+ * Whoever runs the onboarding team.
+ *
+ * A lead sees the whole pipeline and decides who works what; a member works
+ * the providers assigned to them and sees only those. The split matters
+ * because the person filter, the team view and thread management all used to
+ * be open to anyone with a login, so a member could reassign a colleague's
+ * card or rename a campaign they were not on.
+ */
+export const CRM_LEAD_ROLES: User['role'][] = ['admin', 'network_lead'];
+export const canLeadCrm = (u: User | null): boolean => !!u && CRM_LEAD_ROLES.includes(u.role);
 export type FunnelStage = { key: string; label: string };
 export type Funnel = { id: number; name: string; stages: FunnelStage[]; is_default: boolean; success_stage_key: string | null };
 

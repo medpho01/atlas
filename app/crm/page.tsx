@@ -4,7 +4,7 @@ import { requireView } from '@/lib/guard';
 import { RoleBlocked } from '@/components/RoleBlocked';
 import { Card, CardBody, CardHeader } from '@/components/ui/Card';
 import { ChipButton } from '@/components/ui/Toggle';
-import { getQueue, getQueueFunnel, listTeam, getThreadChips } from '@/lib/crm';
+import { getQueue, getQueueFunnel, listTeam, getThreadChips, canLeadCrm } from '@/lib/crm';
 import { CrmTabs } from './CrmTabs';
 import { QueueFunnel } from './QueueFunnel';
 import { QueueBoard } from './QueueBoard';
@@ -31,15 +31,20 @@ export default async function MyQueuePage({
   const me = gate.user;
 
   const staleAfter = Math.max(1, Number(searchParams.stale) || DEFAULT_STALE_DAYS);
+  // A member only ever sees their own queue, whatever ?who says — the filter
+  // is enforced here rather than by hiding the chips, so a hand-typed URL
+  // cannot open a colleague's pipeline.
+  const isLead = canLeadCrm(me);
   const unassigned = searchParams.who === 'unassigned';
-  const viewingId = unassigned ? null : searchParams.who ? Number(searchParams.who) : me.id;
+  const requestedId = searchParams.who ? Number(searchParams.who) : me.id;
+  const viewingId = unassigned ? null : (isLead ? requestedId : me.id);
 
   const threadFilter = Number(searchParams.thread) || null;
 
   const [rows, funnel, team] = await Promise.all([
     getQueue({ assigneeId: viewingId, unassigned, threadId: threadFilter, limit: 500 }),
     getQueueFunnel({ assigneeId: viewingId, unassigned, threadId: threadFilter }),
-    listTeam(),
+    canLeadCrm(me) ? listTeam() : Promise.resolve([]),
   ]);
   // Unfiltered, so selecting a thread never removes the others from the row.
   const threadChips = await getThreadChips({ assigneeId: viewingId, unassigned });
@@ -79,7 +84,7 @@ export default async function MyQueuePage({
           <h1 className="text-2xl font-bold text-ink-900">Network CRM</h1>
         </div>
 
-        <CrmTabs active="/crm" />
+        <CrmTabs active="/crm" isLead={isLead} />
 
         <div className="flex flex-wrap items-center gap-1.5 mb-2">
           <span className="text-[11px] uppercase tracking-wide text-ink-400 mr-1">Showing</span>
@@ -89,7 +94,7 @@ export default async function MyQueuePage({
           <ChipButton href={href({ who: 'unassigned' })} active={unassigned}>
             ⚠ Unassigned
           </ChipButton>
-          {team.filter((t) => t.id !== me.id).map((t) => (
+          {isLead && team.filter((t) => t.id !== me.id).map((t) => (
             <ChipButton key={t.id} href={href({ who: String(t.id) })} active={!unassigned && viewingId === t.id}>
               {t.name}
             </ChipButton>
@@ -146,7 +151,8 @@ export default async function MyQueuePage({
               emptyLabel={
                 unassigned
                   ? 'Every provider on an active thread has an owner.'
-                  : `${whoLabel === 'You' ? 'You have' : `${whoLabel} has`} nothing open. Check the Team tab for what's unowned.`
+                  : `${whoLabel === 'You' ? 'You have' : `${whoLabel} has`} nothing open.${
+                      isLead ? " Check the Team tab for what's unowned." : ' Try the Unassigned filter for work nobody has picked up.'}`
               }
             />
           </div>

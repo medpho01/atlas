@@ -3,7 +3,7 @@
 import { revalidatePath } from 'next/cache';
 import { getSessionUser } from '@/lib/auth';
 import { query, queryOne } from '@/lib/db';
-import { canWriteCrm, logActivity } from '@/lib/crm';
+import { canWriteCrm, canLeadCrm, logActivity } from '@/lib/crm';
 
 type R = { ok: boolean; error?: string; id?: number };
 
@@ -14,11 +14,42 @@ async function writer() {
   return { me, err: null };
 }
 
+/**
+ * Running the campaign, as opposed to working it.
+ *
+ * Creating threads, renaming them, choosing who is on them and deleting them
+ * are the lead's calls. These were open to anyone with a CRM login, so a
+ * member could rename a campaign they were not on or drop someone from it.
+ */
+async function lead() {
+  const me = await getSessionUser();
+  if (!me) return { me: null, err: 'unauthenticated' as const };
+  if (!canLeadCrm(me)) return { me, err: 'Only a network lead or admin can do this' as const };
+  return { me, err: null };
+}
+
+/**
+ * Members act on their own work. Enforced here rather than only in the UI —
+ * a server action is a public endpoint, and hiding a button hides nothing.
+ * Unassigned cards are fair game: picking up unowned work is the point of the
+ * Unassigned filter.
+ */
+async function canActOnProviders(me: { id: number; role: string }, threadId: number, providerIds: number[]) {
+  if (canLeadCrm(me as never)) return true;
+  const rows = await query<{ n: number }>(
+    `SELECT COUNT(*)::int AS n FROM atlas.crm_thread_providers
+      WHERE thread_id = $1 AND provider_id = ANY($2::int[])
+        AND assignee_id IS NOT NULL AND assignee_id <> $3`,
+    [threadId, providerIds, me.id],
+  );
+  return (rows[0]?.n ?? 0) === 0;
+}
+
 export async function createThread(input: {
   name: string; description?: string; funnelId: number;
   targetCount: number; providerKind?: string; region?: string;
 }): Promise<R> {
-  const { me, err } = await writer();
+  const { me, err } = await lead();
   if (err) return { ok: false, error: err };
   // Threads are the CRM's top-level structure and deleting one cascades to
   // every provider link, activity and checklist item on it. Creating them is
@@ -36,7 +67,7 @@ export async function createThread(input: {
 }
 
 export async function setThreadStatus(threadId: number, status: 'active' | 'paused' | 'done'): Promise<R> {
-  const { err } = await writer();
+  const { err } = await lead();
   if (err) return { ok: false, error: err };
   await query(`UPDATE atlas.crm_threads SET status = $1, updated_at = now() WHERE id = $2`, [status, threadId]);
   revalidatePath('/crm');
@@ -174,7 +205,7 @@ export async function deleteThread(input: {
 }
 
 export async function renameThread(input: { threadId: number; name: string }): Promise<R> {
-  const { err } = await writer();
+  const { err } = await lead();
   if (err) return { ok: false, error: err };
   if (!input.name.trim()) return { ok: false, error: 'Name required' };
   await query(`UPDATE atlas.crm_threads SET name = $1, updated_at = now() WHERE id = $2`,
@@ -187,7 +218,7 @@ export async function renameThread(input: { threadId: number; name: string }): P
 export async function setThreadMembers(input: {
   threadId: number; userIds: number[];
 }): Promise<R> {
-  const { me, err } = await writer();
+  const { me, err } = await lead();
   if (err) return { ok: false, error: err };
   const ids = Array.from(new Set(input.userIds.filter((n) => Number.isFinite(n))));
 
@@ -259,6 +290,9 @@ export async function moveStage(input: {
 }): Promise<R> {
   const { me, err } = await writer();
   if (err) return { ok: false, error: err };
+  if (!(await canActOnProviders(me!, input.threadId, [input.providerId]))) {
+    return { ok: false, error: 'That provider is assigned to someone else' };
+  }
 
   const cur = await queryOne<{ stage_key: string }>(
     `SELECT stage_key FROM atlas.crm_thread_providers WHERE thread_id = $1 AND provider_id = $2`,
@@ -286,6 +320,9 @@ export async function assignProvider(input: {
 }): Promise<R> {
   const { me, err } = await writer();
   if (err) return { ok: false, error: err };
+  if (!(await canActOnProviders(me!, input.threadId, [input.providerId]))) {
+    return { ok: false, error: 'That provider is assigned to someone else' };
+  }
   await query(
     `UPDATE atlas.crm_thread_providers SET assignee_id = $1, updated_at = now()
      WHERE thread_id = $2 AND provider_id = $3`,
@@ -308,6 +345,9 @@ export async function addNote(input: {
 }): Promise<R> {
   const { me, err } = await writer();
   if (err) return { ok: false, error: err };
+  if (!(await canActOnProviders(me!, input.threadId, [input.providerId]))) {
+    return { ok: false, error: 'That provider is assigned to someone else' };
+  }
   if (!input.body.trim()) return { ok: false, error: 'Empty note' };
   await logActivity({
     threadId: input.threadId, providerId: input.providerId, authorId: me!.id,
@@ -371,7 +411,7 @@ export async function updateThread(input: {
   threadId: number;
   fields: Partial<{ name: string; description: string; target_count: number; region: string; status: 'active' | 'paused' | 'done' }>;
 }): Promise<R> {
-  const { err } = await writer();
+  const { err } = await lead();
   if (err) return { ok: false, error: err };
   const allowed = ['name', 'description', 'target_count', 'region', 'status'] as const;
   const sets: string[] = [];
@@ -404,7 +444,7 @@ export async function checkProviderDuplicates(input: {
   threadId: number; names: string[];
 }): Promise<{ ok: boolean; error?: string; statuses?: Record<string, DupStatus>;
               similar?: Record<string, string[]> }> {
-  const { err } = await writer();
+  const { err } = await lead();
   if (err) return { ok: false, error: err };
 
   const names = (input.names ?? []).map((n) => (n ?? '').trim()).filter(Boolean);

@@ -3,7 +3,7 @@ import { KanbanSquare, Users } from 'lucide-react';
 import { requireView } from '@/lib/guard';
 import { RoleBlocked } from '@/components/RoleBlocked';
 import { Card, CardBody, CardHeader } from '@/components/ui/Card';
-import { getTeamWorkload } from '@/lib/crm';
+import { getTeamWorkload, canLeadCrm } from '@/lib/crm';
 import { CrmTabs } from '../CrmTabs';
 
 export const dynamic = 'force-dynamic';
@@ -15,6 +15,11 @@ export default async function TeamPage({ searchParams }: { searchParams: { stale
   if (gate.blocked) return <RoleBlocked area="The network CRM" detail="the network and admin teams" />;
 
   const staleAfter = Math.max(1, Number(searchParams.stale) || DEFAULT_STALE_DAYS);
+  const isLead = canLeadCrm(gate.user);
+  if (!isLead) {
+    return <RoleBlocked area="The team view" detail="network leads and admins" />;
+  }
+
   const rows = await getTeamWorkload(staleAfter);
 
   const totalOpen = rows.reduce((s, r) => s + r.open_count, 0);
@@ -31,7 +36,7 @@ export default async function TeamPage({ searchParams }: { searchParams: { stale
         nobody is responsible for is the one most reliably missed.
       </p>
 
-      <CrmTabs active="/crm/team" />
+      <CrmTabs active="/crm/team" isLead={isLead} />
 
       <Card>
         <CardHeader

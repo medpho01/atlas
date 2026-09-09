@@ -3,7 +3,7 @@ import { KanbanSquare } from 'lucide-react';
 import { getSessionUser } from '@/lib/auth';
 import { canAccess } from '@/lib/access';
 import { RoleBlocked } from '@/components/RoleBlocked';
-import { listTeam } from '@/lib/crm';
+import { listTeam, canLeadCrm } from '@/lib/crm';
 import { getDailyUpdate } from '@/lib/crmUpdate';
 import { CrmTabs } from '../CrmTabs';
 import { ChipButton } from '@/components/ui/Toggle';
@@ -30,8 +30,11 @@ export default async function UpdatePage({
   const day = /^\d{4}-\d{2}-\d{2}$/.test(searchParams.day ?? '') ? searchParams.day! : istToday();
   // Anyone can read a colleague's update — standups are posted to the group
   // anyway, and a lead covering for someone should not have to ask them for it.
-  const team = await listTeam();
-  const viewingId = Number(searchParams.who) || me.id;
+  const isLead = canLeadCrm(me);
+  const team = isLead ? await listTeam() : [];
+  // A lead reads the team's updates — that is the point of standups. A member
+  // reads their own, and cannot reach a colleague's by editing the URL.
+  const viewingId = isLead ? (Number(searchParams.who) || me.id) : me.id;
 
   const update = await getDailyUpdate(viewingId, day);
 
@@ -58,7 +61,7 @@ export default async function UpdatePage({
         <KanbanSquare className="w-5 h-5 text-brand-600" />
         <h1 className="text-2xl font-bold text-ink-900">Network CRM</h1>
       </div>
-      <CrmTabs active="/crm/update" />
+      <CrmTabs active="/crm/update" isLead={isLead} />
 
       <div className="flex flex-wrap items-center gap-1.5 mb-2 mt-4">
         <span className="text-[11px] uppercase tracking-wide text-ink-400 mr-1">Day</span>
@@ -71,7 +74,7 @@ export default async function UpdatePage({
         ))}
       </div>
 
-      <div className="flex flex-wrap items-center gap-1.5 mb-5">
+      <div className={`flex flex-wrap items-center gap-1.5 mb-5 ${isLead ? '' : 'hidden'}`}>
         <span className="text-[11px] uppercase tracking-wide text-ink-400 mr-1">Person</span>
         {team.map((t) => (
           <ChipButton key={t.id} href={href({ who: String(t.id) })} active={viewingId === t.id}>
