@@ -15,7 +15,7 @@ type Team = { id: number; name: string; role: string }[];
 
 export function BoardClient({
   thread, initialProviders, checklist, team, canWrite, myId, openProviderId, focusAssigneeId,
-  otherThreads = [],
+  otherThreads = [], assignableThreads = [],
 }: {
   thread: Thread;
   initialProviders: ThreadProvider[];
@@ -29,6 +29,12 @@ export function BoardClient({
   focusAssigneeId?: number | null;
   /** Every other live thread, so cards can be put on one without leaving. */
   otherThreads?: { id: number; name: string }[];
+  /**
+   * Threads this person may add a provider to — their own for a member, all
+   * live ones for a lead. The board you happen to be looking at is not
+   * necessarily the campaign the provider belongs to.
+   */
+  assignableThreads?: { id: number; name: string }[];
 }) {
   const [providers, setProviders] = useState(initialProviders);
   const [openId, setOpenId] = useState<number | null>(openProviderId ?? null);
@@ -369,6 +375,7 @@ export function BoardClient({
       {showAdd && (
         <AddProviderModal
           threadId={thread.id}
+          threads={assignableThreads.length ? assignableThreads : [{ id: thread.id, name: thread.name }]}
           defaultKind={thread.provider_kind ?? 'LAB'}
           onClose={() => setShowAdd(false)}
         />
@@ -387,9 +394,16 @@ export function BoardClient({
 
 /* ---------------------------------------------------------------- drawer */
 
-function AddProviderModal({ threadId, defaultKind, onClose }: {
-  threadId: number; defaultKind: string; onClose: () => void;
+function AddProviderModal({ threadId, threads, defaultKind, onClose }: {
+  threadId: number;
+  threads: { id: number; name: string }[];
+  defaultKind: string;
+  onClose: () => void;
 }) {
+  // Defaults to the board you are on, which is nearly always right — but a
+  // provider found while working one campaign often belongs to another, and
+  // having to close, navigate and re-type was the reason people did not bother.
+  const [target, setTarget] = useState(threadId);
   const [form, setForm] = useState({
     name: '', kind: defaultKind, city: '', state: '', pincode: '',
     phone: '', email: '', contactPerson: '', notes: '',
@@ -414,7 +428,7 @@ function AddProviderModal({ threadId, defaultKind, onClose }: {
   const submit = () => {
     if (dup === 'in_thread') return;
     startTransition(async () => {
-      const res = await createProvider({ threadId, ...form });
+      const res = await createProvider({ threadId: target, ...form });
       if (!res.ok) { setErr(res.error ?? 'Failed'); return; }
       window.location.reload();
     });
@@ -424,9 +438,25 @@ function AddProviderModal({ threadId, defaultKind, onClose }: {
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4" onClick={onClose}>
       <div className="w-full max-w-md rounded-2xl border border-ink-200 bg-surface p-5" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-3">
-          <h3 className="text-[15px] font-bold text-ink-900">Add provider to thread</h3>
+          <h3 className="text-[15px] font-bold text-ink-900">Add provider</h3>
           <button onClick={onClose} className="text-ink-400 hover:text-ink-900"><X className="w-4 h-4" /></button>
         </div>
+
+        {threads.length > 1 && (
+          <label className="block mb-2">
+            <span className="text-[11px] uppercase tracking-wide text-ink-400">Thread</span>
+            <select
+              value={target}
+              onChange={(e) => setTarget(Number(e.target.value))}
+              className="mt-1 w-full h-9 px-2 text-sm rounded-md border border-ink-200 bg-surface"
+            >
+              {threads.map((t) => (
+                <option key={t.id} value={t.id}>{t.name}</option>
+              ))}
+            </select>
+          </label>
+        )}
+
         <div className="grid grid-cols-2 gap-2">
           <input placeholder="Provider name *" value={form.name}
             onBlur={(e) => checkName(e.target.value)}

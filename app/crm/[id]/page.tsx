@@ -4,7 +4,7 @@ import { ArrowLeft, Target } from 'lucide-react';
 import { getSessionUser } from '@/lib/auth';
 import { canAccess } from '@/lib/access';
 import { RoleBlocked } from '@/components/RoleBlocked';
-import { getThread, getThreadProviders, getChecklist, listTeam, getThreadStats, canWriteCrm, listThreads } from '@/lib/crm';
+import { getThread, getThreadProviders, getChecklist, listTeam, getThreadStats, canWriteCrm, listThreads, threadsForUser, canLeadCrm } from '@/lib/crm';
 import { BoardClient } from './BoardClient';
 import { ThreadStats } from './ThreadStats';
 
@@ -43,6 +43,17 @@ export default async function ThreadPage({
     .filter((t) => t.id !== threadId && t.status !== 'done')
     .map((t) => ({ id: t.id, name: t.name }));
 
+  // Where this person may file a new provider. A lead can use any live
+  // campaign; a member only the ones they are on. The current board is always
+  // offered, so the common case still takes one click.
+  const mine = canLeadCrm(me)
+    ? allThreads.filter((t) => t.status !== 'done')
+    : await threadsForUser(me.id);
+  const assignableThreads = [
+    ...(mine.some((t) => t.id === threadId) ? [] : [{ id: thread.id, name: thread.name }]),
+    ...mine.map((t) => ({ id: t.id, name: t.name })),
+  ];
+
   return (
     <main className="mx-auto max-w-[1500px] px-6 py-6">
       <Link href="/crm" className="inline-flex items-center gap-1.5 text-sm text-ink-500 hover:text-ink-900 transition mb-3">
@@ -62,6 +73,7 @@ export default async function ThreadPage({
 
       <BoardClient
         otherThreads={otherThreads}
+        assignableThreads={assignableThreads}
         thread={thread}
         initialProviders={providers}
         checklist={checklist}

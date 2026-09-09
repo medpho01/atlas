@@ -3,7 +3,8 @@ import { KanbanSquare, Users } from 'lucide-react';
 import { requireView } from '@/lib/guard';
 import { RoleBlocked } from '@/components/RoleBlocked';
 import { Card, CardBody, CardHeader } from '@/components/ui/Card';
-import { getTeamWorkload, canLeadCrm } from '@/lib/crm';
+import { getTeamWorkload, canLeadCrm, getQueue, getQueueFunnel } from '@/lib/crm';
+import { QueueBoard } from '../QueueBoard';
 import { CrmTabs } from '../CrmTabs';
 
 export const dynamic = 'force-dynamic';
@@ -20,7 +21,14 @@ export default async function TeamPage({ searchParams }: { searchParams: { stale
     return <RoleBlocked area="The team view" detail="network leads and admins" />;
   }
 
-  const rows = await getTeamWorkload(staleAfter);
+  // Everyone's cards, unfiltered by person — the board a lead reads to see
+  // where the whole team's pipeline actually sits. The table above answers
+  // "who is carrying how much"; this answers "what stage is the work in".
+  const [rows, everything, funnel] = await Promise.all([
+    getTeamWorkload(staleAfter),
+    getQueue({ limit: 2000 }),
+    getQueueFunnel({}),
+  ]);
 
   const totalOpen = rows.reduce((s, r) => s + r.open_count, 0);
   const totalStale = rows.reduce((s, r) => s + r.stale_count, 0);
@@ -98,6 +106,22 @@ export default async function TeamPage({ searchParams }: { searchParams: { stale
       <p className="mt-4 text-xs text-ink-500">
         Counts cover active threads only. Click a name to see exactly what they&rsquo;re carrying.
       </p>
+
+      <Card className="mt-6">
+        <CardHeader
+          title={`Everyone's pipeline · ${everything.length} providers`}
+          subtitle="Every card the team holds, by stage. Each shows its thread and who owns it — unowned cards say so."
+          icon={<KanbanSquare className="w-4 h-4" strokeWidth={2.25} />}
+        />
+        <CardBody className="pt-0">
+          <QueueBoard
+            rows={everything}
+            stages={funnel.stages}
+            staleAfter={staleAfter}
+            emptyLabel="No providers on any thread yet."
+          />
+        </CardBody>
+      </Card>
     </main>
   );
 }
