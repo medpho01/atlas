@@ -13,7 +13,8 @@ export type NetworkPoint = {
   hs: number;
 };
 
-export type Mode = 'both' | 'cv' | 'hs';
+export type { Mode } from './NetworkMapControls';
+import type { Mode } from './NetworkMapControls';
 
 // India bounding box — used to lock the viewport so customers don't accidentally
 // pan to China / Pakistan / Sri Lanka (where OSM tiles render in local scripts).
@@ -26,12 +27,7 @@ const INDIA_CENTER: [number, number] = [22.5, 80.0];
 // Tuned for the light Positron basemap — needs to read at zoom 5 (whole India)
 // and at zoom 12 (zoomed to one pincode). These colors are more saturated than
 // the earlier set so they pop against the near-white tile palette.
-const COLOR = {
-  both:   '#059669', // emerald-600 — both services
-  cvOnly: '#2563eb', // blue-600
-  hsOnly: '#7c3aed', // violet-600
-  focus:  '#e11d48', // rose-600 — searched pincode
-} as const;
+import { MODE_COLOR as COLOR } from './NetworkMapControls';
 
 /** Fits the map either to the full India bbox or to a focused pincode. */
 function FitController({
@@ -154,54 +150,3 @@ export function PublicNetworkMap({
 
 /** Filter pills + legend in one strip — designed to sit ABOVE the map.
  *  Light-themed (slate palette) so it works inside the new presentation-style page. */
-export function NetworkMapControls({
-  mode,
-  onChange,
-}: {
-  mode: Mode;
-  onChange: (m: Mode) => void;
-}) {
-  return (
-    <div className="flex items-center justify-between flex-wrap gap-3 mb-4">
-      <div className="flex gap-0.5 bg-slate-100 rounded-lg p-1 border border-slate-200">
-        <PillButton active={mode === 'both'} onClick={() => onChange('both')}>All services</PillButton>
-        <PillButton active={mode === 'cv'}   onClick={() => onChange('cv')}>Center visit</PillButton>
-        <PillButton active={mode === 'hs'}   onClick={() => onChange('hs')}>Home sample</PillButton>
-      </div>
-      <div className="flex items-center gap-4 text-[12px] text-slate-600">
-        {/* Legend follows the selected mode — single-mode views use one colour */}
-        {mode === 'both' && (
-          <>
-            <LegendDot color={COLOR.both}   label="Both services" />
-            <LegendDot color={COLOR.cvOnly} label="Center visit only" />
-            <LegendDot color={COLOR.hsOnly} label="Home sample only" />
-          </>
-        )}
-        {mode === 'cv' && <LegendDot color={COLOR.cvOnly} label="Pincodes with center visit — dot size = number of centres" />}
-        {mode === 'hs' && <LegendDot color={COLOR.hsOnly} label="Pincodes with home sample — dot size = number of labs" />}
-      </div>
-    </div>
-  );
-}
-
-function PillButton({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
-  return (
-    <button
-      onClick={onClick}
-      className={`px-3.5 py-1.5 rounded-md font-medium text-[13px] transition ${
-        active ? 'bg-white text-slate-900 shadow-sm border border-slate-200' : 'text-slate-600 hover:text-slate-900'
-      }`}
-    >
-      {children}
-    </button>
-  );
-}
-
-function LegendDot({ color, label }: { color: string; label: string }) {
-  return (
-    <div className="flex items-center gap-1.5">
-      <span className="w-2.5 h-2.5 rounded-full ring-2 ring-white shadow-sm" style={{ background: color }} />
-      <span className="font-medium">{label}</span>
-    </div>
-  );
-}

@@ -3,8 +3,8 @@
 import dynamic from 'next/dynamic';
 import { useState, useTransition } from 'react';
 import { Search, MapPin, Home, Building2, X } from 'lucide-react';
-import type { NetworkPoint, Mode } from '@/components/PublicNetworkMap';
-import { NetworkMapControls } from '@/components/PublicNetworkMap';
+import type { NetworkPoint } from '@/components/PublicNetworkMap';
+import { NetworkMapControls, type Mode } from '@/components/NetworkMapControls';
 
 const PublicNetworkMap = dynamic(
   () => import('@/components/PublicNetworkMap').then((m) => m.PublicNetworkMap),
@@ -105,7 +105,7 @@ export function NetworkClient({ points }: { points: NetworkPoint[] }) {
             <PublicNetworkMap points={points} mode={mode} onPincodeSelect={lookup} focusPincode={focus} />
           </div>
           <div className="lg:col-span-2">
-            <ResultPanel result={result} onClose={() => { setResult(null); setPinInput(''); }} />
+            <ResultPanel result={result} mode={mode} onClose={() => { setResult(null); setPinInput(''); }} />
           </div>
         </div>
       ) : (
@@ -115,7 +115,11 @@ export function NetworkClient({ points }: { points: NetworkPoint[] }) {
   );
 }
 
-function ResultPanel({ result, onClose }: { result: Lookup; onClose: () => void }) {
+function ResultPanel({ result, mode, onClose }: { result: Lookup; mode: Mode; onClose: () => void }) {
+  // The pills used to move only the map dots, which made the filter look
+  // broken — you picked "Centre visit" and the panel still listed both.
+  const showCv = mode === 'both' || mode === 'cv';
+  const showHs = mode === 'both' || mode === 'hs';
   return (
     <div className="rounded-2xl border border-slate-200 bg-white shadow-lg p-5 lg:sticky lg:top-24">
       <div className="flex items-start justify-between mb-4 gap-4">
@@ -144,30 +148,34 @@ function ResultPanel({ result, onClose }: { result: Lookup; onClose: () => void 
         <div className="space-y-4">
           {/* Summary chip strip */}
           <div className="flex gap-2 text-xs">
-            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-blue-50 text-blue-700 border border-blue-100 font-medium">
-              <Building2 className="w-3 h-3" /> {result.center_visit.length} center visit
-            </span>
-            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-violet-50 text-violet-700 border border-violet-100 font-medium">
-              <Home className="w-3 h-3" /> {result.home_sample.length} home sample
-            </span>
+            {showCv && (
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-blue-50 text-blue-700 border border-blue-100 font-medium">
+                <Building2 className="w-3 h-3" /> {result.center_visit.length} centre visit
+              </span>
+            )}
+            {showHs && (
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-violet-50 text-violet-700 border border-violet-100 font-medium">
+                <Home className="w-3 h-3" /> {result.home_sample.length} home sample
+              </span>
+            )}
           </div>
 
-          <LabSection
+          {showCv && <LabSection
             icon={<Building2 className="w-4 h-4 text-blue-600" />}
-            title="Center visit"
-            desc={`Walk-in sample collection within ${result.cv_radius_km} km of the searched pincode`}
+            title="Centre visit"
+            desc={`Within ${result.cv_radius_km} km`}
             labs={result.center_visit}
-            emptyMsg={`No center-visit partners within ${result.cv_radius_km} km.`}
+            emptyMsg={`No centre-visit partners within ${result.cv_radius_km} km.`}
             showDistance
-          />
-          <LabSection
+          />}
+          {showHs && <LabSection
             icon={<Home className="w-4 h-4 text-violet-600" />}
             title="Home sample collection"
-            desc="A phlebotomist visits the customer's address"
+            desc=""
             labs={result.home_sample}
             emptyMsg="No home-sample partners serving this pincode yet."
             hideLocation         // lab's HQ city is irrelevant for home-sample service
-          />
+          />}
         </div>
       )}
     </div>
@@ -188,7 +196,7 @@ function LabSection({
         <h3 className="font-semibold text-slate-900 text-[14px]">{title}</h3>
         <span className="ml-auto text-xs text-slate-500 tabular-nums font-medium">{labs.length}</span>
       </div>
-      <p className="text-[11px] text-slate-500 mb-2.5">{desc}</p>
+      {desc ? <p className="text-[11px] text-slate-500 mb-2.5">{desc}</p> : <div className="mb-2" />}
 
       {labs.length === 0 ? (
         <p className="text-sm text-slate-500 italic py-1.5">{emptyMsg}</p>
