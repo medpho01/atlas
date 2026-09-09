@@ -60,6 +60,7 @@ export const NAV: NavGroup[] = [
       { href: '/phlebos', label: 'Phlebos', feature: 'directory' },
       { href: '/nurses', label: 'Nurses', feature: 'directory' },
       { href: '/quality', label: 'Quality', feature: 'directory' },
+      { href: '/discovery', label: 'Provider ranking', feature: 'directory' },
     ],
   },
   {
