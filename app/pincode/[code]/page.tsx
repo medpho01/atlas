@@ -179,10 +179,7 @@ export default async function PincodePage({
         <CardBody className="pt-0">
           {labs.length === 0 ? (
             <p className="text-sm text-ink-400 py-2">
-              No labs serve this pincode.{' '}
-              <Link className="text-brand-600 hover:text-brand-700 font-medium" href="/gaps">
-                Find candidates →
-              </Link>
+              No labs serve this pincode.
             </p>
           ) : (
             <div className="-mx-5">

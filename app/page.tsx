@@ -173,7 +173,7 @@ export default async function HomePage({ searchParams }: { searchParams: { lb_mo
                 title="Network Coverage Map"
                 shows="Every pincode where we have at least one provider or one order. Marker colour = number of providers; solid dots = exact lat/long, dashed dots = inferred location from the pincode prefix."
                 computed={<>Pincodes from <code className="font-mono text-[10px]">mv_pincode_summary</code> joined with <code className="font-mono text-[10px]">mv_pincode_geo</code>. When a lens is active, points come from <code className="font-mono text-[10px]">mv_pincode_coverage</code> filtered to the (kind × modality) slice.</>}
-                drives="Spot geographic clusters and gaps. Click 'Open full heatmap →' to view modes (Demand / Supply / Gap) and filter by service line."
+                drives="Spot geographic clusters and gaps at a glance."
                 notes="~2,617 of 7,912 active pincodes have exact lat/long. The rest are approximated to a ~30km centroid based on the first 3 digits of the pincode."
               />
             }
@@ -196,12 +196,8 @@ export default async function HomePage({ searchParams }: { searchParams: { lb_mo
                 <strong className="text-warn-500">{mapCoverage.inferred.toLocaleString()}</strong> approx (dashed){mapCoverage.unmappable > 0 ? ` · ${mapCoverage.unmappable} unmappable` : ''}
               </span>
               <span className="flex items-center gap-2">
-                <Link href={isLensed ? `/heatmap?lens=${encodeURIComponent(lensKey)}` : '/heatmap'} className="text-brand-500 hover:text-brand-400 font-medium">
-                  Open full heatmap →
-                </Link>
                 {isLensed && (
                   <>
-                    <span className="text-ink-300">·</span>
                     <span>
                       Lens: <strong className="text-ink-700">{lensLabel}</strong> ·{' '}
                       <Link href="/" className="text-brand-500 hover:text-brand-400">clear</Link>
@@ -243,16 +239,8 @@ export default async function HomePage({ searchParams }: { searchParams: { lb_mo
                     . Unserviced requests are weighted 2× because they're demand we couldn't even attempt to fulfil. Score caps at 100 when supply = 0.
                   </>
                 }
-                drives="Click any row → Pincode Explorer → onboard the provider. 'Full queue' opens the complete 80-row gap table with forecast + urgency window."
+                drives="Click any row → Pincode Explorer → onboard the provider."
               />
-            }
-            actions={
-              <Link
-                href={isLensed ? `/gaps?lens=${encodeURIComponent(lensKey)}` : '/gaps'}
-                className="text-xs text-brand-500 hover:text-brand-400 font-medium flex items-center gap-0.5"
-              >
-                Full queue <ChevronRight className="w-3 h-3" />
-              </Link>
             }
           />
           <CardBody className="pt-0">

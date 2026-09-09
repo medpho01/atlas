@@ -1,4 +1,3 @@
-import Link from 'next/link';
 import { requireView } from '@/lib/guard';
 import { RoleBlocked } from '@/components/RoleBlocked';
 import { TrendingUp, TrendingDown, AlertTriangle, Sparkles, CalendarDays } from 'lucide-react';
@@ -138,9 +137,6 @@ export default async function MomentumPage({ searchParams }: { searchParams: { w
         </CardBody>
       </Card>
 
-      <div className="text-xs text-ink-500 mt-3">
-        Want pincode-level imbalances? <Link href="/imbalance" className="text-brand-500 hover:text-brand-400 font-medium">Open the Demand-Supply Watchlist →</Link>
-      </div>
     </div>
   );
 }

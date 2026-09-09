@@ -203,9 +203,6 @@ export function ReadinessTable({
                       </ul>
                     )}
                     <div className="flex flex-wrap gap-3 text-xs">
-                      <Link href={`/gaps?city=${encodeURIComponent(r.city)}`} className="text-brand-600 hover:underline">
-                        Open the gap queue for {r.city} →
-                      </Link>
                       <Link href={`/crm`} className="text-brand-600 hover:underline">
                         Onboarding pipeline →
                       </Link>

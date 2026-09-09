@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import {
-  LayoutDashboard, MapPin, Crosshair, Scale, TrendingUp, Map, FileSearch,
+  LayoutDashboard, MapPin, TrendingUp, FileSearch,
   BookOpenText, Users, HeartPulse, Activity, Briefcase, IndianRupee,
   KanbanSquare, UserCog, PanelLeftClose, PanelLeft, X, type LucideIcon,
 } from 'lucide-react';
@@ -14,10 +14,7 @@ import { navFor, isActive } from '@/lib/navigation';
 const ICONS: Record<string, LucideIcon> = {
   '/': LayoutDashboard,
   '/pincodes': MapPin,
-  '/gaps': Crosshair,
-  '/imbalance': Scale,
   '/momentum': TrendingUp,
-  '/heatmap': Map,
   '/coverage': FileSearch,
   '/directory': BookOpenText,
   '/phlebos': Users,

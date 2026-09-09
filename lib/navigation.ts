@@ -37,11 +37,8 @@ export const NAV: NavGroup[] = [
     noun: 'places',
     items: [
       { href: '/pincodes', label: 'Pincodes', feature: 'coverage', alsoActiveOn: ['/pincode', '/coverage'] },
-      { href: '/gaps', label: 'Gaps', feature: 'coverage' },
       { href: '/readiness', label: 'Readiness', feature: 'coverage' },
-      { href: '/imbalance', label: 'Imbalance', feature: 'coverage' },
       { href: '/momentum', label: 'Momentum', feature: 'coverage' },
-      { href: '/heatmap', label: 'Order Heatmap', feature: 'coverage' },
       { href: '/network', label: 'Provider network', feature: 'coverage' },
     ],
   },

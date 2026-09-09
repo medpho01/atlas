@@ -43,6 +43,14 @@ export async function setThreadStatus(threadId: number, status: 'active' | 'paus
   return { ok: true };
 }
 
+/**
+ * The TypeScript twin of atlas.crm_name_key. Kept in step with it — the SQL
+ * one is what the index and the merge script use.
+ */
+function crmNameKey(raw: string): string {
+  return raw.toLowerCase().replace(/[^a-z0-9]+/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
 export async function createProvider(input: {
   threadId?: number; name: string; kind: string; city?: string; state?: string;
   pincode?: string; phone?: string; email?: string; contactPerson?: string; notes?: string;
@@ -57,7 +65,7 @@ export async function createProvider(input: {
   // way the importer does. Two rows for one hospital split its history across
   // records that no longer look like the same provider.
   const existing = await queryOne<{ id: number }>(
-    `SELECT id FROM atlas.crm_providers WHERE lower(name) = lower($1) ORDER BY id LIMIT 1`,
+    `SELECT id FROM atlas.crm_providers WHERE atlas.crm_name_key(name) = atlas.crm_name_key($1) ORDER BY id LIMIT 1`,
     [name],
   );
 
@@ -249,16 +257,21 @@ export async function checkProviderDuplicates(input: {
 
   const names = (input.names ?? []).map((n) => (n ?? '').trim()).filter(Boolean);
   if (!names.length) return { ok: true, statuses: {} };
-  const keys = names.map((n) => n.toLowerCase());
+
+  // Match on the normalised name, not lower(name): "Apollo Hospitals Pvt. Ltd."
+  // and "apollo  hospitals pvt ltd" are one organisation, and treating them as
+  // two is how a note ends up as a second card.
+  const keys = names.map(crmNameKey);
 
   const onThread = await query<{ k: string }>(
-    `SELECT lower(p.name) AS k FROM atlas.crm_thread_providers tp
+    `SELECT atlas.crm_name_key(p.name) AS k FROM atlas.crm_thread_providers tp
      JOIN atlas.crm_providers p ON p.id = tp.provider_id
-     WHERE tp.thread_id = $1 AND lower(p.name) = ANY($2::text[])`,
+     WHERE tp.thread_id = $1 AND atlas.crm_name_key(p.name) = ANY($2::text[])`,
     [input.threadId, keys],
   );
   const inDirectory = await query<{ k: string }>(
-    `SELECT DISTINCT lower(name) AS k FROM atlas.crm_providers WHERE lower(name) = ANY($1::text[])`,
+    `SELECT DISTINCT atlas.crm_name_key(name) AS k FROM atlas.crm_providers
+     WHERE atlas.crm_name_key(name) = ANY($1::text[])`,
     [keys],
   );
 
@@ -266,9 +279,12 @@ export async function checkProviderDuplicates(input: {
   const directory = new Set(inDirectory.map((r) => r.k));
   const statuses: Record<string, DupStatus> = {};
 
+  // Keyed by the caller's own string. It used to be keyed by the lowercased
+  // name while the caller looked it up by what the user typed, so the warning
+  // never appeared for anything with a capital letter in it.
   for (const n of names) {
-    const k = n.toLowerCase();
-    statuses[k] = thread.has(k) ? 'in_thread' : directory.has(k) ? 'in_directory' : 'new';
+    const k = crmNameKey(n);
+    statuses[n] = thread.has(k) ? 'in_thread' : directory.has(k) ? 'in_directory' : 'new';
   }
   return { ok: true, statuses };
 }
@@ -301,14 +317,14 @@ export async function bulkCreateProviders(input: {
 
   for (const r of rows) {
     const name = r.name.trim();
-    const key = name.toLowerCase();
+    const key = crmNameKey(name);
     if (seenInFile.has(key)) { skipped++; continue; }
     seenInFile.add(key);
 
     const dup = await queryOne(
       `SELECT 1 FROM atlas.crm_thread_providers tp
        JOIN atlas.crm_providers p ON p.id = tp.provider_id
-       WHERE tp.thread_id = $1 AND lower(p.name) = $2`,
+       WHERE tp.thread_id = $1 AND atlas.crm_name_key(p.name) = $2`,
       [input.threadId, key],
     );
     if (dup) { skipped++; continue; }
@@ -317,7 +333,7 @@ export async function bulkCreateProviders(input: {
     // Creating a second row for the same hospital splits its history across
     // two records that no longer look like the same provider.
     const existing = await queryOne<{ id: number }>(
-      `SELECT id FROM atlas.crm_providers WHERE lower(name) = $1 ORDER BY id LIMIT 1`,
+      `SELECT id FROM atlas.crm_providers WHERE atlas.crm_name_key(name) = $1 ORDER BY id LIMIT 1`,
       [key],
     );
 
