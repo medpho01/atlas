@@ -66,6 +66,26 @@ BEGIN
     FROM atlas.pincode_geo_manual
   ),
 
+  -- A coordinate shared by a crowd of pincodes is a default, not a location.
+  --
+  -- LabStack fills unknown pincodes with the geographic centre of India
+  -- (20.594, 78.963) — 97 of them locally sit on that one point. Treated as
+  -- real, they make any centre in central India appear to cover all of them at
+  -- zero distance, which is the same artefact as the prefix guesses except
+  -- hidden inside data that looked authoritative. Found by comparing against
+  -- an external dataset, which is what that comparison is for.
+  --
+  -- Stated as a rule rather than that one coordinate: any point claimed by
+  -- more than five pincodes is a fallback of some kind. Genuine neighbours
+  -- share a rounded position occasionally, never in dozens.
+  placeholder AS (
+    SELECT latitude, longitude
+    FROM src_local."PincodeToLatLong"
+    WHERE latitude IS NOT NULL
+    GROUP BY latitude, longitude
+    HAVING COUNT(DISTINCT pincode) > 5
+  ),
+
   -- 2. LabStack's own table, where it actually has a position.
   labstack AS (
     SELECT p.pincode, p.latitude, p.longitude, 'labstack'::text, NULL::int
@@ -74,6 +94,8 @@ BEGIN
       AND p.latitude  BETWEEN b.lat_lo AND b.lat_hi
       AND p.longitude BETWEEN b.lng_lo AND b.lng_hi
       AND NOT EXISTS (SELECT 1 FROM manual m WHERE m.pincode = p.pincode)
+      AND NOT EXISTS (SELECT 1 FROM placeholder ph
+                       WHERE ph.latitude = p.latitude AND ph.longitude = p.longitude)
   ),
 
   -- 3. Real addresses we have seen in that pincode.
