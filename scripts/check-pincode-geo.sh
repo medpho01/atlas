@@ -4,22 +4,13 @@
 #
 #   docker compose exec -T atlas-refresh /check-pincode-geo.sh /dev/stdin < pincodes.csv
 #
-# Reads only. Nothing is written, nothing is overwritten — run this first,
-# decide what you believe, then run /load-pincode-geo.sh to apply.
-#
-# It answers three questions:
-#
-#   1. How many gaps would it fill?      Pincodes we cannot place at all.
-#   2. Does it agree with what we have?  For pincodes we already know, how far
-#                                        apart are the two positions.
-#   3. Where does it disagree badly?     The worst offenders, named, so a
-#                                        systematic problem is visible rather
-#                                        than averaged away.
+# Reads only. Nothing is written, nothing overwritten — run this first, decide
+# what you believe, then run /load-pincode-geo.sh to apply.
 #
 # Disagreement is not automatically the dataset being wrong. LabStack's own
-# coordinates are unverified too, and a position derived from customer
-# addresses is a median of real deliveries. A large gap means one of them is
-# wrong and it is worth looking at which, not that the import should win.
+# coordinates are unverified too, and an observed position is the median of
+# real customer addresses. A large gap means one of them is wrong, and which
+# is a judgement worth making with the pincodes in front of you.
 # ============================================================================
 set -u
 
@@ -28,78 +19,66 @@ set -u
 PG="psql -h ${PGHOST:-atlas-db} -U ${PGUSER:-atlas} -d ${PGDATABASE:-atlas} -X -q"
 SRC="${1:-/dev/stdin}"
 
-$PG -c "CREATE TABLE IF NOT EXISTS atlas.pincode_geo_check (pincode text, latitude text, longitude text);"
-$PG -c "TRUNCATE atlas.pincode_geo_check;"
-normalise_pincode_csv "$SRC" > /tmp/_pin_norm.csv || exit 1
-$PG -c "\copy atlas.pincode_geo_check FROM '/tmp/_pin_norm.csv' WITH (FORMAT csv, HEADER true)" || {
-  echo "Could not read $SRC as CSV with a header row of pincode,latitude,longitude." >&2
-  exit 1; }
+stage_pincode_csv "$SRC" || exit 1
+CLEAN=$(pincode_clean_sql)
 
-$PG <<'SQL'
+$PG <<SQL
 CREATE OR REPLACE FUNCTION pg_temp.km(a_lat float8, a_lng float8, b_lat float8, b_lng float8)
-RETURNS float8 LANGUAGE sql IMMUTABLE AS $$
+RETURNS float8 LANGUAGE sql IMMUTABLE AS \$\$
   SELECT 6371 * 2 * asin(sqrt(
     power(sin(radians(b_lat - a_lat) / 2), 2) +
     cos(radians(a_lat)) * cos(radians(b_lat)) *
     power(sin(radians(b_lng - a_lng) / 2), 2)))
-$$;
+\$\$;
 
--- One row per pincode. Post-office level data lists several per pincode, so
+-- One row per pincode: post-office level data lists several per pincode, so
 -- take the median before comparing anything.
 CREATE TEMP VIEW theirs AS
-SELECT btrim(pincode) AS pincode,
-       percentile_cont(0.5) WITHIN GROUP (ORDER BY NULLIF(btrim(latitude), '')::float8)  AS lat,
-       percentile_cont(0.5) WITHIN GROUP (ORDER BY NULLIF(btrim(longitude), '')::float8) AS lng
-FROM atlas.pincode_geo_check
-WHERE btrim(pincode) ~ '^[0-9]{6}$'
-GROUP BY 1;
+SELECT pincode,
+       percentile_cont(0.5) WITHIN GROUP (ORDER BY lat) AS lat,
+       percentile_cont(0.5) WITHIN GROUP (ORDER BY lng) AS lng
+FROM ($CLEAN) c
+WHERE lat BETWEEN 6 AND 38 AND lng BETWEEN 67 AND 98
+GROUP BY pincode;
 
 \echo ''
 \echo '=== 1. What the file contains'
-SELECT count(*) AS rows_in_file,
-       count(*) FILTER (WHERE lat BETWEEN 6 AND 38 AND lng BETWEEN 67 AND 98) AS usable,
-       count(*) FILTER (WHERE lat IS NULL OR lng IS NULL) AS no_coordinates,
-       count(*) FILTER (WHERE lat IS NOT NULL
-                          AND NOT (lat BETWEEN 6 AND 38 AND lng BETWEEN 67 AND 98)) AS outside_india
-FROM theirs;
+SELECT (SELECT count(*) FROM atlas.pincode_raw_stage) AS rows_in_file,
+       (SELECT count(*) FROM ($CLEAN) c)              AS parsed_ok,
+       (SELECT count(*) FROM theirs)                  AS distinct_pincodes,
+       (SELECT count(*) FROM ($CLEAN) c
+         WHERE NOT (lat BETWEEN 6 AND 38 AND lng BETWEEN 67 AND 98)) AS outside_india;
 
 \echo ''
 \echo '=== 2. Gaps it would fill'
-SELECT
-  (SELECT count(*) FROM atlas.pincode_geo)                             AS we_have_now,
-  (SELECT count(*) FROM theirs t
-    WHERE t.lat BETWEEN 6 AND 38 AND t.lng BETWEEN 67 AND 98
-      AND NOT EXISTS (SELECT 1 FROM atlas.pincode_geo g WHERE g.pincode = t.pincode)) AS new_pincodes,
-  (SELECT count(*) FROM analytics.mv_pincode_summary)                  AS pincodes_atlas_tracks;
+SELECT (SELECT count(*) FROM atlas.pincode_geo) AS we_have_now,
+       (SELECT count(*) FROM theirs t
+         WHERE NOT EXISTS (SELECT 1 FROM atlas.pincode_geo g WHERE g.pincode = t.pincode)) AS new_pincodes,
+       (SELECT count(*) FROM analytics.mv_pincode_summary) AS pincodes_atlas_tracks;
 
 \echo ''
 \echo '=== 3. Where we both have a position — how far apart, by our source'
-SELECT g.provenance,
-       count(*) AS compared,
-       count(*) FILTER (WHERE pg_temp.km(g.latitude, g.longitude, t.lat, t.lng) <= 2)  AS within_2km,
-       count(*) FILTER (WHERE pg_temp.km(g.latitude, g.longitude, t.lat, t.lng) > 2
-                          AND pg_temp.km(g.latitude, g.longitude, t.lat, t.lng) <= 10) AS "2_to_10km",
-       count(*) FILTER (WHERE pg_temp.km(g.latitude, g.longitude, t.lat, t.lng) > 10
-                          AND pg_temp.km(g.latitude, g.longitude, t.lat, t.lng) <= 50) AS "10_to_50km",
-       count(*) FILTER (WHERE pg_temp.km(g.latitude, g.longitude, t.lat, t.lng) > 50)  AS over_50km
-FROM atlas.pincode_geo g
-JOIN theirs t ON t.pincode = g.pincode
-WHERE t.lat BETWEEN 6 AND 38 AND t.lng BETWEEN 67 AND 98
+SELECT g.provenance, count(*) AS compared,
+       count(*) FILTER (WHERE pg_temp.km(g.latitude,g.longitude,t.lat,t.lng) <= 2)  AS within_2km,
+       count(*) FILTER (WHERE pg_temp.km(g.latitude,g.longitude,t.lat,t.lng) > 2
+                          AND pg_temp.km(g.latitude,g.longitude,t.lat,t.lng) <= 10) AS "2_to_10km",
+       count(*) FILTER (WHERE pg_temp.km(g.latitude,g.longitude,t.lat,t.lng) > 10
+                          AND pg_temp.km(g.latitude,g.longitude,t.lat,t.lng) <= 50) AS "10_to_50km",
+       count(*) FILTER (WHERE pg_temp.km(g.latitude,g.longitude,t.lat,t.lng) > 50)  AS over_50km
+FROM atlas.pincode_geo g JOIN theirs t ON t.pincode = g.pincode
 GROUP BY g.provenance ORDER BY 2 DESC;
 
 \echo ''
 \echo '=== 4. Worst disagreements — check these by hand before trusting either side'
 SELECT g.pincode, g.provenance, g.sample_size AS addresses_behind_ours,
-       round(pg_temp.km(g.latitude, g.longitude, t.lat, t.lng)::numeric, 1) AS km_apart,
+       round(pg_temp.km(g.latitude,g.longitude,t.lat,t.lng)::numeric, 1) AS km_apart,
        round(g.latitude::numeric,3) || ', ' || round(g.longitude::numeric,3) AS ours,
        round(t.lat::numeric,3)      || ', ' || round(t.lng::numeric,3)      AS theirs
-FROM atlas.pincode_geo g
-JOIN theirs t ON t.pincode = g.pincode
-WHERE t.lat BETWEEN 6 AND 38 AND t.lng BETWEEN 67 AND 98
-ORDER BY pg_temp.km(g.latitude, g.longitude, t.lat, t.lng) DESC
+FROM atlas.pincode_geo g JOIN theirs t ON t.pincode = g.pincode
+ORDER BY pg_temp.km(g.latitude,g.longitude,t.lat,t.lng) DESC
 LIMIT 15;
 SQL
 
-$PG -c "TRUNCATE atlas.pincode_geo_check;"
+$PG -c "DROP TABLE IF EXISTS atlas.pincode_raw_stage;"
 echo ""
 echo "Read-only — nothing changed. To apply it:  /load-pincode-geo.sh <file>"

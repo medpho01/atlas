@@ -2,23 +2,22 @@
 # ============================================================================
 # Import pincode coordinates from a CSV.
 #
-#   ./scripts/load-pincode-geo.sh pincodes.csv
-#   docker compose exec -T atlas-refresh /load-pincode-geo.sh < pincodes.csv
+#   docker compose exec -T atlas-refresh /load-pincode-geo.sh /dev/stdin < pincodes.csv
 #
-# CSV: a header row, then pincode,latitude,longitude. Extra columns are
-# ignored, so most public pincode datasets work unedited as long as those three
-# are named. Rows outside India's bounds or without a 6-digit pincode are
-# skipped and counted rather than failing the run — public datasets routinely
-# carry a few bad rows and losing the other 19,000 over them helps nobody.
+# Takes any CSV with a header that names a pincode column and latitude and
+# longitude columns — the India Post directory, a GeoNames-derived mirror, or a
+# plain three-column file. Columns are found by name, the file is parsed by
+# Postgres so quoted fields containing commas behave, and several rows for one
+# pincode collapse to their median.
+#
+# Rows without a six-digit pincode, without numeric coordinates, or outside
+# India are skipped and counted rather than failing the run — every public
+# dataset carries a few, and losing the other 19,000 over them helps nobody.
 #
 # Imported rows land in atlas.pincode_geo_manual, which outranks every other
 # source and is never overwritten by a refresh. Re-running updates in place.
 #
-# Why this matters: LabStack records coordinates for 4,384 of India's ~19,300
-# pincodes. Everything else is placed by averaging its 3-digit neighbours,
-# which is fine for a map and useless for measuring a catchment — so
-# centre-visit reach can only be computed for the pincodes we can genuinely
-# locate. Loading a real dataset here raises that directly.
+# Run /check-pincode-geo.sh first. It reports the same file without writing.
 # ============================================================================
 set -eu
 
@@ -27,26 +26,13 @@ set -eu
 PG="psql -h ${PGHOST:-atlas-db} -U ${PGUSER:-atlas} -d ${PGDATABASE:-atlas} -v ON_ERROR_STOP=1 -X -q"
 SRC="${1:-/dev/stdin}"
 
-# A real staging table, not a temp one: \copy has to run in its own psql
-# invocation (it is a client-side meta-command and does not interpolate
-# variables reliably), and a temp table would not survive between connections.
-$PG -c "CREATE TABLE IF NOT EXISTS atlas.pincode_import_stage (pincode text, latitude text, longitude text);"
-$PG -c "TRUNCATE atlas.pincode_import_stage;"
-normalise_pincode_csv "$SRC" > /tmp/_pin_norm.csv || exit 1
-$PG -c "\copy atlas.pincode_import_stage FROM '/tmp/_pin_norm.csv' WITH (FORMAT csv, HEADER true)" || {
-  echo "Could not read $SRC as CSV with a header row of pincode,latitude,longitude." >&2
-  exit 1; }
+stage_pincode_csv "$SRC"
+CLEAN=$(pincode_clean_sql)
 
-$PG <<'SQL'
-WITH parsed AS (
-  SELECT btrim(pincode) AS pincode,
-         NULLIF(btrim(latitude), '')::double precision  AS lat,
-         NULLIF(btrim(longitude), '')::double precision AS lng
-  FROM atlas.pincode_import_stage
-  WHERE btrim(pincode) ~ '^[0-9]{6}$'
-),
+$PG <<SQL
+WITH clean AS ($CLEAN),
 good AS (
-  SELECT pincode, lat, lng FROM parsed
+  SELECT pincode, lat, lng FROM clean
   WHERE lat BETWEEN 6 AND 38 AND lng BETWEEN 67 AND 98
 ),
 ins AS (
@@ -64,20 +50,15 @@ ins AS (
         source = EXCLUDED.source, created_at = now()
   RETURNING 1
 )
-SELECT (SELECT count(*) FROM atlas.pincode_import_stage)            AS rows_in_file,
-       (SELECT count(*) FROM parsed)                                AS valid_pincode,
-       (SELECT count(*) FROM ins)                                   AS loaded,
-       (SELECT count(*) FROM parsed) - (SELECT count(*) FROM good)  AS skipped_out_of_bounds;
+SELECT (SELECT count(*) FROM atlas.pincode_raw_stage)         AS rows_in_file,
+       (SELECT count(*) FROM clean)                           AS parsed_ok,
+       (SELECT count(DISTINCT pincode) FROM good)             AS pincodes_loaded,
+       (SELECT count(*) FROM clean) - (SELECT count(*) FROM good) AS skipped_outside_india;
 SQL
 
-$PG -c "TRUNCATE atlas.pincode_import_stage;"
+$PG -c "DROP TABLE IF EXISTS atlas.pincode_raw_stage;"
 
 echo "Rebuilding resolved coordinates…"
 $PG -c "SELECT * FROM atlas.rebuild_pincode_geo();"
 echo
-echo "Now refresh the views that depend on them:"
-echo "  REFRESH MATERIALIZED VIEW analytics.mv_pincode_geo;"
-echo "  REFRESH MATERIALIZED VIEW analytics.mv_pincode_cv_reach;"
-echo "  REFRESH MATERIALIZED VIEW analytics.mv_public_network_pincode;"
-echo "  REFRESH MATERIALIZED VIEW analytics.mv_public_network_summary;"
-echo "(or just run /refresh.sh, which does all of it)"
+echo "Now rebuild the views that use them:  /refresh-views.sh"
