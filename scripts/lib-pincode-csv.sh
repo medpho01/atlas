@@ -13,7 +13,10 @@ normalise_pincode_csv() {
     NR == 1 {
       for (i = 1; i <= NF; i++) {
         h = tolower($i); gsub(/[^a-z]/, "", h)
-        if (h == "pincode" || h == "pin" || h == "pincodes")        pc = i
+        # Mirrors name this column all sorts of things, and GeoNames-derived
+        # sets call it "key" with the value prefixed "IN/".
+        if (h == "pincode" || h == "pin" || h == "pincodes" || h == "postalcode" \
+            || h == "postcode" || h == "zip" || h == "zipcode" || h == "key")  pc = i
         else if (h == "latitude"  || h == "lat")                     la = i
         else if (h == "longitude" || h == "lng" || h == "lon" || h == "long") lo = i
       }
@@ -24,6 +27,14 @@ normalise_pincode_csv() {
       print "pincode,latitude,longitude"
       next
     }
-    { gsub(/\r/, ""); if ($pc != "" && $la != "" && $lo != "") print $pc "," $la "," $lo }
+    {
+      gsub(/\r/, "")
+      # Pull the six-digit pincode out of whatever it is wrapped in — "IN/110001",
+      # quotes, stray spaces. Anything without one is skipped rather than
+      # guessed at.
+      p = $pc
+      if (match(p, /[0-9][0-9][0-9][0-9][0-9][0-9]/)) p = substr(p, RSTART, 6); else next
+      if ($la != "" && $lo != "") print p "," $la "," $lo
+    }
   ' "$1"
 }
