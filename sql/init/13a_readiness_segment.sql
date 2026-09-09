@@ -98,7 +98,7 @@ cover AS (
   JOIN analytics.mv_pincode_cv_reach r ON r.entity_id = g.entity_id
   JOIN analytics.mv_pincode_geo pg
     ON pg.pincode = r.covered_pincode AND pg.geo_source = 'exact'
-  WHERE g.segment LIKE 'LAB\_CENTER%' AND r.distance_km <= 5::numeric
+  WHERE g.segment LIKE 'LAB\_CENTER%' AND r.distance_km <= 10::numeric
 
   UNION
 

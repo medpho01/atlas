@@ -15,13 +15,12 @@ import { query, queryOne } from './db';
  * the MV.
  */
 
-// One catchment radius, 5 km, everywhere.
+// One catchment radius, 10 km, everywhere.
 //
-// It used to be 5 km in metros and 10 elsewhere. The wider number credited a
-// centre with pincodes nobody would travel from for a blood test, and it was
-// what pushed reported centre-visit reach above home sample — which is a
-// modelling artefact, not a fact about the network.
-const CV_RADIUS_KM = Number(process.env.CV_REACH_RADIUS_KM ?? 5);
+// Overridable with CV_REACH_RADIUS_KM, but the default is the number the page
+// states. Widening from 5km buys roughly a quarter more reach; the ceiling is
+// how many pincodes have real coordinates, not how far the circle is drawn.
+const CV_RADIUS_KM = Number(process.env.CV_REACH_RADIUS_KM ?? 10);
 
 export const CV_RADIUS = CV_RADIUS_KM;
 

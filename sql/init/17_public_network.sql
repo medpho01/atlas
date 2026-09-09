@@ -10,11 +10,13 @@
 -- None of it depends on the request. It is computed here, nightly, and the
 -- page reads two tiny relations instead.
 --
--- One radius, 5 km, everywhere. It was 5 in metros and 10 elsewhere, on the
--- reasoning that roads are quicker outside the metros — but 10 km still
--- credited a centre with pincodes nobody travels from for a blood test, and it
--- was what pushed reported centre-visit reach above home sample. A single
--- honest number beats a tiered one nobody can check.
+-- One radius, 10 km, everywhere.
+--
+-- It was tiered 5/10 by city, then flat 5. Flat 10 is a commercial call: 5km
+-- understates what a customer will travel for a scan, and the tiering was
+-- unverifiable. Widening it is worth about a quarter more reach — the binding
+-- constraint is not the radius but how many pincodes we can place on a map at
+-- all, and reach can never exceed that count however far the circle is drawn.
 --
 -- Baked in rather than read from env: this is the number the public page
 -- states, and it should not be able to drift from what was measured.
@@ -38,7 +40,7 @@ WITH cv AS (
   FROM analytics.mv_pincode_cv_reach r
   JOIN analytics.mv_pincode_geo g
     ON g.pincode = r.covered_pincode AND g.geo_source = 'exact'
-  WHERE r.distance_km <= 5::numeric
+  WHERE r.distance_km <= 10::numeric
 ),
 cv_count AS (
   SELECT covered_pincode AS pincode,
@@ -80,7 +82,7 @@ WITH cv AS (
   FROM analytics.mv_pincode_cv_reach r
   JOIN analytics.mv_pincode_geo g
     ON g.pincode = r.covered_pincode AND g.geo_source = 'exact'
-  WHERE r.distance_km <= 5::numeric
+  WHERE r.distance_km <= 10::numeric
 ),
 hs AS (
   SELECT DISTINCT pincode FROM analytics.mv_pincode_coverage
