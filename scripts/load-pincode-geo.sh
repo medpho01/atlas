@@ -22,6 +22,8 @@
 # ============================================================================
 set -eu
 
+. "$(dirname "$0")/lib-pincode-csv.sh" 2>/dev/null || . /lib-pincode-csv.sh
+
 PG="psql -h ${PGHOST:-atlas-db} -U ${PGUSER:-atlas} -d ${PGDATABASE:-atlas} -v ON_ERROR_STOP=1 -X -q"
 SRC="${1:-/dev/stdin}"
 
@@ -30,7 +32,8 @@ SRC="${1:-/dev/stdin}"
 # variables reliably), and a temp table would not survive between connections.
 $PG -c "CREATE TABLE IF NOT EXISTS atlas.pincode_import_stage (pincode text, latitude text, longitude text);"
 $PG -c "TRUNCATE atlas.pincode_import_stage;"
-$PG -c "\copy atlas.pincode_import_stage FROM '$SRC' WITH (FORMAT csv, HEADER true)" || {
+normalise_pincode_csv "$SRC" > /tmp/_pin_norm.csv || exit 1
+$PG -c "\copy atlas.pincode_import_stage FROM '/tmp/_pin_norm.csv' WITH (FORMAT csv, HEADER true)" || {
   echo "Could not read $SRC as CSV with a header row of pincode,latitude,longitude." >&2
   exit 1; }
 
@@ -48,8 +51,14 @@ good AS (
 ),
 ins AS (
   INSERT INTO atlas.pincode_geo_manual (pincode, latitude, longitude, source, note)
-  SELECT DISTINCT ON (pincode) pincode, lat, lng, 'import', 'bulk csv'
-  FROM good ORDER BY pincode
+  -- Median, not the first row: the India Post directory lists a row per post
+  -- office, so a pincode with six branches has six positions. The median is
+  -- the one least moved by a branch on the edge of the area.
+  SELECT pincode,
+         percentile_cont(0.5) WITHIN GROUP (ORDER BY lat),
+         percentile_cont(0.5) WITHIN GROUP (ORDER BY lng),
+         'import', 'bulk csv'
+  FROM good GROUP BY pincode
   ON CONFLICT (pincode) DO UPDATE
     SET latitude = EXCLUDED.latitude, longitude = EXCLUDED.longitude,
         source = EXCLUDED.source, created_at = now()

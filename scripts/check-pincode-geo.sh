@@ -23,12 +23,15 @@
 # ============================================================================
 set -u
 
+. "$(dirname "$0")/lib-pincode-csv.sh" 2>/dev/null || . /lib-pincode-csv.sh
+
 PG="psql -h ${PGHOST:-atlas-db} -U ${PGUSER:-atlas} -d ${PGDATABASE:-atlas} -X -q"
 SRC="${1:-/dev/stdin}"
 
 $PG -c "CREATE TABLE IF NOT EXISTS atlas.pincode_geo_check (pincode text, latitude text, longitude text);"
 $PG -c "TRUNCATE atlas.pincode_geo_check;"
-$PG -c "\copy atlas.pincode_geo_check FROM '$SRC' WITH (FORMAT csv, HEADER true)" || {
+normalise_pincode_csv "$SRC" > /tmp/_pin_norm.csv || exit 1
+$PG -c "\copy atlas.pincode_geo_check FROM '/tmp/_pin_norm.csv' WITH (FORMAT csv, HEADER true)" || {
   echo "Could not read $SRC as CSV with a header row of pincode,latitude,longitude." >&2
   exit 1; }
 
@@ -41,12 +44,15 @@ RETURNS float8 LANGUAGE sql IMMUTABLE AS $$
     power(sin(radians(b_lng - a_lng) / 2), 2)))
 $$;
 
+-- One row per pincode. Post-office level data lists several per pincode, so
+-- take the median before comparing anything.
 CREATE TEMP VIEW theirs AS
 SELECT btrim(pincode) AS pincode,
-       NULLIF(btrim(latitude), '')::float8  AS lat,
-       NULLIF(btrim(longitude), '')::float8 AS lng
+       percentile_cont(0.5) WITHIN GROUP (ORDER BY NULLIF(btrim(latitude), '')::float8)  AS lat,
+       percentile_cont(0.5) WITHIN GROUP (ORDER BY NULLIF(btrim(longitude), '')::float8) AS lng
 FROM atlas.pincode_geo_check
-WHERE btrim(pincode) ~ '^[0-9]{6}$';
+WHERE btrim(pincode) ~ '^[0-9]{6}$'
+GROUP BY 1;
 
 \echo ''
 \echo '=== 1. What the file contains'
