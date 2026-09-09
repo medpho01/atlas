@@ -88,18 +88,6 @@ export function UpdateClient({ update }: { update: DailyUpdate }) {
         </div>
         <div>
           <label className="text-[11px] uppercase tracking-wide text-ink-400 font-semibold">
-            Help needed / blockers
-          </label>
-          <textarea
-            value={blockers}
-            onChange={(e) => setBlockers(e.target.value)}
-            rows={2}
-            placeholder="Nil"
-            className="mt-1 w-full rounded-md border border-ink-200 bg-surface p-2 text-sm"
-          />
-        </div>
-        <div>
-          <label className="text-[11px] uppercase tracking-wide text-ink-400 font-semibold">
             Tomorrow&rsquo;s plan
           </label>
           <textarea
@@ -107,6 +95,18 @@ export function UpdateClient({ update }: { update: DailyUpdate }) {
             onChange={(e) => setTomorrow(e.target.value)}
             rows={3}
             placeholder={'1. Close pricing with 3 hospitals in Pune'}
+            className="mt-1 w-full rounded-md border border-ink-200 bg-surface p-2 text-sm"
+          />
+        </div>
+        <div>
+          <label className="text-[11px] uppercase tracking-wide text-ink-400 font-semibold">
+            Help needed / blockers
+          </label>
+          <textarea
+            value={blockers}
+            onChange={(e) => setBlockers(e.target.value)}
+            rows={2}
+            placeholder="Nil"
             className="mt-1 w-full rounded-md border border-ink-200 bg-surface p-2 text-sm"
           />
         </div>

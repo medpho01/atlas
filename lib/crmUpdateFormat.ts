@@ -46,11 +46,11 @@ export function formatUpdate(
   if (extras.misc?.trim()) {
     lines.push('', '[Miscellaneous]', extras.misc.trim());
   }
-  // Always present, defaulting to Nil: a blockers section that only appears
-  // when someone is blocked makes silence ambiguous — nobody can tell whether
-  // the day was clear or the section was forgotten.
-  lines.push('', '⚠️ Help Needed / Blockers', extras.blockers?.trim() || 'Nil');
   lines.push('', "🎯 Tomorrow's Plan:", '');
   lines.push(extras.tomorrow?.trim() || '1. ');
+  // Last, and always present, defaulting to Nil: a blockers section that only
+  // appears when someone is blocked makes silence ambiguous — nobody can tell
+  // whether the day was clear or the section was forgotten.
+  lines.push('', '⚠️ Help Needed / Blockers', extras.blockers?.trim() || 'Nil');
   return lines.join('\n');
 }
