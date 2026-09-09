@@ -23,8 +23,21 @@
 DROP MATERIALIZED VIEW IF EXISTS analytics.mv_public_network_pincode CASCADE;
 CREATE MATERIALIZED VIEW analytics.mv_public_network_pincode AS
 WITH cv AS (
+  -- Only pincodes we can actually locate.
+  --
+  -- mv_pincode_geo falls back to a 'prefix3' centroid when a pincode has no
+  -- exact coordinates, which puts an average of 14.7 pincodes — up to 88 — on
+  -- one identical point. A single centre near that point then "covered" all of
+  -- them at zero distance, and 63% of reported centre-visit coverage was that
+  -- artefact: 4,617 pincodes where 1,662 can be justified.
+  --
+  -- Restricting to exact coordinates understates reach slightly, since some
+  -- guessed pincodes really are nearby. Understating what we can prove beats
+  -- claiming a catchment computed from a guess.
   SELECT r.covered_pincode, r.entity_id, r.kind
   FROM analytics.mv_pincode_cv_reach r
+  JOIN analytics.mv_pincode_geo g
+    ON g.pincode = r.covered_pincode AND g.geo_source = 'exact'
   WHERE r.distance_km <= 5::numeric
 ),
 cv_count AS (
@@ -62,8 +75,11 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_public_network_pincode
 DROP MATERIALIZED VIEW IF EXISTS analytics.mv_public_network_summary CASCADE;
 CREATE MATERIALIZED VIEW analytics.mv_public_network_summary AS
 WITH cv AS (
+  -- Exact coordinates only; see mv_public_network_pincode above.
   SELECT DISTINCT r.entity_id, r.kind, r.covered_pincode
   FROM analytics.mv_pincode_cv_reach r
+  JOIN analytics.mv_pincode_geo g
+    ON g.pincode = r.covered_pincode AND g.geo_source = 'exact'
   WHERE r.distance_km <= 5::numeric
 ),
 hs AS (

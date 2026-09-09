@@ -91,9 +91,13 @@ cover AS (
 
   UNION
 
+  -- Exact coordinates only: a 'prefix3' pincode shares one guessed point with
+  -- a dozen others, so a centre near it would "reach" all of them at zero km.
   SELECT DISTINCT g.city_key, g.segment, r.covered_pincode
   FROM seg g
   JOIN analytics.mv_pincode_cv_reach r ON r.entity_id = g.entity_id
+  JOIN analytics.mv_pincode_geo pg
+    ON pg.pincode = r.covered_pincode AND pg.geo_source = 'exact'
   WHERE g.segment LIKE 'LAB\_CENTER%' AND r.distance_km <= 5::numeric
 
   UNION

@@ -96,7 +96,8 @@ export default async function PublicNetworkPage() {
                 Coverage radius
               </div>
               <div className="text-[11px] text-slate-700">
-                <b className="tabular-nums">{CV_RADIUS} km</b> from the centre
+                <b className="tabular-nums">{CV_RADIUS} km</b> from the centre, counting only
+                pincodes with exact coordinates
               </div>
             </div>
           </Panel>
