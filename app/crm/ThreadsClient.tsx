@@ -56,7 +56,11 @@ export function ThreadsClient({ threads, funnels, canWrite, isAdmin, members, te
     startTransition(async () => {
       const res = await createThread(form);
       if (!res.ok) { setErr(res.error ?? 'Failed'); return; }
-      window.location.href = `/crm/${res.id}`;
+      // Stay here. Creating a thread is usually one of several things being
+      // done in a sitting — name it, staff it, maybe create the next one — and
+      // being thrown onto an empty board meant navigating back every time.
+      // The new thread appears in the list below with its own controls.
+      window.location.reload();
     });
   };
 
