@@ -41,6 +41,8 @@ export function BoardClient({
   const [providers, setProviders] = useState(initialProviders);
   const [openId, setOpenId] = useState<number | null>(openProviderId ?? null);
   const [picked, setPicked] = useState<Set<number>>(new Set());
+  // With cards ticked, a click selects rather than opens — see QueueBoard.
+  const selecting = picked.size > 0;
   const [confirmBulkRemove, setConfirmBulkRemove] = useState(false);
   const [showAdd, setShowAdd] = useState(false);
   const [showImport, setShowImport] = useState(false);
@@ -238,7 +240,7 @@ export function BoardClient({
                       </label>
                     )}
                   <button
-                    onClick={() => setOpenId(p.id)}
+                    onClick={() => (selecting ? togglePick(p.id) : setOpenId(p.id))}
                     className="w-full text-left p-2.5"
                   >
                     <div className="text-[13px] font-medium text-ink-900 leading-tight pr-5">{p.name}</div>
@@ -274,6 +276,7 @@ export function BoardClient({
           <span className="text-[13px] font-semibold text-ink-900">
             {picked.size} selected
           </span>
+          <span className="text-[12px] text-ink-500">click cards to add or remove</span>
 
           <select
             defaultValue=""

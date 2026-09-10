@@ -275,7 +275,7 @@ export function ProviderDrawer({
                     }}
                     className="flex-1 h-8 px-2 text-[13px] rounded-md border border-ink-200 bg-surface"
                   >
-                    <option value="">Also work in another campaign…</option>
+                    <option value="">Add this provider to another thread…</option>
                     {otherThreads.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
                   </select>
                 </div>

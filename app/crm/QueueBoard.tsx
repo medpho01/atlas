@@ -61,6 +61,10 @@ export function QueueBoard({
   const [bulkNote, setBulkNote] = useState<string | null>(null);
   const togglePick = (id: number) =>
     setPicked((p) => { const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  // Once anything is ticked the board is in selection mode: a click adds or
+  // removes a card rather than opening it. Opening one provider's drawer while
+  // four are selected read as though the drawer were the way to move all four.
+  const selecting = picked.size > 0;
   const [loadingId, setLoadingId] = useState<number | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
@@ -157,7 +161,7 @@ export function QueueBoard({
                       )}
                       <button
                         type="button"
-                        onClick={() => openProvider(r)}
+                        onClick={() => (selecting ? togglePick(r.provider_id) : openProvider(r))}
                         className={`block w-full text-left px-2.5 py-2 ${
                           loadingId === r.provider_id ? 'opacity-60' : ''
                         }`}
@@ -199,6 +203,7 @@ export function QueueBoard({
       {otherThreads.length > 0 && picked.size > 0 && (
         <BulkBar>
           <span className="text-[13px] font-semibold text-ink-900">{picked.size} selected</span>
+          <span className="text-[12px] text-ink-500">click cards to add or remove</span>
           <select
             defaultValue=""
             disabled={pending}
