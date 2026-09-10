@@ -79,7 +79,8 @@ export function ScoreAdmin({
                     <th className="pb-1 pr-4 font-medium">Stage</th>
                     <th className="pb-1 pr-4 font-medium">Points</th>
                     <th className="pb-1 pr-4 font-medium">Days allowed</th>
-                    <th className="pb-1 font-medium">Overstaying costs</th>
+                    <th className="pb-1 pr-4 font-medium">Costs per period</th>
+                    <th className="pb-1 font-medium">Reads as</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -97,8 +98,18 @@ export function ScoreAdmin({
                             sla_days: e.target.value === '' ? null : Number(e.target.value),
                           })} />
                       </td>
+                      <td className="py-1 pr-4">
+                        <input type="number" min={0} value={s.penalty_points ?? ''}
+                          placeholder={String(Math.round(s.points * cfg.penaltyMultiplier))}
+                          className={`${input} w-24`}
+                          onChange={(e) => setStage(funnelId, s.stage_key, {
+                            penalty_points: e.target.value === '' ? null : Number(e.target.value),
+                          })} />
+                      </td>
                       <td className="py-1 text-[12px] text-ink-500">
-                        {s.sla_days ? `−${Math.round(s.points * cfg.penaltyMultiplier)} per ${s.sla_days}d` : '—'}
+                        {s.sla_days
+                          ? `+${s.points} to reach, −${s.penalty_points ?? Math.round(s.points * cfg.penaltyMultiplier)} per ${s.sla_days}d sitting`
+                          : `+${s.points} to reach, never goes stale`}
                       </td>
                     </tr>
                   ))}
@@ -106,6 +117,8 @@ export function ScoreAdmin({
               </table>
             </div>
             <p className="text-[12px] text-ink-500 mt-2">
+              A stage worth 0 earns nothing — asking for help is not progress. Give it a cost
+              per period anyway, or it becomes somewhere to park a card for free.{' '}
               A full journey through this funnel is worth{' '}
               <span className="font-medium text-ink-800 tabular-nums">
                 {stages.reduce((n, s) => n + (s.sla_days === null && s.points === 0 ? 0 : s.points), 0)}
@@ -177,7 +190,8 @@ export function ScoreAdmin({
         <div className="flex flex-wrap items-center gap-2">
           <button disabled={pending}
             onClick={() => run(() => saveStagePoints(ladder.map((s) => ({
-              funnelId: s.funnel_id, stageKey: s.stage_key, points: s.points, slaDays: s.sla_days,
+              funnelId: s.funnel_id, stageKey: s.stage_key, points: s.points,
+              slaDays: s.sla_days, penaltyPoints: s.penalty_points,
             }))), 'Ladder saved')}
             className="px-3 h-9 text-sm font-semibold rounded-md bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-40">
             Save ladder

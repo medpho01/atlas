@@ -19,6 +19,10 @@ CREATE TABLE IF NOT EXISTS atlas.crm_stage_points (
   funnel_id  int NOT NULL REFERENCES atlas.crm_funnels(id) ON DELETE CASCADE,
   stage_key  text NOT NULL,
   points     int NOT NULL DEFAULT 0,
+  -- What one overstayed period costs. NULL means the default relationship —
+  -- the multiplier times the stage's own points. Set it where a stage earns
+  -- nothing but still must not become somewhere to park a card.
+  penalty_points int,
   -- NULL = this stage never goes stale. Terminal stages are NULL: a provider
   -- that is onboarded is finished, and charging rent on it is nonsense.
   sla_days   int,
@@ -26,6 +30,8 @@ CREATE TABLE IF NOT EXISTS atlas.crm_stage_points (
 );
 
 -- ---- Everything that is a policy rather than a fact ----------------------
+ALTER TABLE atlas.crm_stage_points ADD COLUMN IF NOT EXISTS penalty_points int;
+
 CREATE TABLE IF NOT EXISTS atlas.crm_score_settings (
   id                 boolean PRIMARY KEY DEFAULT true CHECK (id),
   -- What overstaying costs, as a multiple of the stage's own points.
@@ -98,22 +104,38 @@ BEGIN
   ),
   graded AS (
     SELECT s.*,
-           -- Stages that count as progress, numbered so the ramp ignores the
-           -- dead ends sitting among them.
+           -- Stages that count as progress, numbered so the dead ends and the
+           -- holding pens sitting among them do not stretch the ramp.
            (s.stage_key = s.success_stage_key) AS is_success,
-           (s.label ~* '(stall|drop|lost|reject|dead|hold)') AS is_dead,
-           COUNT(*) FILTER (WHERE NOT (s.label ~* '(stall|drop|lost|reject|dead|hold)'))
+           (s.label ~* '(stall|drop|lost|reject|dead)') AS is_dead,
+           -- Asking for help is not progress and must never pay. A stage that
+           -- earns points for saying you are stuck is a stage people will move
+           -- cards into, and the queue fills with cards waiting on nobody.
+           (s.label ~* '(help|blocked|waiting|hold|park)') AS is_help,
+           COUNT(*) FILTER (WHERE NOT (s.label ~* '(stall|drop|lost|reject|dead|help|blocked|waiting|hold|park)'))
              OVER (PARTITION BY s.funnel_id) AS live_n,
-           ROW_NUMBER() OVER (PARTITION BY s.funnel_id ORDER BY s.idx)
-             AS live_i
+           -- Counts only the stages that are on the ladder, so a holding pen
+           -- in the middle of the funnel does not push the stages after it up
+           -- a rung and carry the top past where the ramp was meant to end.
+           COUNT(*) FILTER (WHERE NOT (s.label ~* '(stall|drop|lost|reject|dead|help|blocked|waiting|hold|park)'))
+             OVER (PARTITION BY s.funnel_id ORDER BY s.idx
+                   ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS live_i
     FROM s
   )
-  INSERT INTO atlas.crm_stage_points (funnel_id, stage_key, points, sla_days)
+  INSERT INTO atlas.crm_stage_points (funnel_id, stage_key, points, sla_days, penalty_points)
   SELECT g.funnel_id, g.stage_key,
-         CASE WHEN g.is_dead THEN 0
+         CASE WHEN g.is_dead OR g.is_help THEN 0
               ELSE GREATEST(1, ROUND(1 + 11.0 * (g.live_i - 1) / GREATEST(g.live_n - 1, 1)))::int
          END,
-         CASE WHEN g.is_dead OR g.is_success THEN NULL ELSE 7 END
+         CASE WHEN g.is_dead OR g.is_success THEN NULL
+              -- A card asking for help is the one thing that should be picked
+              -- up fastest, so it gets the shortest clock in the funnel.
+              WHEN g.is_help THEN 3
+              ELSE 7 END,
+         -- Earning nothing would also mean costing nothing, which turns the
+         -- help column into free parking. A small flat cost per period keeps
+         -- it a place cards pass through rather than sit.
+         CASE WHEN g.is_help THEN 2 ELSE NULL END
   FROM graded g
   ON CONFLICT (funnel_id, stage_key) DO NOTHING;
   GET DIAGNOSTICS n = ROW_COUNT;
@@ -233,7 +255,7 @@ RETURNS TABLE (
       AND tp.assignee_id IS NOT NULL
   ),
   measured AS (
-    SELECT s.*, spt.points, spt.sla_days,
+    SELECT s.*, spt.points, spt.penalty_points, spt.sla_days,
            -- Days served by the end of the window...
            FLOOR(EXTRACT(EPOCH FROM (s.ends - s.entered)) / 86400.0) AS days_end,
            -- ...and by its start, so only what was crossed inside it counts.
@@ -241,7 +263,8 @@ RETURNS TABLE (
     FROM spell s
     JOIN atlas.crm_stage_points spt
       ON spt.funnel_id = s.funnel_id AND spt.stage_key = s.stage_key
-    WHERE spt.sla_days IS NOT NULL AND spt.sla_days > 0 AND spt.points > 0
+    WHERE spt.sla_days IS NOT NULL AND spt.sla_days > 0
+      AND COALESCE(spt.penalty_points, spt.points) > 0
   ),
   capped AS (
     SELECT m.*,
@@ -254,11 +277,17 @@ RETURNS TABLE (
            -- earlier month adds nothing in this one.
            (LEAST(FLOOR(c.days_end / c.sla_days), CASE WHEN c.cap > 0 THEN c.cap ELSE 1e9 END)
             - LEAST(FLOOR(c.days_start / c.sla_days), CASE WHEN c.cap > 0 THEN c.cap ELSE 1e9 END))::int AS periods,
-           c.points, c.days_end::int AS days_sitting
+           -- What one period costs: the stage's own figure where it has one,
+           -- otherwise the multiplier on what the stage is worth.
+           COALESCE(
+             c.penalty_points,
+             ROUND(c.points * (SELECT penalty_multiplier FROM atlas.crm_score_settings))
+           )::int AS per_period,
+           c.days_end::int AS days_sitting
     FROM capped c
   )
   SELECT c.assignee_id, c.thread_id, c.provider_id, c.stage_key, c.periods,
-         (c.periods * c.points * (SELECT penalty_multiplier FROM atlas.crm_score_settings))::int,
+         (c.periods * c.per_period)::int,
          c.days_sitting
   FROM charged c
   WHERE c.periods > 0;

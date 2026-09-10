@@ -116,6 +116,8 @@ export type StagePoint = {
   sort: number;
   points: number;
   sla_days: number | null;
+  /** What one overstayed period costs. NULL = points × the multiplier. */
+  penalty_points: number | null;
 };
 
 /**
@@ -132,7 +134,7 @@ export async function getStagePoints(): Promise<StagePoint[]> {
            COALESCE(st.value ->> 'label', st.value ->> 'key') AS stage_label,
            (st.ord - 1)::int AS sort,
            COALESCE(sp.points, 0) AS points,
-           sp.sla_days
+           sp.sla_days, sp.penalty_points
     FROM atlas.crm_funnels f
     CROSS JOIN LATERAL jsonb_array_elements(f.stages) WITH ORDINALITY st(value, ord)
     LEFT JOIN atlas.crm_stage_points sp

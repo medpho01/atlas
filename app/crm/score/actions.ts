@@ -21,6 +21,7 @@ async function admin() {
 
 export async function saveStagePoints(rows: {
   funnelId: number; stageKey: string; points: number; slaDays: number | null;
+  penaltyPoints: number | null;
 }[]): Promise<R> {
   const { err } = await admin();
   if (err) return { ok: false, error: err };
@@ -32,12 +33,18 @@ export async function saveStagePoints(rows: {
     if (r.slaDays != null && (!Number.isFinite(r.slaDays) || r.slaDays < 1 || r.slaDays > 365)) {
       return { ok: false, error: `Days for ${r.stageKey} must be between 1 and 365, or blank` };
     }
+    if (r.penaltyPoints != null && (r.penaltyPoints < 0 || r.penaltyPoints > 1000)) {
+      return { ok: false, error: `Cost for ${r.stageKey} must be between 0 and 1000, or blank` };
+    }
     await query(
-      `INSERT INTO atlas.crm_stage_points (funnel_id, stage_key, points, sla_days)
-       VALUES ($1, $2, $3, $4)
+      `INSERT INTO atlas.crm_stage_points (funnel_id, stage_key, points, sla_days, penalty_points)
+       VALUES ($1, $2, $3, $4, $5)
        ON CONFLICT (funnel_id, stage_key)
-       DO UPDATE SET points = EXCLUDED.points, sla_days = EXCLUDED.sla_days`,
-      [r.funnelId, r.stageKey, Math.round(r.points), r.slaDays == null ? null : Math.round(r.slaDays)],
+       DO UPDATE SET points = EXCLUDED.points, sla_days = EXCLUDED.sla_days,
+                     penalty_points = EXCLUDED.penalty_points`,
+      [r.funnelId, r.stageKey, Math.round(r.points),
+       r.slaDays == null ? null : Math.round(r.slaDays),
+       r.penaltyPoints == null ? null : Math.round(r.penaltyPoints)],
     );
   }
   revalidatePath('/crm/score');
