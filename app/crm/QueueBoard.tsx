@@ -6,6 +6,7 @@ import { Clock } from 'lucide-react';
 import type { QueueRow, QueueFunnelStage, Thread, ThreadProvider, ChecklistItem, FunnelStage } from '@/lib/crm';
 import { ProviderDrawer, type Team } from './ProviderDrawer';
 import { providerKindLabel } from '@/lib/providerKinds';
+import { BulkBar } from './BulkBar';
 import { moveStage, assignProvider, removeFromThread, addProvidersToThread } from './actions';
 
 type Loaded = {
@@ -196,7 +197,7 @@ export function QueueBoard({
       </div>
 
       {otherThreads.length > 0 && picked.size > 0 && (
-        <div className="sticky bottom-3 z-30 mt-3 flex flex-wrap items-center gap-2 rounded-xl border border-brand-500/40 bg-surface shadow-lg px-3 py-2">
+        <BulkBar>
           <span className="text-[13px] font-semibold text-ink-900">{picked.size} selected</span>
           <select
             defaultValue=""
@@ -231,7 +232,7 @@ export function QueueBoard({
           >
             Clear
           </button>
-        </div>
+        </BulkBar>
       )}
 
       {err && (

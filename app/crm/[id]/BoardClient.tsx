@@ -9,6 +9,7 @@ import * as XLSX from 'xlsx';
 import { moveStage, assignProvider, addNote, updateProvider, bulkCreateProviders, addChecklistItem, removeChecklistItem, removeFromThread, bulkUpdateProviders, checkProviderDuplicates, addProvidersToThread, type DupStatus } from '../actions';
 import type { Thread, ThreadProvider, ChecklistItem, ProviderDoc, Activity, FunnelStage } from '@/lib/crm';
 import { providerKindLabel, normalizeProviderKind } from '@/lib/providerKinds';
+import { BulkBar } from '../BulkBar';
 import { AddProviderModal } from '../AddProviderModal';
 import { ProviderDrawer } from '../ProviderDrawer';
 
@@ -269,7 +270,7 @@ export function BoardClient({
       {/* Bulk actions — only present when something is selected, so the
           toolbar doesn't carry controls that do nothing most of the time. */}
       {canWrite && picked.size > 0 && (
-        <div className="sticky bottom-3 z-30 mt-3 flex flex-wrap items-center gap-2 rounded-xl border border-brand-500/40 bg-surface shadow-lg px-3 py-2">
+        <BulkBar>
           <span className="text-[13px] font-semibold text-ink-900">
             {picked.size} selected
           </span>
@@ -349,7 +350,7 @@ export function BoardClient({
           <button onClick={() => { setPicked(new Set()); setNote(null); }} className="ml-auto text-[12px] text-ink-500 hover:text-ink-900">
             Clear
           </button>
-        </div>
+        </BulkBar>
       )}
 
       {/* Drawer */}
