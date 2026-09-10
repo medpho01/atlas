@@ -4,8 +4,9 @@ import { requireView } from '@/lib/guard';
 import { RoleBlocked } from '@/components/RoleBlocked';
 import { Card, CardBody, CardHeader } from '@/components/ui/Card';
 import { ChipButton } from '@/components/ui/Toggle';
-import { getQueue, getQueueFunnel, listTeam, getThreadChips, canLeadCrm, listThreads } from '@/lib/crm';
+import { getQueue, getQueueFunnel, listTeam, getThreadChips, canLeadCrm, listThreads, canWriteCrm, threadsForUser } from '@/lib/crm';
 import { CrmTabs } from './CrmTabs';
+import { NewProviderButton } from './NewProviderButton';
 import { QueueFunnel } from './QueueFunnel';
 import { QueueBoard } from './QueueBoard';
 
@@ -53,6 +54,11 @@ export default async function MyQueuePage({
   const liveThreads = (await listThreads())
     .filter((t) => t.status !== 'done')
     .map((t) => ({ id: t.id, name: t.name }));
+  // Where this person may file a new provider: any live campaign for a lead,
+  // only their own for a member — the same rule the thread board uses.
+  const assignableThreads = isLead
+    ? liveThreads
+    : (await threadsForUser(me.id)).map((t) => ({ id: t.id, name: t.name }));
   const threadChips = await getThreadChips({ assigneeId: showAll ? undefined : viewingId, unassigned, isLead });
 
   // Onboarded rows are in the list now, so "open" and "stale" are derived here
@@ -92,7 +98,10 @@ export default async function MyQueuePage({
           <h1 className="text-2xl font-bold text-ink-900">Network CRM</h1>
         </div>
 
-        <CrmTabs active="/crm" isLead={isLead} />
+        <div className="flex items-center justify-between gap-3">
+          <CrmTabs active="/crm" isLead={isLead} />
+          {canWriteCrm(me) && <NewProviderButton threads={assignableThreads} />}
+        </div>
 
         <div className="flex flex-wrap items-center gap-1.5 mb-2">
           <span className="text-[11px] uppercase tracking-wide text-ink-400 mr-1">Showing</span>
