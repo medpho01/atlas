@@ -152,7 +152,7 @@ export default async function MyQueuePage({
                 unassigned
                   ? 'Every provider on an active thread has an owner.'
                   : `${whoLabel === 'You' ? 'You have' : `${whoLabel} has`} nothing open.${
-                      isLead ? " Check the Team tab for what's unowned." : ' Try the Unassigned filter for work nobody has picked up.'}`
+                      ' Try the Unassigned filter for work nobody has picked up.'}`
               }
             />
           </div>

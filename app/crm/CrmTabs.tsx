@@ -10,19 +10,18 @@ import Link from 'next/link';
  */
 const TABS = [
   { href: '/crm', label: 'My queue' },
-  { href: '/crm/team', label: 'Team' },
   { href: '/crm/threads', label: 'Threads' },
   { href: '/crm/update', label: 'Daily update' },
 ] as const;
 
 export function CrmTabs({ active, isLead = true }: {
-  active: '/crm' | '/crm/team' | '/crm/threads' | '/crm/update';
-  /** Team is other people's workload, so members do not get the tab. */
+  active: '/crm' | '/crm/threads' | '/crm/update';
+  /** Threads are the lead's to run, so members do not get the tab. */
   isLead?: boolean;
 }) {
   return (
     <div className="flex items-center gap-1 mb-5 border-b border-ink-200">
-      {TABS.filter((t) => isLead || t.href !== '/crm/team').map((t) => (
+      {TABS.filter((t) => isLead || t.href !== '/crm/threads').map((t) => (
         <Link
           key={t.href}
           href={t.href}
