@@ -41,11 +41,14 @@ export function QueueBoard({
   stages,
   staleAfter,
   emptyLabel,
+  otherThreads = [],
 }: {
   rows: QueueRow[];
   stages: QueueFunnelStage[];
   staleAfter: number;
   emptyLabel: string;
+  /** Live threads, so a card can be put on one without opening its board. */
+  otherThreads?: { id: number; name: string }[];
 }) {
   const router = useRouter();
   const [loaded, setLoaded] = useState<Loaded | null>(null);
@@ -206,6 +209,7 @@ export function QueueBoard({
             setLoaded((l) => (l ? { ...l, provider: { ...l.provider, ...patch } } : l));
             refresh();
           }}
+          otherThreads={otherThreads.filter((t) => t.id !== loaded.thread.id)}
           onNoteAdded={refresh}
         />
       )}

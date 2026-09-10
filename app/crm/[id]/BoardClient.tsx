@@ -366,7 +366,8 @@ export function BoardClient({
           onMove={doMove}
           onAssign={doAssign}
           onRemove={doRemove}
-          onPatch={doPatch}
+          otherThreads={otherThreads}
+        onPatch={doPatch}
           onNoteAdded={() => {}}
         />
       )}

@@ -4,7 +4,7 @@ import { requireView } from '@/lib/guard';
 import { RoleBlocked } from '@/components/RoleBlocked';
 import { Card, CardBody, CardHeader } from '@/components/ui/Card';
 import { ChipButton } from '@/components/ui/Toggle';
-import { getQueue, getQueueFunnel, listTeam, getThreadChips, canLeadCrm } from '@/lib/crm';
+import { getQueue, getQueueFunnel, listTeam, getThreadChips, canLeadCrm, listThreads } from '@/lib/crm';
 import { CrmTabs } from './CrmTabs';
 import { QueueFunnel } from './QueueFunnel';
 import { QueueBoard } from './QueueBoard';
@@ -36,18 +36,24 @@ export default async function MyQueuePage({
   // cannot open a colleague's pipeline.
   const isLead = canLeadCrm(me);
   const unassigned = searchParams.who === 'unassigned';
+  // "all" is a lead-only view of everyone's cards at once — the thing the
+  // Team tab used to answer. Members never get it, whatever the URL says.
+  const showAll = isLead && searchParams.who === 'all';
   const requestedId = searchParams.who ? Number(searchParams.who) : me.id;
-  const viewingId = unassigned ? null : (isLead ? requestedId : me.id);
+  const viewingId = unassigned || showAll ? null : (isLead ? requestedId : me.id);
 
   const threadFilter = Number(searchParams.thread) || null;
 
   const [rows, funnel, team] = await Promise.all([
-    getQueue({ assigneeId: viewingId, unassigned, threadId: threadFilter, limit: 500 }),
-    getQueueFunnel({ assigneeId: viewingId, unassigned, threadId: threadFilter }),
+    getQueue({ assigneeId: showAll ? undefined : viewingId, unassigned, threadId: threadFilter, limit: showAll ? 2000 : 500 }),
+    getQueueFunnel({ assigneeId: showAll ? undefined : viewingId, unassigned, threadId: threadFilter }),
     canLeadCrm(me) ? listTeam() : Promise.resolve([]),
   ]);
   // Unfiltered, so selecting a thread never removes the others from the row.
-  const threadChips = await getThreadChips({ assigneeId: viewingId, unassigned });
+  const liveThreads = (await listThreads())
+    .filter((t) => t.status !== 'done')
+    .map((t) => ({ id: t.id, name: t.name }));
+  const threadChips = await getThreadChips({ assigneeId: showAll ? undefined : viewingId, unassigned });
 
   // Onboarded rows are in the list now, so "open" and "stale" are derived here
   // rather than by the query having quietly dropped them. Staleness only means
@@ -60,7 +66,9 @@ export default async function MyQueuePage({
   // Which campaigns this person's work spans — the thread board's context,
   // carried into the person view so the two aren't different worlds.
   const threads = threadChips;
-  const whoLabel = unassigned
+  const whoLabel = showAll
+    ? 'The team'
+    : unassigned
     ? 'Nobody'
     : viewingId === me.id
       ? 'You'
@@ -94,6 +102,11 @@ export default async function MyQueuePage({
           <ChipButton href={href({ who: 'unassigned' })} active={unassigned}>
             ⚠ Unassigned
           </ChipButton>
+          {isLead && (
+            <ChipButton href={href({ who: 'all' })} active={showAll}>
+              Everyone
+            </ChipButton>
+          )}
           {isLead && team.filter((t) => t.id !== me.id).map((t) => (
             <ChipButton key={t.id} href={href({ who: String(t.id) })} active={!unassigned && viewingId === t.id}>
               {t.name}
@@ -145,6 +158,7 @@ export default async function MyQueuePage({
         <CardBody className="pt-0">
           <div className="-mx-5">
             <QueueBoard
+            otherThreads={liveThreads}
               rows={rows}
               stages={funnel.stages}
               staleAfter={staleAfter}

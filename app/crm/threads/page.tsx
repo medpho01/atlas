@@ -55,6 +55,7 @@ export default async function CrmPage() {
         />
         <CardBody className="pt-0">
           <QueueBoard
+            otherThreads={threads.filter((t) => t.status !== 'done').map((t) => ({ id: t.id, name: t.name }))}
             rows={everything}
             stages={funnel.stages}
             staleAfter={7}

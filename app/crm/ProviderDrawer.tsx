@@ -5,7 +5,7 @@ import {
   X, User as UserIcon, FileText, Upload, CheckCircle2, Circle,
   ArrowRight, StickyNote, Clock, Phone, Mail, MapPin, Trash2,
 } from 'lucide-react';
-import { moveStage, assignProvider, addNote, updateProvider, removeFromThread } from './actions';
+import { moveStage, assignProvider, addNote, updateProvider, removeFromThread, addProvidersToThread } from './actions';
 import type { Thread, ThreadProvider, ChecklistItem, ProviderDoc, Activity, FunnelStage } from '@/lib/crm';
 import { PROVIDER_KINDS } from '@/lib/providerKinds';
 
@@ -21,6 +21,7 @@ export type Team = { id: number; name: string; role: string }[];
  */
 export function ProviderDrawer({
   thread, provider, stages, checklist, team, canWrite, pending, onClose, onMove, onAssign, onRemove, onPatch,
+  otherThreads = [],
 }: {
   thread: Thread;
   provider: ThreadProvider;
@@ -35,6 +36,14 @@ export function ProviderDrawer({
   onPatch: (providerId: number, patch: Record<string, string>) => void;
   onAssign: (providerId: number, assigneeId: number | null) => void;
   onNoteAdded: () => void;
+  /**
+   * Live threads this provider is not already on.
+   *
+   * Adding from here rather than only from the board's bulk bar: the bulk bar
+   * needs you to be on the right board with the right card ticked, which is
+   * why nobody found it. This is on the card itself, wherever it was opened.
+   */
+  otherThreads?: { id: number; name: string }[];
 }) {
   const [tab, setTab] = useState<'journey' | 'docs'>('journey');
   const [note, setNote] = useState('');
@@ -53,6 +62,7 @@ export function ProviderDrawer({
   const [activities, setActivities] = useState<Activity[] | null>(null);
   const [docs, setDocs] = useState<ProviderDoc[] | null>(null);
   const [busy, setBusy] = useState(false);
+  const [added, setAdded] = useState<string | null>(null);
 
   const loadActivities = async () => {
     const r = await fetch(`/api/crm/activities?provider=${provider.id}&thread=${thread.id}`);
@@ -158,6 +168,35 @@ export function ProviderDrawer({
             )}
           </div>
           <div className="flex items-center gap-1 shrink-0">
+            {canWrite && otherThreads.length > 0 && (
+              <select
+                defaultValue=""
+                disabled={busy || pending}
+                title="Also work this provider in another campaign"
+                onChange={async (e) => {
+                  const id = Number(e.target.value);
+                  e.target.value = '';
+                  if (!id) return;
+                  setBusy(true);
+                  try {
+                    const res = await addProvidersToThread({
+                      providerIds: [provider.id], threadId: id,
+                    });
+                    setSaveErr(res.ok
+                      ? null
+                      : (res.error ?? 'Could not add to that thread'));
+                    if (res.ok) {
+                      setAdded(otherThreads.find((t) => t.id === id)?.name ?? 'thread');
+                      setTimeout(() => setAdded(null), 3000);
+                    }
+                  } finally { setBusy(false); }
+                }}
+                className="h-7 px-1.5 text-[11px] rounded-md border border-ink-200 bg-surface mr-1"
+              >
+                <option value="" disabled>Add to thread…</option>
+                {otherThreads.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+              </select>
+            )}
             {canWrite && (
               confirmRemove ? (
                 <span className="inline-flex items-center gap-1.5 mr-1">
@@ -259,6 +298,7 @@ export function ProviderDrawer({
                   </button>
                 )}
                 {saveErr && <span className="text-[12px] text-danger-500">{saveErr}</span>}
+                {added && <span className="text-[12px] text-success-600">Added to {added}</span>}
               </div>
             </div>
           )}

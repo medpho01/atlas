@@ -361,7 +361,11 @@ export async function getQueue(opts: {
       GREATEST(tp.updated_at, COALESCE(tc.last_activity, tp.updated_at))::text AS last_touch,
       EXTRACT(DAY FROM now() - GREATEST(tp.updated_at, COALESCE(tc.last_activity, tp.updated_at)))::int AS days_stale
     FROM atlas.crm_thread_providers tp
-    JOIN atlas.crm_threads t ON t.id = tp.thread_id AND t.status = 'active'
+    -- Every thread that has not been marked done, not just active ones.
+    -- Pausing a campaign does not un-work the providers on it, and the cards
+    -- were vanishing from people's queues the moment a thread was paused —
+    -- which reads as "my work disappeared", not as "that campaign is on hold".
+    JOIN atlas.crm_threads t ON t.id = tp.thread_id AND t.status <> 'done'
     JOIN atlas.crm_funnels f ON f.id = t.funnel_id
     JOIN atlas.crm_providers p ON p.id = tp.provider_id
     LEFT JOIN atlas.users u ON u.id = tp.assignee_id
