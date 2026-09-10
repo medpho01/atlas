@@ -104,7 +104,7 @@ export default async function MyQueuePage({
           </ChipButton>
           {isLead && (
             <ChipButton href={href({ who: 'all' })} active={showAll}>
-              Everyone
+              View all
             </ChipButton>
           )}
           {isLead && team.filter((t) => t.id !== me.id).map((t) => (

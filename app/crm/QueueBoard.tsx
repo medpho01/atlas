@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { Clock } from 'lucide-react';
 import type { QueueRow, QueueFunnelStage, Thread, ThreadProvider, ChecklistItem, FunnelStage } from '@/lib/crm';
 import { ProviderDrawer, type Team } from './ProviderDrawer';
-import { moveStage, assignProvider, removeFromThread } from './actions';
+import { moveStage, assignProvider, removeFromThread, addProvidersToThread } from './actions';
 
 type Loaded = {
   thread: Thread;
@@ -52,6 +52,13 @@ export function QueueBoard({
 }) {
   const router = useRouter();
   const [loaded, setLoaded] = useState<Loaded | null>(null);
+  // Selection lives on provider_id, not the thread-provider pair: adding the
+  // same organisation to a campaign twice from two of its cards would be one
+  // no-op and one insert, which is confusing to report.
+  const [picked, setPicked] = useState<Set<number>>(new Set());
+  const [bulkNote, setBulkNote] = useState<string | null>(null);
+  const togglePick = (id: number) =>
+    setPicked((p) => { const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n; });
   const [loadingId, setLoadingId] = useState<number | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
@@ -125,11 +132,31 @@ export function QueueBoard({
                     <p className="text-center text-xs text-ink-300 py-5">—</p>
                   ) : (
                     list.map((r) => (
-                      <button
+                      <div
                         key={`${r.thread_id}-${r.provider_id}`}
+                        className={`relative rounded-md border bg-surface transition ${
+                          picked.has(r.provider_id)
+                            ? 'border-brand-500 ring-1 ring-brand-500/30'
+                            : 'border-ink-200 hover:border-brand-400'
+                        }`}
+                      >
+                      {otherThreads.length > 0 && (
+                        // Outside the card button, so ticking never opens the drawer.
+                        <label
+                          className="absolute top-1.5 right-1.5 z-10 p-1 cursor-pointer"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={picked.has(r.provider_id)}
+                            onChange={() => togglePick(r.provider_id)}
+                          />
+                        </label>
+                      )}
+                      <button
                         type="button"
                         onClick={() => openProvider(r)}
-                        className={`block w-full text-left rounded-md border border-ink-200 bg-surface px-2.5 py-2 hover:border-brand-400 transition ${
+                        className={`block w-full text-left px-2.5 py-2 ${
                           loadingId === r.provider_id ? 'opacity-60' : ''
                         }`}
                       >
@@ -158,6 +185,7 @@ export function QueueBoard({
                           </span>
                         </div>
                       </button>
+                      </div>
                     ))
                   )}
                 </div>
@@ -165,6 +193,45 @@ export function QueueBoard({
             );
           })}
       </div>
+
+      {otherThreads.length > 0 && picked.size > 0 && (
+        <div className="sticky bottom-3 z-30 mt-3 flex flex-wrap items-center gap-2 rounded-xl border border-brand-500/40 bg-surface shadow-lg px-3 py-2">
+          <span className="text-[13px] font-semibold text-ink-900">{picked.size} selected</span>
+          <select
+            defaultValue=""
+            disabled={pending}
+            onChange={(e) => {
+              const id = Number(e.target.value);
+              e.target.value = '';
+              if (!id) return;
+              startTransition(async () => {
+                setErr(null);
+                const res = await addProvidersToThread({
+                  providerIds: [...picked], threadId: id,
+                });
+                if (!res.ok) { setErr(res.error ?? 'Failed'); return; }
+                const name = otherThreads.find((t) => t.id === id)?.name ?? 'thread';
+                setBulkNote(res.already
+                  ? `Added ${res.added} to ${name} · ${res.already} already there`
+                  : `Added ${res.added} to ${name}`);
+                setPicked(new Set());
+                router.refresh();
+              });
+            }}
+            className="h-8 px-2 text-[12px] rounded-md border border-ink-200 bg-surface"
+          >
+            <option value="" disabled>Add to thread…</option>
+            {otherThreads.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+          </select>
+          {bulkNote && <span className="text-[12px] text-success-600">{bulkNote}</span>}
+          <button
+            onClick={() => { setPicked(new Set()); setBulkNote(null); }}
+            className="ml-auto text-[12px] text-ink-500 hover:text-ink-900"
+          >
+            Clear
+          </button>
+        </div>
+      )}
 
       {err && (
         <p className="mt-2 text-xs text-danger-500">{err}</p>
@@ -209,7 +276,7 @@ export function QueueBoard({
             setLoaded((l) => (l ? { ...l, provider: { ...l.provider, ...patch } } : l));
             refresh();
           }}
-          otherThreads={otherThreads.filter((t) => t.id !== loaded.thread.id)}
+          otherThreads={otherThreads}
           onNoteAdded={refresh}
         />
       )}

@@ -366,7 +366,7 @@ export function BoardClient({
           onMove={doMove}
           onAssign={doAssign}
           onRemove={doRemove}
-          otherThreads={otherThreads}
+          otherThreads={[{ id: thread.id, name: thread.name }, ...otherThreads]}
         onPatch={doPatch}
           onNoteAdded={() => {}}
         />

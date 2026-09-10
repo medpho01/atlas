@@ -8,7 +8,8 @@ import { createUser, updateUser, deleteUser, bulkCreateUsers, type UserRow, type
 // selectable only for users already on them — see the legacy option below.
 const ROLE_OPTIONS = [
   { value: 'admin',      label: 'Admin',      hint: 'Everything, plus provisioning people and roles' },
-  { value: 'network',    label: 'Network',    hint: 'Grows supply — edits the directory, rates and onboarding' },
+  { value: 'network_lead', label: 'Network lead', hint: 'Runs onboarding — sees the whole pipeline, owns threads and who works them' },
+  { value: 'network',    label: 'Network',    hint: 'Grows supply — works the providers assigned to them' },
   { value: 'accounts',   label: 'Accounts',   hint: 'Grows demand — owns account health, reads the network side' },
   { value: 'operations', label: 'Operations', hint: 'Fulfils orders — reads coverage and the directory' },
 ] as const;

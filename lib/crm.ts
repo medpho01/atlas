@@ -221,22 +221,38 @@ export async function listTeam(): Promise<{ id: number; name: string; role: stri
  * selected.
  */
 export async function getThreadChips(opts: { assigneeId?: number | null; unassigned?: boolean }) {
-  const where: string[] = [];
   const params: unknown[] = [];
+  let cardFilter = 'TRUE';
   if (opts.unassigned) {
-    where.push('tp.assignee_id IS NULL');
+    cardFilter = 'tp.assignee_id IS NULL';
   } else if (opts.assigneeId != null) {
     params.push(opts.assigneeId);
-    where.push(`tp.assignee_id = $${params.length}`);
+    cardFilter = `tp.assignee_id = $${params.length}`;
   }
+  const memberFilter = opts.assigneeId != null && !opts.unassigned
+    ? `EXISTS (SELECT 1 FROM atlas.crm_thread_members m
+                WHERE m.thread_id = t.id AND m.user_id = $${params.length})`
+    : 'FALSE';
+
   return query<{ id: number; name: string; n: number }>(`
-    SELECT t.id, t.name, COUNT(*)::int AS n
-    FROM atlas.crm_thread_providers tp
-    JOIN atlas.crm_threads t ON t.id = tp.thread_id
-    ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
+    -- Driven by the thread list, not by the cards on it. Counting from
+    -- crm_thread_providers meant a thread with no cards yet produced no chip
+    -- at all, so a campaign created this morning was invisible until someone
+    -- put a provider on it — exactly when you most want to filter to it.
+    SELECT t.id, t.name,
+           COUNT(tp.provider_id) FILTER (WHERE ${cardFilter})::int AS n
+    FROM atlas.crm_threads t
+    LEFT JOIN atlas.crm_thread_providers tp ON tp.thread_id = t.id
+    WHERE t.status <> 'done'
     GROUP BY t.id, t.name
+    -- Threads you hold cards in first, then ones you are on but have not
+    -- started, then the rest. An empty thread you are not on is still offered:
+    -- it is where work gets filed, and hiding it is how it stays empty.
+    HAVING COUNT(tp.provider_id) FILTER (WHERE ${cardFilter}) > 0
+        OR ${memberFilter}
+        OR $${params.length + 1}::boolean
     ORDER BY n DESC, t.name
-  `, params);
+  `, [...params, opts.assigneeId == null && !opts.unassigned]);
 }
 
 export type ThreadMember = { thread_id: number; user_id: number; name: string; role: string };
