@@ -220,7 +220,20 @@ export async function listTeam(): Promise<{ id: number; name: string; role: stri
  * question without the thread filter, so the chips are stable whatever is
  * selected.
  */
-export async function getThreadChips(opts: { assigneeId?: number | null; unassigned?: boolean }) {
+export async function getThreadChips(opts: {
+  assigneeId?: number | null;
+  unassigned?: boolean;
+  /**
+   * The VIEWER's role, not the viewed person's.
+   *
+   * A lead or admin picks the campaign to look at, so they get every live
+   * thread whether or not anything has been filed on it yet — a new campaign
+   * is invisible otherwise, which is exactly when you want to open it. A
+   * member gets the threads they are on or hold cards in; the rest are not
+   * theirs to work and would only be noise.
+   */
+  isLead?: boolean;
+}) {
   const params: unknown[] = [];
   let cardFilter = 'TRUE';
   if (opts.unassigned) {
@@ -229,30 +242,24 @@ export async function getThreadChips(opts: { assigneeId?: number | null; unassig
     params.push(opts.assigneeId);
     cardFilter = `tp.assignee_id = $${params.length}`;
   }
-  const memberFilter = opts.assigneeId != null && !opts.unassigned
-    ? `EXISTS (SELECT 1 FROM atlas.crm_thread_members m
-                WHERE m.thread_id = t.id AND m.user_id = $${params.length})`
-    : 'FALSE';
+
+  let having = 'TRUE';
+  if (!opts.isLead && opts.assigneeId != null && !opts.unassigned) {
+    having = `COUNT(tp.provider_id) FILTER (WHERE ${cardFilter}) > 0
+              OR EXISTS (SELECT 1 FROM atlas.crm_thread_members m
+                          WHERE m.thread_id = t.id AND m.user_id = $${params.length})`;
+  }
 
   return query<{ id: number; name: string; n: number }>(`
-    -- Driven by the thread list, not by the cards on it. Counting from
-    -- crm_thread_providers meant a thread with no cards yet produced no chip
-    -- at all, so a campaign created this morning was invisible until someone
-    -- put a provider on it — exactly when you most want to filter to it.
     SELECT t.id, t.name,
            COUNT(tp.provider_id) FILTER (WHERE ${cardFilter})::int AS n
     FROM atlas.crm_threads t
     LEFT JOIN atlas.crm_thread_providers tp ON tp.thread_id = t.id
     WHERE t.status <> 'done'
     GROUP BY t.id, t.name
-    -- Threads you hold cards in first, then ones you are on but have not
-    -- started, then the rest. An empty thread you are not on is still offered:
-    -- it is where work gets filed, and hiding it is how it stays empty.
-    HAVING COUNT(tp.provider_id) FILTER (WHERE ${cardFilter}) > 0
-        OR ${memberFilter}
-        OR $${params.length + 1}::boolean
+    HAVING ${having}
     ORDER BY n DESC, t.name
-  `, [...params, opts.assigneeId == null && !opts.unassigned]);
+  `, params);
 }
 
 export type ThreadMember = { thread_id: number; user_id: number; name: string; role: string };

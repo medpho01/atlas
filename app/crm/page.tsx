@@ -53,7 +53,7 @@ export default async function MyQueuePage({
   const liveThreads = (await listThreads())
     .filter((t) => t.status !== 'done')
     .map((t) => ({ id: t.id, name: t.name }));
-  const threadChips = await getThreadChips({ assigneeId: showAll ? undefined : viewingId, unassigned });
+  const threadChips = await getThreadChips({ assigneeId: showAll ? undefined : viewingId, unassigned, isLead });
 
   // Onboarded rows are in the list now, so "open" and "stale" are derived here
   // rather than by the query having quietly dropped them. Staleness only means
