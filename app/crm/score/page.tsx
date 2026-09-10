@@ -53,6 +53,8 @@ export default async function ScorePage({
   const pct = mine?.pct ?? 0;
   const payout = Number(mine?.payout ?? 0);
   const short = Math.max(target - net, 0);
+  const earnedTotal = mine?.earned ?? 0;
+  const penaltyTotal = mine?.penalty ?? 0;
 
   const months = [0, 1, 2, 3].map((i) => shiftMonth(month.key, -i)).reverse();
   const href = (patch: { month?: string; who?: string }) => {
@@ -73,8 +75,8 @@ export default async function ScorePage({
       </div>
       <CrmTabs active="/crm/score" isLead={isLead} />
 
-      <div className="flex flex-wrap items-center gap-1.5 mt-4 mb-2">
-        <span className="text-[11px] uppercase tracking-wide text-ink-400 mr-1">Month</span>
+      <div className="flex flex-wrap items-center gap-1.5 mt-5 mb-2">
+        <span className="w-14 shrink-0 text-[11px] uppercase tracking-wide text-ink-400">Month</span>
         {months.map((m) => (
           <ChipButton key={m} href={href({ month: m })} active={m === month.key}>
             {new Date(`${m}-01T00:00:00Z`).toLocaleDateString('en-GB', { month: 'short', year: '2-digit', timeZone: 'UTC' })}
@@ -83,8 +85,8 @@ export default async function ScorePage({
       </div>
 
       {isLead && board.length > 0 && (
-        <div className="flex flex-wrap items-center gap-1.5 mb-4">
-          <span className="text-[11px] uppercase tracking-wide text-ink-400 mr-1">Whose</span>
+        <div className="flex flex-wrap items-center gap-1.5 mb-5">
+          <span className="w-14 shrink-0 text-[11px] uppercase tracking-wide text-ink-400">Whose</span>
           {board.map((r) => (
             <ChipButton key={r.user_id} href={href({ who: String(r.user_id) })} active={r.user_id === viewingId}>
               {r.name}
@@ -93,54 +95,71 @@ export default async function ScorePage({
         </div>
       )}
 
-      {/* The score itself, and what it is short of. */}
+      {/* The score itself, and what it is short of.
+
+          Laid out as one headline and a row of equal cells rather than as
+          free-floating figures: the numbers are read against each other, so
+          they need a shared baseline and a shared column width. CardBody has
+          no top padding of its own — it is built to sit under a CardHeader —
+          so this card sets its own. */}
       <Card className="mb-5">
-        <CardBody>
-          <div className="flex flex-wrap items-end gap-x-10 gap-y-4">
-            <div>
+        <div className="p-5">
+          <div className="flex flex-wrap items-start gap-x-12 gap-y-5">
+            <div className="min-w-[11rem] pr-6 border-r border-ink-150">
               <div className="text-[11px] uppercase tracking-wide text-ink-400">
                 {viewingId === me.id ? 'My score' : board.find((r) => r.user_id === viewingId)?.name} · {month.label}
               </div>
-              <div className="flex items-baseline gap-2 mt-1">
-                <span className={`text-4xl font-bold tabular-nums ${net < 0 ? 'text-danger-500' : 'text-ink-900'}`}>{net}</span>
+              <div className="flex items-baseline gap-2 mt-1.5">
+                <span className={`text-[40px] leading-none font-bold tabular-nums ${net < 0 ? 'text-danger-500' : 'text-ink-900'}`}>{net}</span>
                 <span className="text-sm text-ink-500">of {target} points</span>
               </div>
             </div>
-            <div>
-              <div className="text-[11px] uppercase tracking-wide text-ink-400">Earned</div>
-              <div className="text-2xl font-semibold tabular-nums text-success-600 mt-1">+{mine?.earned ?? 0}</div>
-            </div>
-            <div>
-              <div className="text-[11px] uppercase tracking-wide text-ink-400">Lost to waiting</div>
-              <div className="text-2xl font-semibold tabular-nums text-danger-500 mt-1">−{mine?.penalty ?? 0}</div>
-            </div>
-            <div>
-              <div className="text-[11px] uppercase tracking-wide text-ink-400">Of target</div>
-              <div className="text-2xl font-semibold tabular-nums text-ink-900 mt-1">{pct}%</div>
-            </div>
-            {Number(settings.incentive_pot) > 0 && (
-              <div>
-                <div className="text-[11px] uppercase tracking-wide text-ink-400">Incentive at this rate</div>
-                <div className="text-2xl font-semibold tabular-nums text-brand-700 dark:text-brand-400 mt-1">{money(payout)}</div>
+
+            <dl className="flex flex-wrap gap-x-10 gap-y-4">
+              <div className="min-w-[5.5rem]">
+                <dt className="text-[11px] uppercase tracking-wide text-ink-400">Earned</dt>
+                <dd className="text-2xl leading-none font-semibold tabular-nums text-success-600 mt-1.5">
+                  {earnedTotal > 0 ? `+${earnedTotal}` : '0'}
+                </dd>
               </div>
-            )}
+              <div className="min-w-[5.5rem]">
+                <dt className="text-[11px] uppercase tracking-wide text-ink-400">Lost to waiting</dt>
+                <dd className={`text-2xl leading-none font-semibold tabular-nums mt-1.5 ${penaltyTotal > 0 ? 'text-danger-500' : 'text-ink-400'}`}>
+                  {penaltyTotal > 0 ? `−${penaltyTotal}` : '0'}
+                </dd>
+              </div>
+              <div className="min-w-[5.5rem]">
+                <dt className="text-[11px] uppercase tracking-wide text-ink-400">Of target</dt>
+                <dd className="text-2xl leading-none font-semibold tabular-nums text-ink-900 mt-1.5">{pct}%</dd>
+              </div>
+              {Number(settings.incentive_pot) > 0 && (
+                <div className="min-w-[5.5rem]">
+                  <dt className="text-[11px] uppercase tracking-wide text-ink-400">Incentive at this rate</dt>
+                  <dd className="text-2xl leading-none font-semibold tabular-nums text-brand-700 dark:text-brand-400 mt-1.5">{money(payout)}</dd>
+                </div>
+              )}
+            </dl>
           </div>
 
-          <div className="mt-4 h-2.5 rounded-full bg-ink-100 overflow-hidden">
-            <div
-              className={`h-full rounded-full transition-all ${pct >= 100 ? 'bg-success-500' : pct >= 60 ? 'bg-brand-500' : 'bg-warn-500'}`}
-              style={{ width: `${Math.min(pct, 100)}%` }}
-            />
+          <div className="mt-5">
+            <div className="h-2 rounded-full bg-ink-100 overflow-hidden">
+              <div
+                className={`h-full rounded-full transition-all ${pct >= 100 ? 'bg-success-500' : pct >= 60 ? 'bg-brand-500' : 'bg-warn-500'}`}
+                style={{ width: `${Math.min(Math.max(pct, 0), 100)}%` }}
+              />
+            </div>
+            <div className="flex items-baseline justify-between mt-1.5 text-[11px] text-ink-400 tabular-nums">
+              <span>{short > 0 ? `${short} points to target` : 'Target reached'}</span>
+              <span>{target}</span>
+            </div>
           </div>
-          <p className="text-[12px] text-ink-500 mt-2">
-            {short > 0
-              ? `${short} points to target.`
-              : 'Target reached.'}{' '}
+
+          <p className="text-[12px] leading-relaxed text-ink-500 mt-4 max-w-3xl">
             Moving a provider forward earns that stage&apos;s points once. A card left past its
             stage&apos;s allowance costs {String(settings.penalty_multiplier)}× those points, and again
             every further period{settings.max_penalty_periods > 0 ? `, up to ${settings.max_penalty_periods} times` : ''}.
           </p>
-        </CardBody>
+        </div>
       </Card>
 
       <div className="grid gap-5 lg:grid-cols-2">
@@ -157,17 +176,17 @@ export default async function ScorePage({
               <table className="w-full text-sm">
                 <thead>
                   <tr className="text-[11px] uppercase tracking-wide text-ink-400 text-left">
-                    <th className="pb-2 font-medium">Stage</th>
-                    <th className="pb-2 font-medium text-right">Providers</th>
+                    <th className="pb-2 pr-4 font-medium">Stage</th>
+                    <th className="pb-2 pr-4 font-medium text-right">Providers</th>
                     <th className="pb-2 font-medium text-right">Points</th>
                   </tr>
                 </thead>
                 <tbody>
                   {earned.map((e) => (
                     <tr key={e.stage_key} className="border-t border-ink-150">
-                      <td className="py-1.5 text-ink-800">{e.stage_label}</td>
-                      <td className="py-1.5 text-right tabular-nums text-ink-600">{e.moves}</td>
-                      <td className="py-1.5 text-right tabular-nums font-medium text-success-600">+{e.points}</td>
+                      <td className="py-2 pr-4 text-ink-800">{e.stage_label}</td>
+                      <td className="py-2 pr-4 text-right tabular-nums text-ink-600">{e.moves}</td>
+                      <td className="py-2 text-right tabular-nums font-medium text-success-600">+{e.points}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -241,16 +260,20 @@ export default async function ScorePage({
                 <tbody>
                   {board.map((r) => (
                     <tr key={r.user_id} className="border-t border-ink-150">
-                      <td className="py-1.5">
+                      <td className="py-2 pr-4">
                         <Link href={href({ who: String(r.user_id) })} className="text-ink-900 hover:text-brand-600">{r.name}</Link>
                       </td>
-                      <td className="py-1.5 text-right tabular-nums text-success-600">+{r.earned}</td>
-                      <td className="py-1.5 text-right tabular-nums text-danger-500">−{r.penalty}</td>
-                      <td className={`py-1.5 text-right tabular-nums font-semibold ${r.net < 0 ? 'text-danger-500' : 'text-ink-900'}`}>{r.net}</td>
-                      <td className="py-1.5 text-right tabular-nums text-ink-500">{r.target}</td>
-                      <td className="py-1.5 text-right tabular-nums text-ink-800">{r.pct}%</td>
+                      <td className={`py-2 text-right tabular-nums ${r.earned > 0 ? 'text-success-600' : 'text-ink-400'}`}>
+                        {r.earned > 0 ? `+${r.earned}` : '0'}
+                      </td>
+                      <td className={`py-2 text-right tabular-nums ${r.penalty > 0 ? 'text-danger-500' : 'text-ink-400'}`}>
+                        {r.penalty > 0 ? `−${r.penalty}` : '0'}
+                      </td>
+                      <td className={`py-2 text-right tabular-nums font-semibold ${r.net < 0 ? 'text-danger-500' : 'text-ink-900'}`}>{r.net}</td>
+                      <td className="py-2 text-right tabular-nums text-ink-500">{r.target}</td>
+                      <td className="py-2 text-right tabular-nums text-ink-800">{r.pct}%</td>
                       {Number(settings.incentive_pot) > 0 && (
-                        <td className="py-1.5 text-right tabular-nums text-brand-700 dark:text-brand-400">{money(Number(r.payout))}</td>
+                        <td className="py-2 text-right tabular-nums text-brand-700 dark:text-brand-400">{money(Number(r.payout))}</td>
                       )}
                     </tr>
                   ))}
