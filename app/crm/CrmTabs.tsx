@@ -7,15 +7,19 @@ import Link from 'next/link';
  * actually done — by a person, across every thread they're on. Anything
  * assigned in a thread someone doesn't open regularly is invisible to them
  * on the board alone, which is the failure these two views exist to fix.
+ *
+ * Score is the same work counted: what the month has been worth so far, and
+ * what is still sitting there costing points.
  */
 const TABS = [
   { href: '/crm', label: 'My queue' },
   { href: '/crm/threads', label: 'Threads' },
   { href: '/crm/update', label: 'Daily update' },
+  { href: '/crm/score', label: 'Score' },
 ] as const;
 
 export function CrmTabs({ active, isLead = true }: {
-  active: '/crm' | '/crm/threads' | '/crm/update';
+  active: '/crm' | '/crm/threads' | '/crm/update' | '/crm/score';
   /** Threads are the lead's to run, so members do not get the tab. */
   isLead?: boolean;
 }) {
