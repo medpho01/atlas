@@ -4,7 +4,7 @@ import { useEffect, useState, useTransition } from 'react';
 import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
 import { createProvider, checkProviderDuplicates, type DupStatus } from './actions';
-import { PROVIDER_KINDS } from '@/lib/providerKinds';
+import { providerKindOptions } from '@/lib/providerKinds';
 
 /**
  * Add a provider, from anywhere.
@@ -99,7 +99,9 @@ export function AddProviderModal({ threadId, threads, defaultKind, onClose }: {
             className="col-span-2 h-9 px-3 text-sm rounded-md border border-ink-200 bg-surface" />
           <select value={form.kind} onChange={(e) => setForm({ ...form, kind: e.target.value })}
             className="h-9 px-2 text-sm rounded-md border border-ink-200 bg-surface">
-            {PROVIDER_KINDS.map((k) => <option key={k}>{k}</option>)}
+            {providerKindOptions(form.kind).map((k) => (
+              <option key={k.value} value={k.value}>{k.label}</option>
+            ))}
           </select>
           <input placeholder="Contact person" value={form.contactPerson} onChange={(e) => setForm({ ...form, contactPerson: e.target.value })}
             className="h-9 px-3 text-sm rounded-md border border-ink-200 bg-surface" />

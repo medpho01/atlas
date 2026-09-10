@@ -7,7 +7,7 @@ import {
 } from 'lucide-react';
 import { moveStage, assignProvider, addNote, updateProvider, removeFromThread, addProvidersToThread } from './actions';
 import type { Thread, ThreadProvider, ChecklistItem, ProviderDoc, Activity, FunnelStage } from '@/lib/crm';
-import { PROVIDER_KINDS } from '@/lib/providerKinds';
+import { providerKindLabel, providerKindOptions } from '@/lib/providerKinds';
 
 export type Team = { id: number; name: string; role: string }[];
 
@@ -153,7 +153,7 @@ export function ProviderDrawer({
           <div>
             <div className="text-[15px] font-bold text-ink-900">{provider.name}</div>
             <div className="text-[12px] text-ink-500 flex flex-wrap items-center gap-x-3 gap-y-0.5 mt-0.5">
-              <span>{provider.kind}</span>
+              <span>{providerKindLabel(provider.kind)}</span>
               {provider.city && <span className="inline-flex items-center gap-1"><MapPin className="w-3 h-3" />{provider.city}{provider.pincode ? ` ${provider.pincode}` : ''}</span>}
               {provider.phone && <a href={`tel:${provider.phone}`} className="inline-flex items-center gap-1 text-brand-700 dark:text-brand-400"><Phone className="w-3 h-3" />{provider.phone}</a>}
               {provider.email && <span className="inline-flex items-center gap-1"><Mail className="w-3 h-3" />{provider.email}</span>}
@@ -204,8 +204,8 @@ export function ProviderDrawer({
                   className="col-span-2 h-8 px-2 text-[13px] rounded-md border border-ink-200 bg-surface font-medium" />
                 <select value={fields.kind} onChange={(e) => setField('kind', e.target.value)}
                   className="h-8 px-2 text-[13px] rounded-md border border-ink-200 bg-surface">
-                  {PROVIDER_KINDS.map((k) =>
-                    <option key={k} value={k}>{k}</option>)}
+                  {providerKindOptions(fields.kind).map((k) =>
+                    <option key={k.value} value={k.value}>{k.label}</option>)}
                 </select>
                 <input value={fields.contact_person} onChange={(e) => setField('contact_person', e.target.value)}
                   placeholder="Contact person"

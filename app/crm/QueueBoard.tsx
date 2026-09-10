@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { Clock } from 'lucide-react';
 import type { QueueRow, QueueFunnelStage, Thread, ThreadProvider, ChecklistItem, FunnelStage } from '@/lib/crm';
 import { ProviderDrawer, type Team } from './ProviderDrawer';
+import { providerKindLabel } from '@/lib/providerKinds';
 import { moveStage, assignProvider, removeFromThread, addProvidersToThread } from './actions';
 
 type Loaded = {
@@ -164,7 +165,7 @@ export function QueueBoard({
                           {r.provider_name}
                         </div>
                         <div className="text-[11px] text-ink-500 mt-0.5">
-                          {r.kind}{r.city ? ` · ${r.city}` : ''}
+                          {providerKindLabel(r.kind)}{r.city ? ` · ${r.city}` : ''}
                         </div>
                         <div className="text-[11px] text-ink-600 mt-1.5 truncate" title={r.thread_name}>
                           {r.thread_name}

@@ -6,7 +6,7 @@ import { Plus, Target, ChevronRight, Settings2, X } from 'lucide-react';
 import { createThread, createFunnel, updateThread, setFunnelSuccessStage,
          renameThread, setThreadMembers, deleteThread } from './actions';
 import type { Thread, Funnel, ThreadMember } from '@/lib/crm';
-import { PROVIDER_KINDS } from '@/lib/providerKinds';
+import { providerKindLabel, providerKindOptions } from '@/lib/providerKinds';
 
 function CardAction({ onClick, danger, children }: {
   onClick: () => void; danger?: boolean; children: React.ReactNode;
@@ -121,7 +121,9 @@ export function ThreadsClient({ threads, funnels, canWrite, isAdmin, members, te
                 onChange={(e) => setForm({ ...form, providerKind: e.target.value })}
                 className="h-9 px-2 text-sm rounded-md border border-ink-200 bg-surface"
               >
-                {PROVIDER_KINDS.map((k) => <option key={k}>{k}</option>)}
+                {providerKindOptions(form.providerKind).map((k) => (
+                  <option key={k.value} value={k.value}>{k.label}</option>
+                ))}
               </select>
               <input
                 type="text" placeholder="Region (e.g. Pune)" value={form.region}
@@ -209,7 +211,7 @@ export function ThreadsClient({ threads, funnels, canWrite, isAdmin, members, te
                   </span>
                   <span>{t.provider_total} in pipeline</span>
                   {t.region && <span>· {t.region}</span>}
-                  {t.provider_kind && <span>· {t.provider_kind}</span>}
+                  {t.provider_kind && <span>· {providerKindLabel(t.provider_kind)}</span>}
                 </div>
                 <div className="flex h-1.5 rounded-full bg-ink-100 overflow-hidden" title={`${pct}% of target`}>
                   {t.provider_total > 0 ? t.stages.map((s) => {

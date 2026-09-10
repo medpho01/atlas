@@ -8,7 +8,7 @@ import {
 import * as XLSX from 'xlsx';
 import { moveStage, assignProvider, addNote, updateProvider, bulkCreateProviders, addChecklistItem, removeChecklistItem, removeFromThread, bulkUpdateProviders, checkProviderDuplicates, addProvidersToThread, type DupStatus } from '../actions';
 import type { Thread, ThreadProvider, ChecklistItem, ProviderDoc, Activity, FunnelStage } from '@/lib/crm';
-import { PROVIDER_KINDS } from '@/lib/providerKinds';
+import { providerKindLabel, normalizeProviderKind } from '@/lib/providerKinds';
 import { AddProviderModal } from '../AddProviderModal';
 import { ProviderDrawer } from '../ProviderDrawer';
 
@@ -242,7 +242,7 @@ export function BoardClient({
                   >
                     <div className="text-[13px] font-medium text-ink-900 leading-tight pr-5">{p.name}</div>
                     <div className="text-[11px] text-ink-500 mt-0.5">
-                      {p.kind}{p.city ? ` · ${p.city}` : ''}
+                      {providerKindLabel(p.kind)}{p.city ? ` · ${p.city}` : ''}
                     </div>
                     <div className="flex items-center gap-2 mt-1.5 text-[10px] text-ink-500">
                       <span className={`inline-flex items-center gap-0.5 ${p.assignee_name ? 'text-brand-700 dark:text-brand-400 font-medium' : ''}`}>
@@ -450,7 +450,7 @@ function ImportModal({ threadId, defaultKind, onClose }: {
         if (!name) continue;
         const get = (i: number) => (i >= 0 ? String(row[i] ?? '').trim() : '');
         out.push({
-          name, kind: get(idx.kind) || defaultKind, city: get(idx.city), state: get(idx.state),
+          name, kind: normalizeProviderKind(get(idx.kind)) || defaultKind, city: get(idx.city), state: get(idx.state),
           pincode: get(idx.pincode), phone: get(idx.phone), email: get(idx.email),
           contactPerson: get(idx.contactPerson), notes: get(idx.notes),
         });

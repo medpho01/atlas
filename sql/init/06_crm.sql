@@ -32,7 +32,7 @@ CREATE TABLE IF NOT EXISTS atlas.crm_threads (
   description   text,
   funnel_id     int NOT NULL REFERENCES atlas.crm_funnels(id),
   target_count  int NOT NULL DEFAULT 0,
-  provider_kind text,                  -- e.g. 'LAB', 'HOSPITAL', 'PHLEBO', 'DOCTOR' — informational
+  provider_kind text,                  -- informational; keys from lib/providerKinds.ts
   region        text,                  -- informational: "Pune", "South", ...
   status        text NOT NULL DEFAULT 'active',   -- active | paused | done
   created_by    int REFERENCES atlas.users(id),
@@ -43,7 +43,10 @@ CREATE TABLE IF NOT EXISTS atlas.crm_threads (
 CREATE TABLE IF NOT EXISTS atlas.crm_providers (
   id             serial PRIMARY KEY,
   name           text NOT NULL,
-  kind           text NOT NULL DEFAULT 'LAB',    -- LAB | HOSPITAL | DOCTOR | PHLEBO | OTHER
+  -- Free text by design, but the app writes keys from lib/providerKinds.ts:
+  -- LAB (pathology) | RADIOLOGY | COLLECTION_CENTRE | CLINIC | HOSPITAL |
+  -- PHARMACY | DOCTOR | PHLEBO | NURSE | DENTAL | VISION.
+  kind           text NOT NULL DEFAULT 'LAB',
   city           text,
   state          text,
   pincode        text,

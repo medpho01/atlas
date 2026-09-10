@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache';
 import { getSessionUser } from '@/lib/auth';
 import { query, queryOne } from '@/lib/db';
 import { canWriteCrm, canLeadCrm, logActivity } from '@/lib/crm';
+import { normalizeProviderKind } from '@/lib/providerKinds';
 
 type R = { ok: boolean; error?: string; id?: number };
 
@@ -103,7 +104,7 @@ export async function createProvider(input: {
   const p = existing ?? await queryOne<{ id: number }>(
     `INSERT INTO atlas.crm_providers (name, kind, city, state, pincode, phone, email, contact_person, notes, source, created_by)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'manual', $10) RETURNING id`,
-    [name, input.kind || 'LAB', input.city ?? null, input.state ?? null,
+    [name, normalizeProviderKind(input.kind) || 'LAB', input.city ?? null, input.state ?? null,
      input.pincode ?? null, input.phone ?? null, input.email ?? null,
      input.contactPerson ?? null, input.notes ?? null, me!.id],
   );
@@ -369,7 +370,8 @@ export async function updateProvider(input: {
   const vals: unknown[] = [];
   for (const k of allowed) {
     if (k in input.fields) {
-      vals.push((input.fields as Record<string, unknown>)[k]);
+      const v = (input.fields as Record<string, unknown>)[k];
+      vals.push(k === 'kind' ? normalizeProviderKind(v as string) || 'LAB' : v);
       sets.push(`${k} = $${vals.length}`);
     }
   }
@@ -571,7 +573,7 @@ export async function bulkCreateProviders(input: {
       const p = await queryOne<{ id: number }>(
         `INSERT INTO atlas.crm_providers (name, kind, city, state, pincode, phone, email, contact_person, notes, source, created_by)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'import', $10) RETURNING id`,
-        [name, r.kind || 'LAB', r.city ?? null, r.state ?? null, r.pincode ?? null,
+        [name, normalizeProviderKind(r.kind) || 'LAB', r.city ?? null, r.state ?? null, r.pincode ?? null,
          r.phone ?? null, r.email ?? null, r.contactPerson ?? null, r.notes ?? null, me!.id],
       );
       providerId = p!.id;
