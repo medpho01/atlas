@@ -1,12 +1,19 @@
 'use client';
 
-import { useState, useTransition } from 'react';
+import { useEffect, useState, useTransition } from 'react';
+import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
 import { createProvider, checkProviderDuplicates, type DupStatus } from './actions';
 import { PROVIDER_KINDS } from '@/lib/providerKinds';
 
 /**
  * Add a provider, from anywhere.
+ *
+ * Rendered through a portal to <body>. A `position: fixed` element is
+ * positioned against the nearest ancestor carrying a filter, transform or
+ * backdrop-filter rather than the viewport — and the queue's sticky header has
+ * backdrop-blur on it, so opening this from there pinned the dialog inside the
+ * header strip and blurred it. The portal takes it out of that subtree.
  *
  * Lifted out of the thread board so the queue can open it too — there was no
  * way to create a provider without first navigating into a campaign, which is
@@ -52,9 +59,19 @@ export function AddProviderModal({ threadId, threads, defaultKind, onClose }: {
     });
   };
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4" onClick={onClose}>
-      <div className="w-full max-w-md rounded-2xl border border-ink-200 bg-surface p-5" onClick={(e) => e.stopPropagation()}>
+  // Portals need a DOM target, which does not exist during the server render.
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+  useEffect(() => {
+    const esc = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', esc);
+    return () => window.removeEventListener('keydown', esc);
+  }, [onClose]);
+  if (!mounted) return null;
+
+  return createPortal(
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
+      <div className="w-full max-w-md max-h-[85vh] overflow-y-auto rounded-2xl border border-ink-200 bg-surface shadow-2xl p-5" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-3">
           <h3 className="text-[15px] font-bold text-ink-900">Add provider</h3>
           <button onClick={onClose} className="text-ink-400 hover:text-ink-900"><X className="w-4 h-4" /></button>
@@ -133,6 +150,7 @@ export function AddProviderModal({ threadId, threads, defaultKind, onClose }: {
           <button onClick={onClose} className="px-3 h-9 text-sm rounded-md border border-ink-200 text-ink-700 hover:bg-ink-50">Cancel</button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
