@@ -237,5 +237,9 @@ export const SETTLED_STAGES = new Set([
   'ORDERED', 'DISCHARGED', 'CANCELLED', 'DENIED', 'WRONG_NUMBER',
 ]);
 
-export const stageLabel = (s: string) =>
-  STAGE_LABEL[s] ?? s.toLowerCase().replace(/_/g, ' ');
+// Nullable on purpose: the console's status column has no NOT NULL, and a
+// single request without one used to take the whole queue down with
+// "cannot read properties of null" — a page of two hundred rows lost to one
+// blank field.
+export const stageLabel = (s: string | null | undefined) =>
+  s ? (STAGE_LABEL[s] ?? s.toLowerCase().replace(/_/g, ' ')) : '—';
