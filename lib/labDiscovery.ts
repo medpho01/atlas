@@ -233,6 +233,23 @@ const ACCREDITATION_RANK: { pattern: RegExp; weight: number; label: string }[] =
  */
 const UNKNOWN_ACCREDITATION = 0.45;
 
+/**
+ * What a confirmed wrong-kind-of-centre does to the total.
+ *
+ * The fit component being near-zero was not enough on its own. A large NABL
+ * pathology chain on an MRI request scored 67 against 59 for an unlisted lab
+ * that might actually have a scanner: it lost fit by 16 points and won
+ * liveness, accreditation, reachability and rating by more. So the top lead on
+ * an imaging request was a lab confirmed unable to do imaging, and the first
+ * phone call was guaranteed wasted — which is the exact call this ranking
+ * exists to skip.
+ *
+ * This does not change the five weights or what they mean. It is a rule on top
+ * of them, and it is only reachable from a *confirmed* mismatch — a lab that
+ * said what it does, and it is not this. Silence never triggers it.
+ */
+const MISMATCH_DISCOUNT = 0.45;
+
 /** Rating prior: where a listing's average tends to sit, and how much it counts. */
 const RATING_PRIOR_MEAN = 3.9;
 const RATING_PRIOR_WEIGHT = 25;
@@ -257,10 +274,13 @@ export type Band = {
 };
 
 export type LeadScore = {
-  /** 0-100, to one decimal. */
+  /** 0-100, to one decimal. The five components, after any discount below. */
   total: number;
   band: Band;
   components: ScoreComponent[];
+  /** Set when the total is not simply the five components added up. Carried
+   *  so the hover breakdown can still account for the number shown. */
+  discount?: { factor: number; why: string };
   /** Why this lead sits where it does. Rendered as "Ranked here for …". */
   reasons: string[];
   /** What is unknown and has to be asked. The caveat list is the agenda for
@@ -319,6 +339,7 @@ export function scoreLead(lead: LabFacts, needed?: string[] | null): LeadScore {
   const can = lead.disciplines ?? [];
   let fit: number;
   let fitDetail: string;
+  let mismatched = false;
   if (!want.length) {
     // Pincode-level scoring: there is no ask to match against yet. Neutral,
     // so base_score orders on the facts that do not depend on a request.
@@ -345,8 +366,11 @@ export function scoreLead(lead: LabFacts, needed?: string[] | null): LeadScore {
     } else {
       // The one confirmed mismatch worth scoring down hard. A pathology lab
       // cannot do an MRI however good it is, and putting it first wastes
-      // precisely the call this feature exists to shorten.
+      // precisely the call this feature exists to shorten. Near-zero here AND
+      // MISMATCH_DISCOUNT on the total — the component alone was not enough to
+      // stop a well-credentialled chain from winning on the other four.
       fit = 0.05;
+      mismatched = true;
       fitDetail = `Does ${can.map(labelOf).join(', ')} — this ask needs ${want.map(labelOf).join(' or ')}`;
       caveats.push(`wrong kind of centre for this ask (does ${can.map(labelOf).join(', ')})`);
     }
@@ -464,8 +488,13 @@ export function scoreLead(lead: LabFacts, needed?: string[] | null): LeadScore {
     points: pointsOf(rat, WEIGHTS.rating), max: WEIGHTS.rating, detail: ratDetail,
   });
 
-  const total = Math.round(components.reduce((a, c) => a + c.points, 0) * 10) / 10;
-  return { total, band: scoreBand(total), components, reasons, caveats };
+  const raw = components.reduce((a, c) => a + c.points, 0);
+  const discount = mismatched
+    ? { factor: MISMATCH_DISCOUNT,
+        why: 'confirmed wrong kind of centre for this ask — cannot outrank a lab that might be able to do the work' }
+    : undefined;
+  const total = Math.round(raw * (discount?.factor ?? 1) * 10) / 10;
+  return { total, band: scoreBand(total), components, reasons, caveats, discount };
 }
 
 export type Ranked<T> = T & { rank: number; score: LeadScore };

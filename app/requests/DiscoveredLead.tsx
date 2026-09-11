@@ -20,9 +20,14 @@ import type { LeadRow } from '@/lib/discoverLabs';
  */
 export function DiscoveredLead({ lead }: { lead: Ranked<LeadRow> }) {
   const { score } = lead;
-  const breakdown = score.components
-    .map((c) => `${c.label}: ${c.points}/${c.max} — ${c.detail}`)
-    .join('\n');
+  const breakdown = [
+    ...score.components.map((c) => `${c.label}: ${c.points}/${c.max} — ${c.detail}`),
+    // Without this line the components would not add up to the number on the
+    // chip, and an unexplained total is the thing this card exists to avoid.
+    ...(score.discount
+      ? [`then ×${score.discount.factor}: ${score.discount.why}`]
+      : []),
+  ].join('\n');
 
   return (
     <li className="py-2.5">
