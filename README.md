@@ -24,11 +24,21 @@ Zero paid SaaS. Runs entirely on the existing `labstack` database.
 
 ## Setup
 
+You do not need access to the LabStack database to work on Atlas. The setup
+script starts a Postgres container, builds the schema and loads an invented
+dataset that every page can render.
+
 ```bash
+./scripts/setup-local.sh   # database, schema, sample data, logins
 npm install
-npm run db:views       # build materialized views (one-time + nightly refresh)
-npm run dev            # http://localhost:3010
+npm run dev                # http://localhost:3010
 ```
+
+Sign in as `admin@local.test` / `atlas1234`.
+
+**[docs/LOCAL-SETUP.md](docs/LOCAL-SETUP.md)** has the rest: what the sample
+data covers, every environment variable, how local differs from production,
+and what to do when it goes wrong.
 
 ## Routes
 

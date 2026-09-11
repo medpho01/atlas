@@ -114,7 +114,7 @@ export default async function MomentumPage({ searchParams }: { searchParams: { w
                 <tr>
                   <th>City</th>
                   {services.map((sl) => (
-                    <th key={sl} className="text-right whitespace-nowrap">{SERVICE_LINE_LABEL[sl].replace(' — ', '\n')}</th>
+                    <th key={sl} className="text-right whitespace-nowrap">{(SERVICE_LINE_LABEL[sl] ?? String(sl)).replace(' — ', '\n')}</th>
                   ))}
                 </tr>
               </thead>
@@ -143,8 +143,12 @@ export default async function MomentumPage({ searchParams }: { searchParams: { w
 
 function ServiceLineCard({ row, windowLabel }: { row: any; windowLabel: string }) {
   const sl = row.service_line as ServiceLine;
-  const label = SERVICE_LINE_LABEL[sl];
-  const tone = SERVICE_LINE_TONE[sl];
+  // The momentum view buckets anything it cannot classify as OTHER, which is
+  // not one of the declared service lines — and an unknown key here took the
+  // whole page down with "cannot read properties of undefined". A line nobody
+  // has named yet should render in grey, not 500.
+  const label = SERVICE_LINE_LABEL[sl] ?? String(sl);
+  const tone = SERVICE_LINE_TONE[sl] ?? 'other';
   const colors = TONE_COLORS[tone];
   const wow = row.wow_pct;
   const mom = row.mom_pct;
