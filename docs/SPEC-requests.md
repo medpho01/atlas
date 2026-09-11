@@ -246,17 +246,103 @@ Three guards:
 Only for supply-gap pincodes — **242 pincodes** on current data, small enough to
 do properly.
 
-- Runs **per pincode**, cached in `atlas.discovered_lab`, on a schedule, never
-  on page load.
-- Output: name, address, pincode, phone, source URL, retrieved-at.
+- Runs **per pincode**, cached in `atlas.discovered_lab`, on a schedule **and on
+  the request detail page**. See "Searching on page load" below — this reverses
+  an earlier decision and the reversal is deliberate.
+- Output: name, address, pincode, phone, source URL, retrieved-at, plus the
+  facts the ranking needs — disciplines, services, accreditation, rating and
+  review count, home collection, in-pincode and distance, chain, website,
+  hours, and the note the search always returned and the code used to discard.
 - **Marked unverified.** These are leads for a human to call, not records
   equivalent to our own. The UI must not blur that line, and a discovered lab
   can never be the named target on a *short* promise — only after a human
   confirms it exists and will take the work.
+- **Ranked, not just listed.** See "Ranking" below.
 - "Promote to CRM" creates an `atlas.crm_providers` row and a thread, reusing
-  the pipeline that exists.
+  the pipeline that exists. The CRM note carries the ranking evidence, because
+  the facts that put a lab at the top are exactly the facts nobody verified.
 - Search results are data, never instructions, and Atlas never contacts a
   discovered lab automatically.
+
+### Ranking
+
+Leads were ordered by the model's own `confidence`, which answers "is this a
+real lab" — not the question the network team is actually asking, which is "who
+do I phone first". So they opened a Google tab and worked it out there. Removing
+that tab is what the ranking is for.
+
+100 points over five components. The order of the weights is the order of the
+questions on the first phone call:
+
+| Component | Pts | Why |
+|---|---|---|
+| Can it do what THIS request asks | 32 | First question on the call; ends the call if no |
+| Evidence it is currently operating | 20 | An invented lab costs somebody a morning |
+| Accreditation (NABL/CAP > ICMR > NABH > ISO) | 16 | The quality signal that is actually audited |
+| Reachability: phone, in-pincode, home collection | 17 | A lead with no phone number is not yet a lead |
+| Public rating, discounted by review volume | 15 | Weakest signal, easiest to game |
+
+Two rules matter more than the weights:
+
+- **Unknown is not "no".** No published accreditation or rating scores
+  **mid-band**, not zero. A single-doctor lab in a supply-gap pincode usually
+  has no web presence at all, and scoring that silence as a negative buries
+  exactly the labs this feature exists to find, in the pincodes where they are
+  often the only option. Only a **confirmed** discipline mismatch is scored down
+  hard — and it discounts the total, not just its own component, because 32
+  points is not enough on its own to stop a well-credentialled pathology chain
+  from topping an imaging request.
+- **Ratings are discounted by review volume.** 5.0 from three people is the
+  rating a lab can arrange for itself; 4.4 from 380 has to beat it.
+
+The scoring is a **pure function**, not a model judgement (`lib/labDiscovery.ts`,
+no database and no `server-only` import), so a rank can be disagreed with,
+audited, and tested without production data. Every lead carries its reasons and
+its caveats, and the caveat list is the agenda for the phone call.
+
+The request-specific component is computed **at read time**. The same pincode
+legitimately ranks differently for a blood panel and an MRI, so only the
+pincode-level part is stored, in `base_score`.
+
+Rank 1 means "call this one first". It never means "this one is real".
+
+### Searching on page load
+
+**This reverses the earlier rule that discovery runs on a schedule and never on
+page load.** That rule was right when the only trigger was a nightly batch over
+a couple of hundred pincodes. It stopped being right once the card existed on
+the request detail page, because:
+
+- A request with no covering lab has exactly one next step, and it is this
+  search. Waiting for a click bought nothing except a click.
+- The batch runs nightly against the busiest supply-gap pincodes. Somebody
+  working a request *now*, in a pincode the batch has not reached, was being
+  told to come back tomorrow.
+- The empty box with a button was the thing that sent people to Google, and the
+  tab they opened there is what this is meant to remove.
+
+What stops it becoming a search on every page load is `atlas.claim_discovery()`,
+which returns true — and takes the claim — in one statement, so two tabs opening
+the same request cannot both win. It searches only when **all** of:
+
+- no lab in the network covers the pincode; **and**
+- there are no leads on screen already; **and**
+- nothing is in flight (nothing started within 2 minutes); **and**
+- one of: never answered · answered empty or failed and that was over a day ago ·
+  answered longer ago than the staleness window (30 days).
+
+`shouldAutoSearch()` in `lib/labDiscovery.ts` mirrors that WHERE clause so the
+page can reach the same answer one render earlier and never announce a search
+the database is about to decline. **The database is the authority**; the mirror
+is a rendering convenience. If one changes, the other must.
+
+A deliberate human "Search again" passes a zero-day staleness window, so the
+only guard left is the in-flight one — a person may always re-search, just not
+over the top of a search already running. This keeps the manual path on the same
+function rather than inventing a second authority that can drift from it.
+
+Auto-search is scoped to the **request detail page** only. Nothing else in Atlas
+searches on load.
 
 ---
 
