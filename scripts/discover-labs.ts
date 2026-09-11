@@ -200,11 +200,21 @@ async function main() {
     // The same claim the request page takes, for the same reason: the batch
     // and somebody's open tab can pick the same pincode within the same
     // minute, and only one of them should pay for it.
+    //
+    // --pincode is somebody naming one deliberately, so it gets the same
+    // zero-day window the "Search again" button does: always allowed, except
+    // over the top of a search already running. Without that, `--pincode X`
+    // would silently skip a pincode it had searched last week, which is not
+    // what typing it means — and the sweep's own query already filters on
+    // staleness, so this claim is the concurrency guard there, not the
+    // staleness one.
     const { rows: [c] } = await pool.query<{ claimed: boolean }>(
-      `SELECT atlas.claim_discovery($1, $2, 'batch') AS claimed`, [t.pincode, STALE_DAYS]);
+      `SELECT atlas.claim_discovery($1, $2, 'batch') AS claimed`,
+      [t.pincode, ONE ? 0 : STALE_DAYS]);
     if (!c?.claimed) {
       skipped++;
-      console.log(`  ${t.pincode} skipped — searched recently, or in flight elsewhere`);
+      console.log(`  ${t.pincode} skipped — ` +
+        (ONE ? 'a search is already running for it' : 'searched recently, or in flight elsewhere'));
       continue;
     }
     try {

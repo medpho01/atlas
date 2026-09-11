@@ -1,6 +1,7 @@
 import { notFound } from 'next/navigation';
 import Link from 'next/link';
 import { requireView } from '@/lib/guard';
+import { canManage } from '@/lib/access';
 import { RoleBlocked } from '@/components/RoleBlocked';
 import { FileText, ArrowLeft } from 'lucide-react';
 import { Card, CardHeader, CardBody } from '@/components/ui/Card';
@@ -67,7 +68,14 @@ export default async function RequestDetail({ params }: { params: { id: string }
   //
   // The database still has the final say. This is the same answer one render
   // earlier, not a substitute for it.
-  const autoSearch = !!r.pincode && noLabHere && leads.length === 0 && shouldAutoSearch(lastRun);
+  //
+  // Gated on canManage too, because the search runs as the person viewing the
+  // page. `operations` and `accounts` can view a request but only view
+  // commitments, so without this they would auto-fire a search, get back
+  // "needs the network or admin role", and see a red error on every
+  // supply-gap request for something they never asked for and cannot fix.
+  const autoSearch = !!r.pincode && noLabHere && leads.length === 0
+    && canManage(gate.user, 'commitments') && shouldAutoSearch(lastRun);
   const searchRunning = isSearchRunning(lastRun);
 
   const tone = STATE_TONE[r.state] ?? 'ink';
