@@ -24,12 +24,20 @@ export async function getDailyUpdate(userId: number, day: string): Promise<Daily
 
   // Every thread the person is on, whether or not they touched it today — a
   // thread with nothing to report is itself worth reporting.
+  //
+  // Membership is not the only claim on a thread: cards get assigned across
+  // campaigns, and someone carrying three providers in a thread nobody added
+  // them to had that work missing from their update entirely. Own a card and
+  // the thread is yours to report on.
   const threads = await query<{ thread_id: number; name: string; stages: { key: string; label: string }[] }>(`
-    SELECT t.id AS thread_id, t.name, f.stages
-    FROM atlas.crm_thread_members m
-    JOIN atlas.crm_threads t ON t.id = m.thread_id
+    SELECT DISTINCT t.id AS thread_id, t.name, f.stages
+    FROM atlas.crm_threads t
     JOIN atlas.crm_funnels f ON f.id = t.funnel_id
-    WHERE m.user_id = $1 AND t.status <> 'done'
+    WHERE t.status <> 'done'
+      AND (EXISTS (SELECT 1 FROM atlas.crm_thread_members m
+                    WHERE m.thread_id = t.id AND m.user_id = $1)
+        OR EXISTS (SELECT 1 FROM atlas.crm_thread_providers tp
+                    WHERE tp.thread_id = t.id AND tp.assignee_id = $1))
     ORDER BY t.name
   `, [userId]);
 
@@ -63,6 +71,29 @@ export async function getDailyUpdate(userId: number, day: string): Promise<Daily
     byThread.get(m.thread_id)!.set(m.stage_key, m.n);
   }
 
+  // Work that left no stage change.
+  //
+  // Most days are chasing: three calls, a rate list sent, a follow-up booked —
+  // real work that moves nothing on the board, so the update read as a column
+  // of zeroes and the people doing the hardest chasing looked idle. A note is
+  // the record of that, counted against the stage the provider sits in now.
+  const touched = await query<{ thread_id: number; stage_key: string; n: number }>(`
+    SELECT tp.thread_id, tp.stage_key, COUNT(DISTINCT a.provider_id)::int AS n
+    FROM atlas.crm_activities a
+    JOIN atlas.crm_thread_providers tp
+      ON tp.thread_id = a.thread_id AND tp.provider_id = a.provider_id
+    WHERE a.author_id = $1
+      AND (a.created_at AT TIME ZONE 'Asia/Kolkata')::date = $2::date
+      AND a.type = 'note'
+    GROUP BY tp.thread_id, tp.stage_key
+  `, [userId, day]);
+
+  const touchedByThread = new Map<number, Map<string, number>>();
+  for (const t of touched) {
+    if (!touchedByThread.has(t.thread_id)) touchedByThread.set(t.thread_id, new Map());
+    touchedByThread.get(t.thread_id)!.set(t.stage_key, t.n);
+  }
+
   // Requests the person moved on, for threads worked off the request queue.
   const req = await queryOne<{ n: number }>(`
     SELECT COUNT(DISTINCT cm.request_id)::int AS n
@@ -77,14 +108,18 @@ export async function getDailyUpdate(userId: number, day: string): Promise<Daily
     requests_progressed: req?.n ?? 0,
     threads: threads.map((t) => {
       const counts = byThread.get(t.thread_id) ?? new Map();
+      const notes = touchedByThread.get(t.thread_id) ?? new Map();
       const stages = (t.stages ?? []).map((st) => ({
-        key: st.key, label: st.label, count: counts.get(st.key) ?? 0,
+        key: st.key, label: st.label,
+        count: counts.get(st.key) ?? 0,
+        touched: notes.get(st.key) ?? 0,
       }));
       return {
         thread_id: t.thread_id,
         name: t.name,
         stages,
         total: stages.reduce((n, st) => n + st.count, 0),
+        touched: stages.reduce((n, st) => n + st.touched, 0),
       };
     }),
   };

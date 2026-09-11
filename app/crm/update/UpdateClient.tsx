@@ -36,15 +36,17 @@ export function UpdateClient({ update }: { update: DailyUpdate }) {
     }
   };
 
-  const nothing = update.threads.every((t) => t.total === 0);
+  // A day of notes and no stage changes is a worked day, not an empty one —
+  // warning about it made the people doing the chasing look idle.
+  const nothing = update.threads.every((t) => t.total === 0 && t.touched === 0);
 
   return (
     <div className="grid lg:grid-cols-2 gap-5">
       <div className="space-y-4">
         {nothing && (
           <p className="text-xs text-warn-600 bg-warn-500/10 border border-warn-500/30 rounded-md px-3 py-2">
-            No stage changes recorded on this day. The counts below are all zero — pick another
-            date, or write what you did in Miscellaneous.
+            Nothing recorded on this day — no stage changes and no notes. Pick another date,
+            or write what you did in Miscellaneous.
           </p>
         )}
 
@@ -52,14 +54,25 @@ export function UpdateClient({ update }: { update: DailyUpdate }) {
           <div key={t.thread_id} className="rounded-lg border border-ink-200 bg-surface">
             <div className="px-4 py-2.5 border-b border-ink-100 flex items-baseline justify-between">
               <span className="text-sm font-semibold text-ink-900">{t.name}</span>
-              <span className="text-[11px] num text-ink-500">{t.total} moved</span>
+              <span className="text-[11px] num text-ink-500">
+                {t.total} moved{t.touched > 0 && ` · ${t.touched} touched`}
+              </span>
             </div>
             <div className="px-4 py-2.5 space-y-1">
               {t.stages.map((st) => (
-                <div key={st.key} className="flex items-center justify-between text-[13px]">
+                <div key={st.key} className="flex items-center justify-between gap-3 text-[13px]">
                   <span className="text-ink-600">{st.label}</span>
-                  <span className={`num font-medium ${st.count ? 'text-ink-900' : 'text-ink-400'}`}>
-                    {st.count}
+                  <span className="flex items-baseline gap-2">
+                    {/* The chasing, where it happened. Shown only on the stages
+                        it happened in: a "0 touched" on every line is noise. */}
+                    {st.touched > 0 && (
+                      <span className="text-[11px] text-ink-500">
+                        touched {st.touched}
+                      </span>
+                    )}
+                    <span className={`num font-medium ${st.count ? 'text-ink-900' : 'text-ink-400'}`}>
+                      {st.count}
+                    </span>
                   </span>
                 </div>
               ))}
