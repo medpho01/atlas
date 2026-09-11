@@ -457,8 +457,10 @@ export async function getPackageLabPricing(packageIds: number[]): Promise<LabPri
     FROM analytics.mv_lab_packages lp
     JOIN src."Lab" l ON l.id = lp.lab_id
     JOIN analytics.v_package_economics e ON e.package_id = lp.package_id
-    -- Tier is looked up, never inferred here: same key the enricher writes.
-    LEFT JOIN atlas.city_tier ct ON ct.city_key = regexp_replace(lower(TRIM(l.city)), '[^a-z0-9]', '', 'g')
+    -- Through the canonical view, not the raw table: atlas.city_tier is keyed
+    -- on whatever name the enricher saw, so a lab in "Bangalore" matched
+    -- nothing against a row written as "Bengaluru" and showed no tier at all.
+    LEFT JOIN atlas.city_tier_canon ct ON ct.city_key = atlas.city_key(l.city)
     WHERE lp.package_id = ANY($1::int[]) AND lp.b2b > 10
     ORDER BY e.package_name, lp.b2b
   `, [packageIds]);

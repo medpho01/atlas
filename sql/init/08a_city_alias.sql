@@ -107,12 +107,18 @@ $$;
 -- written. Where an alias and its canonical name both carry a tier, a human
 -- classification wins, then the more confident one.
 -- ---------------------------------------------------------------------------
+--
+-- rationale comes along because the request detail page prints it under the
+-- tier: a city called Tier 2 with no reason given is a number nobody can
+-- argue with. Appended rather than slotted in, since CREATE OR REPLACE VIEW
+-- can add a column at the end and cannot reorder the ones already there.
 CREATE OR REPLACE VIEW atlas.city_tier_canon AS
 SELECT DISTINCT ON (atlas.city_key(city))
        atlas.city_key(city) AS city_key,
        tier,
        source,
-       confidence
+       confidence,
+       rationale
 FROM atlas.city_tier
 ORDER BY atlas.city_key(city),
          (source = 'human') DESC,
