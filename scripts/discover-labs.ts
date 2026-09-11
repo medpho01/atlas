@@ -143,12 +143,12 @@ async function store(t: Target, l: FoundLab) {
   await pool.query(`
     INSERT INTO atlas.discovered_lab
       (pincode, name, address, phone, source_url, city, state, confidence, model,
-       disciplines, services, accreditation, rating, rating_count, home_collection,
-       in_pincode, distance_km, chain, website, hours, note,
+       disciplines, disciplines_absent, services, accreditation, rating, rating_count,
+       home_collection, in_pincode, distance_km, chain, website, hours, note,
        base_score, score_reasons, scored_at)
     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,
-            $10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,
-            $22,$23,now())
+            $10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,
+            $23,$24,now())
     ON CONFLICT (pincode, lower(name)) DO UPDATE SET
       address = COALESCE(EXCLUDED.address, atlas.discovered_lab.address),
       phone = COALESCE(EXCLUDED.phone, atlas.discovered_lab.phone),
@@ -157,6 +157,7 @@ async function store(t: Target, l: FoundLab) {
       -- COALESCE throughout: a later search that happened not to find the
       -- accreditation must not erase the one an earlier search did find.
       disciplines = COALESCE(EXCLUDED.disciplines, atlas.discovered_lab.disciplines),
+      disciplines_absent = COALESCE(EXCLUDED.disciplines_absent, atlas.discovered_lab.disciplines_absent),
       services = COALESCE(EXCLUDED.services, atlas.discovered_lab.services),
       accreditation = COALESCE(EXCLUDED.accreditation, atlas.discovered_lab.accreditation),
       rating = COALESCE(EXCLUDED.rating, atlas.discovered_lab.rating),
@@ -176,7 +177,8 @@ async function store(t: Target, l: FoundLab) {
     WHERE atlas.discovered_lab.verified_at IS NULL
   `, [t.pincode, l.name, l.address ?? null, l.phone ?? null, l.source_url,
       t.city, t.state_name, l.confidence ?? null, MODEL,
-      l.disciplines ?? null, l.services ?? null, l.accreditation ?? null,
+      l.disciplines ?? null, l.disciplines_absent ?? null,
+      l.services ?? null, l.accreditation ?? null,
       l.rating ?? null, l.rating_count ?? null, l.home_collection ?? null,
       l.in_pincode ?? null, l.distance_km ?? null, l.chain ?? null,
       l.website ?? null, l.hours ?? null, l.note ?? null,

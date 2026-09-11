@@ -66,6 +66,14 @@ export function DiscoveredLead({ lead }: { lead: Ranked<LeadRow> }) {
             {DISCIPLINE_BADGE[d] ?? d.toLowerCase().replace(/_/g, ' ')}
           </span>
         ))}
+        {/* Only what the listing positively said is absent. A discipline the
+            page simply never mentioned is not shown here — that distinction is
+            the whole reason the search reports the two separately. */}
+        {lead.disciplines_absent?.map((d) => (
+          <span key={`no-${d}`} className="rounded border border-ink-200 px-1 text-ink-400 line-through">
+            {DISCIPLINE_BADGE[d] ?? d.toLowerCase().replace(/_/g, ' ')}
+          </span>
+        ))}
         {lead.accreditation?.map((a) => (
           <span key={a} className="inline-flex items-center gap-0.5 rounded border
                                    border-success-100 bg-success-50 text-success-600 px-1">

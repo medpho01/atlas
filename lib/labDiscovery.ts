@@ -97,6 +97,22 @@ Rules:
 - disciplines: which of PATHOLOGY, RADIOLOGY, CARDIO_DIAGNOSTIC this provider
   can actually perform, going by what its own listing supports. Omit the field
   if you genuinely cannot tell — do not fall back to PATHOLOGY as a default.
+
+  Check for ALL THREE. Do not infer the list from the business name. Indian
+  diagnostic centres are routinely mixed: a great many businesses called
+  "... Pathology Lab" or "... Diagnostics" also run X-ray, ultrasound and ECG
+  at their main branch, and listing only PATHOLOGY for one of those is wrong in
+  a way that matters — it is read as "cannot do imaging" and the lab is dropped
+  to the bottom of every imaging request. Look at the services, equipment and
+  price list on the page, not the signage. The reverse is rarer but real: a
+  standalone scan centre usually does not run blood work.
+
+- disciplines_absent: the subset of PATHOLOGY, RADIOLOGY, CARDIO_DIAGNOSTIC the
+  listing positively indicates this provider does NOT do — "collection centre
+  only, samples sent to our Pune lab", "pure imaging centre", "no laboratory on
+  site". POSITIVE EVIDENCE ONLY. Leave the field out unless the page actually
+  tells you something is absent; a page that simply does not mention imaging is
+  not evidence that there is none, and must not appear here.
 - services: notable named tests or equipment you saw (e.g. "MRI 1.5T", "CBC",
   "TMT", "home sample collection"). A handful at most, roughly as published.
 - accreditation: recognised marks the provider claims — NABL, CAP, ICMR, NABH,
@@ -134,6 +150,7 @@ export const SEARCH_SCHEMA = {
           note: { type: 'string' },
           confidence: { type: 'number' },
           disciplines: { type: 'array', items: { type: 'string', enum: DISCIPLINES } },
+          disciplines_absent: { type: 'array', items: { type: 'string', enum: DISCIPLINES } },
           services: { type: 'array', items: { type: 'string' } },
           accreditation: { type: 'array', items: { type: 'string' } },
           rating: { type: 'number' },
@@ -162,6 +179,9 @@ export type LabFacts = {
   note?: string | null;
   confidence?: number | null;
   disciplines?: string[] | null;
+  /** Disciplines the listing positively says this provider does NOT do.
+   *  Distinct from "not mentioned", which stays out of this array. */
+  disciplines_absent?: string[] | null;
   services?: string[] | null;
   accreditation?: string[] | null;
   rating?: number | null;
@@ -337,6 +357,11 @@ export function scoreLead(lead: LabFacts, needed?: string[] | null): LeadScore {
   // --- 1. Can it do what this request asks -------------------------------
   const want = (needed ?? []).filter(Boolean);
   const can = lead.disciplines ?? [];
+  // What the listing positively SAID is absent, as opposed to merely did not
+  // mention. The search is asked for this directly rather than the scoring
+  // inferring it, because the two are not the same fact and only one of them
+  // is evidence. See disciplines_absent in SEARCH_SYSTEM.
+  const cannot = lead.disciplines_absent ?? [];
   let fit: number;
   let fitDetail: string;
   let mismatched = false;
@@ -353,26 +378,52 @@ export function scoreLead(lead: LabFacts, needed?: string[] | null): LeadScore {
   } else {
     const matched = want.filter((d) => can.includes(d));
     const missing = want.filter((d) => !can.includes(d));
+    const ruledOut = missing.filter((d) => cannot.includes(d));
     if (!missing.length) {
       fit = 1;
       fitDetail = `Performs ${want.map(labelOf).join(' and ')}`;
       reasons.push(`does ${want.map(labelOf).join(' and ')}`);
     } else if (matched.length) {
-      fit = 0.5 + 0.35 * (matched.length / want.length);
-      fitDetail = `Performs ${matched.map(labelOf).join(', ')}, ` +
-                  `but nothing found for ${missing.map(labelOf).join(', ')}`;
+      // Partial cover. A gap the listing explicitly rules out is worth less
+      // than one it simply never mentions, so the two are not averaged alike.
+      const unlisted = missing.filter((d) => !cannot.includes(d));
+      fit = 0.5 + 0.35 * (matched.length / want.length)
+                - 0.20 * (ruledOut.length / want.length);
+      fitDetail = `Performs ${matched.map(labelOf).join(', ')}` +
+        (ruledOut.length ? `; states it does NOT do ${ruledOut.map(labelOf).join(', ')}` : '') +
+        (unlisted.length ? `; nothing found for ${unlisted.map(labelOf).join(', ')}` : '');
       reasons.push(`covers ${matched.map(labelOf).join(', ')}`);
-      caveats.push(`does not appear to do ${missing.map(labelOf).join(' or ')} — this ask needs it too`);
+      if (ruledOut.length) {
+        caveats.push(`says it does not do ${ruledOut.map(labelOf).join(' or ')} — this ask needs it too`);
+      }
+      if (unlisted.length) {
+        caveats.push(`does not appear to do ${unlisted.map(labelOf).join(' or ')} — this ask needs it too`);
+      }
     } else {
       // The one confirmed mismatch worth scoring down hard. A pathology lab
       // cannot do an MRI however good it is, and putting it first wastes
       // precisely the call this feature exists to shorten. Near-zero here AND
       // MISMATCH_DISCOUNT on the total — the component alone was not enough to
       // stop a well-credentialled chain from winning on the other four.
+      //
+      // Reached whether or not the listing spelled the absence out. It has to
+      // be: with the PR's own fixtures a strong pathology chain scores 65.5
+      // outside the fit component and a sparse imaging centre totals 58.8, so
+      // NO amount of benefit-of-the-doubt on fit lets the imaging centre win.
+      // Only the discount does. The lever for a mixed lab is therefore the
+      // DATA — the search is now told to check all three disciplines and not
+      // read them off the signage — and not a softer rule here.
       fit = 0.05;
       mismatched = true;
-      fitDetail = `Does ${can.map(labelOf).join(', ')} — this ask needs ${want.map(labelOf).join(' or ')}`;
-      caveats.push(`wrong kind of centre for this ask (does ${can.map(labelOf).join(', ')})`);
+      const stated = want.every((d) => cannot.includes(d));
+      fitDetail = `Does ${can.map(labelOf).join(', ')} — this ask needs ${want.map(labelOf).join(' or ')}` +
+                  (stated ? ' and the listing says it does not do that' : '');
+      caveats.push(stated
+        ? `the listing states it does not do ${want.map(labelOf).join(' or ')}`
+        // Worth distinguishing out loud: this one is read off a listing that
+        // only ever mentioned something else, which is weaker evidence than
+        // the lab saying so. It is the caveat most worth a 30-second check.
+        : `wrong kind of centre for this ask (listing only shows ${can.map(labelOf).join(', ')})`);
     }
   }
   components.push({

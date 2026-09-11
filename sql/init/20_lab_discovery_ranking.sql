@@ -32,6 +32,12 @@ ALTER TABLE atlas.discovered_lab
   -- What it can actually perform: PATHOLOGY, RADIOLOGY, CARDIO_DIAGNOSTIC.
   -- The only field a *confirmed* mismatch can be scored down hard on.
   ADD COLUMN IF NOT EXISTS disciplines     text[],
+  -- What the listing positively SAYS it does not do, as opposed to what it
+  -- merely never mentioned. The search reports the two separately because only
+  -- one of them is evidence: a page that never mentions imaging is not a page
+  -- saying there is none. Kept apart so the caveat on the card can tell the
+  -- person phoning which of the two they are looking at.
+  ADD COLUMN IF NOT EXISTS disciplines_absent text[],
   -- Named tests or equipment seen on the listing ("MRI 1.5T", "TMT").
   ADD COLUMN IF NOT EXISTS services        text[],
   -- Marks claimed: NABL, CAP, ICMR, NABH, ISO. Claimed, not verified.

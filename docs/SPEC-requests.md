@@ -292,6 +292,36 @@ Two rules matter more than the weights:
   hard — and it discounts the total, not just its own component, because 32
   points is not enough on its own to stop a well-credentialled pathology chain
   from topping an imaging request.
+
+#### Mixed-discipline providers
+
+A package is a combination of tests, and its disciplines come from its
+*components*, not its name — `atlas.test_discipline()` per test, packages
+expanded through `_MasterToPackage`. "Full Body Checkup" says nothing about
+whether an ultrasound is inside it.
+
+Many Indian diagnostic businesses are genuinely mixed: a great many trading as
+"… Pathology Lab" also run X-ray, ultrasound and ECG at their main branch. The
+reverse is rarer — a standalone scan centre usually has no laboratory.
+
+**That asymmetry is carried by the data, not by a scoring rule.** The search is
+told to check all three disciplines and not read them off the signage, so a
+mixed lab comes back as `['PATHOLOGY','RADIOLOGY']` and is a full match on
+either ask. It is deliberately *not* a rule that infers imaging capability from
+a pathology declaration, and the reason is arithmetic: with a strong pathology
+chain scoring ~65 outside the fit component and a sparse imaging centre
+totalling ~59, no amount of benefit-of-the-doubt on fit lets the imaging centre
+win an imaging request. Only the mismatch discount does. Softening the rule
+would put a lab that cannot perform an MRI back at rank 1 on an MRI request,
+which is the failure the ranking exists to prevent.
+
+`disciplines_absent` carries what a listing **positively states** it does not do
+("collection centre only, samples sent to our Pune lab"). It is separate from
+silence because only one of the two is evidence. It does not change the penalty
+— a stated and an inferred mismatch score the same — it changes what the caller
+is told, so a caveat reads "the listing states it does not do imaging" rather
+than "listing only shows pathology". On a mixed ask a stated gap does cost more
+than a silent one, so reporting an absence honestly is never free.
 - **Ratings are discounted by review volume.** 5.0 from three people is the
   rating a lab can arrange for itself; 4.4 from 380 has to beat it.
 

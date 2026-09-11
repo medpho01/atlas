@@ -40,7 +40,7 @@ DO $$
 DECLARE missing text;
 BEGIN
   SELECT string_agg(c, ', ') INTO missing FROM unnest(ARRAY[
-    'disciplines','services','accreditation','rating','rating_count',
+    'disciplines','disciplines_absent','services','accreditation','rating','rating_count',
     'home_collection','in_pincode','distance_km','chain','website','hours',
     'note','base_score','score_reasons','scored_at']) AS c
    WHERE NOT EXISTS (
@@ -49,7 +49,7 @@ BEGIN
   IF missing IS NOT NULL THEN
     RAISE EXCEPTION 'FAIL: discovered_lab is missing %', missing;
   END IF;
-  PERFORM pg_temp.expect_true('discovered_lab has all 15 new columns', true);
+  PERFORM pg_temp.expect_true('discovered_lab has all 16 new columns', true);
 
   SELECT string_agg(c, ', ') INTO missing FROM unnest(ARRAY['started_at','trigger']) AS c
    WHERE NOT EXISTS (

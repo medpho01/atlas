@@ -129,6 +129,70 @@ group('An imaging request must not rank a NABL pathology chain first');
 }
 
 // ---------------------------------------------------------------------------
+group('A mixed lab is recognised from the DATA, not from an inferred rule');
+// ---------------------------------------------------------------------------
+{
+  // The real-world case this is for: a great many Indian businesses called
+  // "... Pathology Lab" also run X-ray, ultrasound and ECG at their main
+  // branch. The fix is that the search reports both disciplines, not that the
+  // scoring guesses one from the other — a guess cannot be made safe here,
+  // because a strong pathology chain outscores a sparse imaging centre by more
+  // than the whole 32-point fit component (see MISMATCH_DISCOUNT).
+  const mixedChain = base({
+    name: 'Suyash Scan & Pathology',
+    disciplines: ['PATHOLOGY', 'RADIOLOGY'],
+    accreditation: ['NABL'], rating: 4.4, rating_count: 386, home_collection: true,
+  });
+  const pureScanCentre = base({ name: 'City Scan Centre', disciplines: ['RADIOLOGY'] });
+
+  check('a path lab that ALSO reports imaging is a full match on an imaging ask',
+    scoreLead(mixedChain, ['RADIOLOGY']).components.find((c) => c.key === 'fit')!.points === 32);
+  check('...and on a pathology ask',
+    scoreLead(mixedChain, ['PATHOLOGY']).components.find((c) => c.key === 'fit')!.points === 32);
+  check('...and on a package needing both',
+    scoreLead(mixedChain, ['PATHOLOGY', 'RADIOLOGY']).components.find((c) => c.key === 'fit')!.points === 32);
+  check('a mixed lab is never discounted for either ask',
+    !scoreLead(mixedChain, ['RADIOLOGY']).discount &&
+    !scoreLead(mixedChain, ['PATHOLOGY']).discount);
+
+  // disciplines_absent upgrades an inferred mismatch to a stated one. It must
+  // change the WORDS the caller sees without weakening the penalty.
+  const statedNoImaging = base({
+    name: 'Collection Point Only', disciplines: ['PATHOLOGY'],
+    disciplines_absent: ['RADIOLOGY'],
+  });
+  const inferredNoImaging = base({ name: 'Just A Path Lab', disciplines: ['PATHOLOGY'] });
+
+  const stated = scoreLead(statedNoImaging, ['RADIOLOGY']);
+  const inferred = scoreLead(inferredNoImaging, ['RADIOLOGY']);
+  check('a STATED absence is still discounted', !!stated.discount);
+  check('an INFERRED absence is still discounted', !!inferred.discount);
+  check('the two are scored the same — the data changes the words, not the penalty',
+    stated.total === inferred.total, `${stated.total} vs ${inferred.total}`);
+  check('a stated absence says the listing said so',
+    stated.caveats.some((c) => /listing states it does not do/.test(c)),
+    stated.caveats.join('; '));
+  check('an inferred absence admits it is only what the listing showed',
+    inferred.caveats.some((c) => /listing only shows/.test(c)),
+    inferred.caveats.join('; '));
+
+  // On a mixed ask, an explicitly ruled-out gap must cost more than a silent
+  // one — otherwise reporting the absence honestly would gain the lab nothing.
+  const silentGap = scoreLead(
+    base({ name: 'Silent', disciplines: ['PATHOLOGY'] }), ['PATHOLOGY', 'RADIOLOGY']);
+  const statedGap = scoreLead(
+    base({ name: 'Stated', disciplines: ['PATHOLOGY'], disciplines_absent: ['RADIOLOGY'] }),
+    ['PATHOLOGY', 'RADIOLOGY']);
+  check('on a mixed ask, a stated gap scores below a silent one',
+    statedGap.total < silentGap.total, `${statedGap.total} vs ${silentGap.total}`);
+  check('but a stated gap is still not a full mismatch',
+    !statedGap.discount && statedGap.total > scoreLead(pureScanCentre, ['PATHOLOGY']).total);
+  check('positive evidence of absence is never invented from silence',
+    !scoreLead(base({ name: 'X', disciplines: ['PATHOLOGY'] }), ['PATHOLOGY'])
+      .caveats.some((c) => /states it does not/.test(c)));
+}
+
+// ---------------------------------------------------------------------------
 group('Ratings are discounted by review volume');
 // ---------------------------------------------------------------------------
 {
