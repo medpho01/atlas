@@ -7,6 +7,7 @@ import { Briefcase, AlertTriangle, TrendingUp, TrendingDown, Sparkles } from 'lu
 import { Card, CardHeader, CardBody } from '@/components/ui/Card';
 import { PageHeader } from '@/components/ui/PageHeader';
 import { KpiTile } from '@/components/KpiTile';
+import { StickyMetrics } from '@/components/ui/StickyMetrics';
 import { Pill, ChipButton } from '@/components/ui/Toggle';
 import { InfoTip } from '@/components/ui/InfoTip';
 import { AccountsTable } from './AccountsTable';
@@ -127,7 +128,8 @@ export default async function AccountsPage({ searchParams }: { searchParams: { s
       />
 
       {/* KPIs */}
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 mb-5">
+      <StickyMetrics title="Account health" className="mb-5">
+      <div className="kpi-row grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
         <KpiTile
           label="Growing"
           value={totals.GROWING ?? 0}
@@ -165,6 +167,7 @@ export default async function AccountsPage({ searchParams }: { searchParams: { s
           info={<InfoTip title="At-risk GMV %" shows="Share of platform order volume sitting in fragile accounts (AT_RISK + DECLINING)." computed={<>(AT_RISK total orders + DECLINING total orders) ÷ all-accounts total orders × 100. Bad ≥30%, warn ≥15%.</>} drives="The single most important number on this page. ≥30% means a meaningful chunk of revenue is on shaky ground — call top names this week." />}
         />
       </div>
+      </StickyMetrics>
 
       <div className="flex items-center gap-1.5 mb-4">
         <ChipButton href="/accounts" active={!status || status === 'all'}>All</ChipButton>

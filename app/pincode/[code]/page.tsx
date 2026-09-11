@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { ArrowLeft, MapPin, ShoppingBag, GitBranch, Building2, Star, Activity } from 'lucide-react';
 import { KpiTile } from '@/components/KpiTile';
+import { StickyMetrics } from '@/components/ui/StickyMetrics';
 import { HealthBadge, CoverageBadge } from '@/components/HealthBadge';
 import { Card, CardHeader, CardBody } from '@/components/ui/Card';
 import { PageHeader } from '@/components/ui/PageHeader';
@@ -70,7 +71,8 @@ export default async function PincodePage({
       </div>
 
       {/* Order summary strip */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
+      <StickyMetrics title="Pincode" className="mb-5">
+      <div className="kpi-row grid grid-cols-2 md:grid-cols-4 gap-3">
         <KpiTile label="Orders L30D" value={s.orders_l30d.toLocaleString()} icon={<ShoppingBag className="w-4 h-4" />} />
         <KpiTile label="Orders L90D" value={s.orders_l90d.toLocaleString()} sub="last 90 days" />
         <KpiTile label="Orders all-time" value={s.orders_all_time.toLocaleString()} sub="cumulative" />
@@ -81,6 +83,7 @@ export default async function PincodePage({
           tone={s.gap_score >= 50 ? 'bad' : s.gap_score >= 20 ? 'warn' : 'good'}
         />
       </div>
+      </StickyMetrics>
 
       {/* Map + Order breakdown */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-5">

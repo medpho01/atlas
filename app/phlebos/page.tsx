@@ -4,6 +4,7 @@ import { requireView } from '@/lib/guard';
 import { canManage } from '@/lib/access';
 import { RoleBlocked } from '@/components/RoleBlocked';
 import { PhlebosClient } from './PhlebosClient';
+import { StickyMetrics } from '@/components/ui/StickyMetrics';
 import Link from 'next/link';
 import { Upload, Users, MapPin, TrendingUp, Sparkles } from 'lucide-react';
 
@@ -63,8 +64,9 @@ export default async function PhlebosPage({ searchParams }: { searchParams: Prom
         )}
       </div>
 
-      {/* Stat tiles */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
+      {/* Stat tiles — sticky, so the totals stay put while the table scrolls. */}
+      <StickyMetrics title="Phlebos" className="mb-6">
+      <div className="kpi-row grid grid-cols-2 sm:grid-cols-4 gap-3">
         <StatTile
           icon={<Users className="w-4 h-4 text-brand-600" />}
           label="Total phlebos"
@@ -87,6 +89,7 @@ export default async function PhlebosPage({ searchParams }: { searchParams: Prom
           sub={stats.overlap > 0 ? `${stats.overlap.toLocaleString('en-IN')} also in order data` : undefined}
         />
       </div>
+      </StickyMetrics>
 
       {/* Client interactive area */}
       <PhlebosClient
@@ -114,13 +117,13 @@ export default async function PhlebosPage({ searchParams }: { searchParams: Prom
 
 function StatTile({ icon, label, value, sub }: { icon: React.ReactNode; label: string; value: string; sub?: string }) {
   return (
-    <div className="rounded-xl border border-ink-200 bg-surface p-3.5">
+    <div data-kpi className="rounded-xl border border-ink-200 bg-surface p-3.5">
       <div className="flex items-center gap-2 mb-1">
-        {icon}
+        <span data-kpi-icon>{icon}</span>
         <div className="text-[11px] uppercase tracking-wider text-ink-500 font-semibold">{label}</div>
       </div>
-      <div className="text-2xl font-bold text-ink-900 tabular-nums leading-tight">{value}</div>
-      {sub && <div className="text-[11px] text-ink-500 mt-0.5">{sub}</div>}
+      <div data-kpi-value className="text-2xl font-bold text-ink-900 tabular-nums leading-tight">{value}</div>
+      {sub && <div data-kpi-foot className="text-[11px] text-ink-500 mt-0.5">{sub}</div>}
     </div>
   );
 }

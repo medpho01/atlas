@@ -55,7 +55,7 @@ export default async function ReadinessPage({
       {/* Title, segments, filters and the KPI strip stay put while the table
           scrolls — the filters are what you change to read the numbers below
           them, and scrolling back up to reach them is the whole friction. */}
-      <div className="sticky top-0 z-30 -mx-6 lg:-mx-8 px-6 lg:px-8 pt-1 pb-3 bg-ink-50/95 backdrop-blur-sm border-b border-ink-150">
+      <div className="sticky top-14 z-20 -mx-6 lg:-mx-8 px-6 lg:px-8 pt-1 pb-3 bg-ink-50/95 backdrop-blur-sm border-b border-ink-150">
         <PageHeader
           title="City Readiness"
           actions={

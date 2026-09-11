@@ -25,19 +25,27 @@ const accentDot = {
   bad: 'bg-danger-500',
 };
 
+/**
+ * data-kpi marks the parts that give way when the row is stuck to the top of
+ * the window: see StickyMetrics and the [data-stuck] rules in globals.css. The
+ * compact strip is these same tiles, not a second copy of the numbers.
+ */
 export function KpiTile({ label, value, sub, trend, tone = 'default', icon, info }: Props) {
   return (
-    <div className={`relative rounded-xl border ${toneStyles[tone]} px-4 py-4 flex flex-col gap-1.5 transition-shadow hover:shadow-card-lg`}>
+    <div
+      data-kpi
+      className={`relative rounded-xl border ${toneStyles[tone]} px-4 py-4 flex flex-col gap-1.5 transition-shadow hover:shadow-card-lg`}
+    >
       <div className="flex items-start justify-between">
         <div className="flex items-center gap-1.5">
           <span className={`w-1.5 h-1.5 rounded-full ${accentDot[tone]}`} />
           <span className="text-[11px] uppercase tracking-wider text-ink-500 font-semibold">{label}</span>
           {info}
         </div>
-        {icon && <span className="text-ink-400">{icon}</span>}
+        {icon && <span data-kpi-icon className="text-ink-400">{icon}</span>}
       </div>
-      <div className="text-[28px] font-semibold text-ink-900 tabular-nums leading-none mt-1">{value}</div>
-      <div className="flex items-center justify-between mt-0.5">
+      <div data-kpi-value className="text-[28px] font-semibold text-ink-900 tabular-nums leading-none mt-1">{value}</div>
+      <div data-kpi-foot className="flex items-center justify-between mt-0.5">
         {sub ? <span className="text-xs text-ink-500">{sub}</span> : <span />}
         {trend && (
           <span className={`flex items-center gap-0.5 text-xs font-semibold tabular-nums ${trend.up ? 'text-success-500' : 'text-danger-500'}`}>

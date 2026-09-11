@@ -3,6 +3,7 @@ import { Activity, AlertTriangle, Flame, ListChecks, MapPinned, Globe2, ChevronR
 import { KpiTile } from '@/components/KpiTile';
 import { Card, CardHeader, CardBody } from '@/components/ui/Card';
 import { PageHeader } from '@/components/ui/PageHeader';
+import { StickyMetrics } from '@/components/ui/StickyMetrics';
 import { InfoTip } from '@/components/ui/InfoTip';
 import MapClient from '@/components/MapClient';
 import { Leaderboard } from '@/components/Leaderboard';
@@ -54,8 +55,10 @@ export default async function HomePage({ searchParams }: { searchParams: { lb_mo
         }
       />
 
-      {/* KPI strip */}
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 mb-6">
+      {/* KPI strip. Sticky: these are the numbers the rest of the page is read
+          against, and scrolling to the map used to take them off screen. */}
+      <StickyMetrics title="Network Health" className="mb-6">
+      <div className="kpi-row grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
         <KpiTile
           label="Active pincodes"
           value={kpis.active_pincodes.toLocaleString()}
@@ -155,6 +158,7 @@ export default async function HomePage({ searchParams }: { searchParams: { lb_mo
           }
         />
       </div>
+      </StickyMetrics>
 
       {/* Map + Leaderboard */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-6">

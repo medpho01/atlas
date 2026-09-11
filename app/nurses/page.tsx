@@ -9,6 +9,7 @@ import {
   getNurseRepoStats, listNurses, countNurses, listNurseAggregators, NURSE_REACH_RADIUS_KM,
 } from '@/lib/nursesQueries';
 import { NursesClient } from './NursesClient';
+import { StickyMetrics } from '@/components/ui/StickyMetrics';
 
 export const dynamic = 'force-dynamic';
 
@@ -65,7 +66,9 @@ export default async function NursesPage({ searchParams }: { searchParams: Promi
         )}
       </div>
 
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
+      {/* Stat tiles — sticky, so the totals stay put while the table scrolls. */}
+      <StickyMetrics title="Nurses" className="mb-6">
+      <div className="kpi-row grid grid-cols-2 sm:grid-cols-4 gap-3">
         <StatTile
           icon={<HeartPulse className="w-4 h-4 text-brand-600" />}
           label="Total nurses"
@@ -89,6 +92,7 @@ export default async function NursesPage({ searchParams }: { searchParams: Promi
           sub={stats.manual > 0 ? `${stats.manual.toLocaleString('en-IN')} uploaded` : undefined}
         />
       </div>
+      </StickyMetrics>
 
       <NursesClient
         initialNurses={nurses}
@@ -115,13 +119,13 @@ export default async function NursesPage({ searchParams }: { searchParams: Promi
 
 function StatTile({ icon, label, value, sub }: { icon: React.ReactNode; label: string; value: string; sub?: string }) {
   return (
-    <div className="rounded-xl border border-ink-200 bg-surface p-3.5">
+    <div data-kpi className="rounded-xl border border-ink-200 bg-surface p-3.5">
       <div className="flex items-center gap-2 mb-1">
-        {icon}
+        <span data-kpi-icon>{icon}</span>
         <div className="text-[11px] uppercase tracking-wider text-ink-500 font-semibold">{label}</div>
       </div>
-      <div className="text-2xl font-bold text-ink-900 tabular-nums leading-tight">{value}</div>
-      {sub && <div className="text-[11px] text-ink-500 mt-0.5">{sub}</div>}
+      <div data-kpi-value className="text-2xl font-bold text-ink-900 tabular-nums leading-tight">{value}</div>
+      {sub && <div data-kpi-foot className="text-[11px] text-ink-500 mt-0.5">{sub}</div>}
     </div>
   );
 }

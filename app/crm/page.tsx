@@ -91,8 +91,12 @@ export default async function MyQueuePage({
     <main className="mx-auto max-w-7xl px-6 py-8">
       {/* Title, tabs and the two filter rows stay put while the queue scrolls —
           the filters are what you change to read the numbers below them, and
-          scrolling back up to reach them is the whole friction. */}
-      <div className="sticky top-0 z-30 -mx-6 px-6 pt-1 pb-3 bg-ink-50/95 backdrop-blur-sm border-b border-ink-150">
+          scrolling back up to reach them is the whole friction.
+
+          top-14, not top-0: the app header is 56px of sticky chrome above
+          this, and a page bar parked at 0 lands underneath it — or, at the
+          same z, paints over the breadcrumb and the account menu. */}
+      <div className="sticky top-14 z-20 -mx-6 px-6 pt-1 pb-3 bg-ink-50/95 backdrop-blur-sm border-b border-ink-150">
         <div className="flex items-center gap-2 mb-3">
           <KanbanSquare className="w-5 h-5 text-brand-600" strokeWidth={2.25} />
           <h1 className="text-2xl font-bold text-ink-900">Network CRM</h1>

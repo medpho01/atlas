@@ -184,3 +184,55 @@
     display: none;
   }
 }
+
+/* -------------------------------------------------------------------------- */
+/* Stuck metrics                                                               */
+/*                                                                             */
+/* The headline figures stay on screen while the page scrolls under them, but  */
+/* a 100px-tall row parked at the top steals the screen it was meant to help   */
+/* you read. Stuck, the same tiles collapse to one line: label, figure, no     */
+/* chrome. Nothing is duplicated — these are the tiles, smaller.               */
+/* -------------------------------------------------------------------------- */
+@layer components {
+  [data-stuck='true'] > .kpi-row {
+    display: flex;
+    gap: 0.5rem;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  [data-stuck='true'] > .kpi-row::-webkit-scrollbar {
+    display: none;
+  }
+  [data-stuck='true'] [data-kpi] {
+    flex: 0 0 auto;
+    flex-direction: row;
+    align-items: baseline;
+    gap: 0.5rem;
+    padding: 0.3rem 0.7rem;
+    border-radius: 0.5rem;
+  }
+  [data-stuck='true'] [data-kpi]:hover {
+    box-shadow: none;
+  }
+  [data-stuck='true'] [data-kpi-value] {
+    font-size: 0.95rem;
+    margin-top: 0;
+    line-height: 1.1;
+  }
+  /* The sub-label, the trend and the icon are context for a figure you are
+     reading properly. Stuck, you are glancing. */
+  [data-stuck='true'] [data-kpi-foot],
+  [data-stuck='true'] [data-kpi-icon] {
+    display: none;
+  }
+}
+
+/* A bar that only has to say "something is happening", so it loops rather
+   than pretending to know how far along the request is. */
+@keyframes route-progress {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(400%); }
+}
+.animate-route-progress {
+  animation: route-progress 1.1s ease-in-out infinite;
+}

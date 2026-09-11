@@ -10,6 +10,7 @@ import { FilterBar, FilterInput, FilterSelect } from '@/components/ui/FilterBar'
 import { ChipButton } from '@/components/ui/Toggle';
 import { InfoTip } from '@/components/ui/InfoTip';
 import { KpiTile } from '@/components/KpiTile';
+import { StickyMetrics } from '@/components/ui/StickyMetrics';
 import { PincodesTable } from './PincodesTable';
 import { ServiceabilityPanel } from './ServiceabilityPanel';
 import { LabPanelGap } from './LabPanelGap';
@@ -232,7 +233,8 @@ export default async function PincodesPage({ searchParams }: { searchParams: Sea
       <PincodeTabs active="distribution" />
 
       {/* KPI strip */}
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 mb-5">
+      <StickyMetrics title="Pincodes" className="mb-5">
+      <div className="kpi-row grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
         <KpiTile
           label="Pincodes in scope"
           value={distTotal.toLocaleString()}
@@ -274,6 +276,7 @@ export default async function PincodesPage({ searchParams }: { searchParams: Sea
           info={<InfoTip title="L30D active" shows="Pincodes that received at least one order in the last 30 days — your current live demand surface." computed={<>Pincodes with <code className="font-mono text-[10px]">orders_l30d &gt; 0</code>.</>} drives="Compare to 'Pincodes in scope' to see what % of the footprint is actually firing right now." />}
         />
       </div>
+      </StickyMetrics>
 
       {/* Insight row: distribution bar + top cities */}
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-4 mb-5">
