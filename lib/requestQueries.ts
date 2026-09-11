@@ -414,18 +414,16 @@ export async function getPincodeIntel(pincode: string) {
   `, [pincode]);
 }
 
-/** Unverified web leads for a pincode. Never mixed into the lab list above. */
-export async function getDiscoveredLabs(pincode: string) {
-  return query<{
-    id: number; name: string; address: string | null; phone: string | null;
-    source_url: string | null; retrieved_at: string; crm_provider_id: number | null;
-  }>(`
-    SELECT id, name, address, phone, source_url, retrieved_at, crm_provider_id
-    FROM atlas.discovered_lab
-    WHERE pincode = $1 AND NOT dismissed
-    ORDER BY confidence DESC NULLS LAST, name
-  `, [pincode]);
-}
+/**
+ * Unverified web leads for a pincode. Never mixed into the lab list above.
+ *
+ * Moved to rankedLeadsForPincode() in lib/discoverLabs.ts, which reads the
+ * same rows and orders them by the ranking rather than by `confidence` alone —
+ * confidence answers "is this lab real", which is not the question the network
+ * team is asking when they pick who to phone first. The read lives beside the
+ * write because both need the same fallback for a host that has not yet
+ * applied sql/init/20_lab_discovery_ranking.sql.
+ */
 
 export async function getCommitments(opts: { includeClosed?: boolean } = {}) {
   if (opts.includeClosed) {

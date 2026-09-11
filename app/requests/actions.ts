@@ -72,20 +72,35 @@ export async function syncCommitments(): Promise<R & { opened?: number; closed?:
  * Triggered from the request the network team is looking at, rather than only
  * by the nightly batch — when someone is working a supply gap now, "run the
  * script and come back tomorrow" is not an answer.
+ *
+ * `trigger` says who wanted it, and it changes how willing this is to spend.
+ * 'request_page' is the card firing on its own, so it goes through the full
+ * staleness window in atlas.claim_discovery. 'manual' is somebody clicking
+ * "Search again", where the only guard left is the in-flight one — they asked.
+ * The role check is the same either way: the auto path runs as the person
+ * viewing the page, so it cannot search for anybody who could not click.
  */
 export async function findLabsForPincode(
   pincode: string, city?: string | null, state?: string | null,
   disciplines?: string[] | null,
-): Promise<R & { found?: number }> {
+  trigger: 'manual' | 'request_page' = 'manual',
+): Promise<R & { found?: number; declined?: boolean }> {
   const me = await getSessionUser();
   if (!me) return { ok: false, error: 'unauthenticated' };
   if (!canManage(me, 'commitments')) {
     return { ok: false, error: 'Searching for labs needs the network or admin role' };
   }
   if (!/^\d{6}$/.test(pincode)) return { ok: false, error: 'Bad pincode' };
+  // Not from the client's word: an unexpected value would otherwise pick the
+  // more expensive staleness window.
+  const t = trigger === 'request_page' ? 'request_page' : 'manual';
 
-  const r = await discoverForPincode(pincode, city, state, disciplines);
+  const r = await discoverForPincode(pincode, city, state, disciplines, { trigger: t });
   revalidatePath(`/requests`);
+  // A declined claim is not a failure — somebody else is already searching
+  // this pincode, or it was answered recently enough. The caller re-reads
+  // rather than showing an error.
+  if (r.declined) return { ok: true, found: 0, declined: true };
   return r.error ? { ok: false, error: r.error, found: 0 } : { ok: true, found: r.found };
 }
 
