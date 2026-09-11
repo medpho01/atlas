@@ -6,15 +6,17 @@ import { FileText, ArrowLeft } from 'lucide-react';
 import { Card, CardHeader, CardBody } from '@/components/ui/Card';
 import { PageHeader } from '@/components/ui/PageHeader';
 import {
-  getRequest, getRequestItems, getCoveringLabs, getDiscoveredLabs, getPackageTests,
+  getRequest, getRequestItems, getCoveringLabs, getPackageTests,
   getPincodeIntel,
 } from '@/lib/requestQueries';
-import { lastDiscoveryRun } from '@/lib/discoverLabs';
+import {
+  lastDiscoveryRun, rankedLeadsForPincode, shouldAutoSearch, isSearchRunning,
+} from '@/lib/discoverLabs';
 import {
   STATE_SHORT, STATE_TONE, TONE_CHIP, BASIS_LABEL, BASIS_STRENGTH, DISCIPLINE_LABEL,
 } from '@/lib/requests';
 import { QuoteCard } from '../QuoteCard';
-import { LeadActions } from '../LeadActions';
+import { DiscoveredLead } from '../DiscoveredLead';
 import { PriceBreakdown } from '../PriceBreakdown';
 import { FindLabs } from '../FindLabs';
 import { PincodeIntel } from '../PincodeIntel';
@@ -38,7 +40,9 @@ export default async function RequestDetail({ params }: { params: { id: string }
   const [items, labs, leads, packs, lastRun, intel] = await Promise.all([
     getRequestItems(id),
     getCoveringLabs(id),
-    r.pincode ? getDiscoveredLabs(r.pincode) : Promise.resolve([]),
+    // Ranked against THIS request's disciplines, not stored: the same pincode
+    // legitimately ranks differently for a blood panel and an MRI.
+    r.pincode ? rankedLeadsForPincode(r.pincode, r.disciplines) : Promise.resolve([]),
     getPackageTests(id),
     r.pincode ? lastDiscoveryRun(r.pincode) : Promise.resolve(null),
     r.pincode ? getPincodeIntel(r.pincode) : Promise.resolve(null),
@@ -48,6 +52,23 @@ export default async function RequestDetail({ params }: { params: { id: string }
   // lab exists there is a real relationship to use, and an unverified search
   // result would only compete with it.
   const noLabHere = labs.length === 0 || labs.every((l) => (l.missing ?? 1) > 0);
+
+  // Whether the card searches without being asked. Decided here, server-side,
+  // because the client must not be the one choosing to spend money — and
+  // because the answer needs the covering-lab query, which only exists here.
+  //
+  // Three conditions, all required:
+  //   * the network cannot reach this pincode, so a web search is the next
+  //     step whatever anybody clicks;
+  //   * there is nothing already on screen — leads present means the question
+  //     has an answer and re-searching it is somebody's decision, not ours;
+  //   * shouldAutoSearch agrees, which mirrors atlas.claim_discovery's WHERE
+  //     clause so the card never announces a search the database declines.
+  //
+  // The database still has the final say. This is the same answer one render
+  // earlier, not a substitute for it.
+  const autoSearch = !!r.pincode && noLabHere && leads.length === 0 && shouldAutoSearch(lastRun);
+  const searchRunning = isSearchRunning(lastRun);
 
   const tone = STATE_TONE[r.state] ?? 'ink';
 
@@ -205,46 +226,42 @@ export default async function RequestDetail({ params }: { params: { id: string }
             <Card>
               <CardHeader
                 title="Labs found on the open web"
-                subtitle="Unverified search results — leads to call, not network records." />
+                subtitle={leads.length > 0
+                  ? 'Unverified search results, best call first — leads to phone, not network records.'
+                  : 'Unverified search results — leads to call, not network records.'} />
               <CardBody className="pt-0">
                 <div className="mb-3">
                   <FindLabs pincode={r.pincode} city={r.city} state={r.state_name}
                             lastRun={lastRun?.ran_at ?? null} found={lastRun?.found ?? null}
                             error={lastRun?.error ?? null}
-                            disciplines={r.disciplines} />
+                            disciplines={r.disciplines}
+                            autoSearch={autoSearch} running={searchRunning} />
                   {lastRun?.error && (
                     <p className="text-[11px] text-ink-500 mt-1">
                       <span className="text-danger-500">{lastRun.error}</span>
                     </p>
                   )}
                 </div>
-                {leads.length === 0 && (
+                {/* Only when the page is not about to search anyway —
+                    otherwise this contradicts the spinner underneath it. */}
+                {leads.length === 0 && !autoSearch && !searchRunning && (
                   <p className="text-xs text-ink-500">
                     Nothing found yet for {r.pincode}. Searching costs a few seconds and the
                     results are cached, so it is worth doing once per pincode rather than once
                     per request.
                   </p>
                 )}
+                {leads.length > 0 && (
+                  <p className="text-[11px] text-ink-400 mb-1">
+                    Ranked for what this request asks for
+                    {(r.disciplines?.length ?? 0) > 0 &&
+                      ` (${r.disciplines!.map((d: string) => DISCIPLINE_LABEL[d] ?? d).join(', ')})`}
+                    , then on evidence, accreditation, reachability and rating. Rank 1 means
+                    call this one first — not that it is confirmed to exist.
+                  </p>
+                )}
                 <ul className="text-sm divide-y divide-ink-100">
-                  {leads.map((l) => (
-                    <li key={l.id} className="py-2">
-                      <div className="flex items-baseline gap-2">
-                        <span className="font-medium text-ink-900">{l.name}</span>
-                        <span className="text-[10px] uppercase tracking-wide text-warn-600
-                                         border border-warn-100 bg-warn-50 rounded px-1">
-                          unverified
-                        </span>
-                        <span className="ml-auto">
-                          <LeadActions leadId={l.id} promoted={!!l.crm_provider_id} />
-                        </span>
-                      </div>
-                      <div className="text-xs text-ink-600">{l.address}</div>
-                      {l.phone && <div className="text-xs text-ink-700 num">{l.phone}</div>}
-                      {l.source_url && (
-                        <div className="text-[10px] text-ink-400 truncate">{l.source_url}</div>
-                      )}
-                    </li>
-                  ))}
+                  {leads.map((l) => <DiscoveredLead key={l.id} lead={l} />)}
                 </ul>
               </CardBody>
             </Card>
