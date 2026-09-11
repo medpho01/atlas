@@ -28,8 +28,15 @@ function check(what: string, cond: boolean, detail = '') {
 
 function group(name: string) { console.log(`\n${name}`); }
 
-/** A believable, unremarkable lead. Cases override only what they are about. */
-const base = (over: Partial<LabFacts> & { name: string }): LabFacts & { name: string } => ({
+/**
+ * A believable, unremarkable lead. Cases override only what they are about,
+ * so what each one is testing is the only thing that differs.
+ *
+ * `id` is optional because rankLeads() uses it as the last tie-breaker, and
+ * the stability cases below need to set it.
+ */
+type Fixture = LabFacts & { name: string; id?: number };
+const base = (over: Partial<Fixture> & { name: string }): Fixture => ({
   phone: '02224001234',
   source_url: 'https://example.test/listing',
   confidence: 0.8,
@@ -252,7 +259,7 @@ group('The order does not depend on the order the rows arrived in');
     // Deliberately identical to Beta on every scored field, so only the
     // tie-breaker separates them.
     base({ id: 5, name: 'Beta Labs Annexe', rating: 4.1, rating_count: 60 }),
-  ] as (LabFacts & { id: number; name: string })[];
+  ];
 
   const order = (xs: typeof leads) => rankLeads(xs, ['PATHOLOGY']).map((r) => r.name).join(' > ');
   const forward = order(leads);

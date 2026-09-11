@@ -16,7 +16,8 @@
     "tiers:enrich": "tsx scripts/enrich-provider-tiers.ts",
     "labs:discover": "tsx scripts/discover-labs.ts",
     "test:scoring": "tsx scripts/test-lab-scoring.ts",
-    "test:discovery-read": "tsx scripts/test-discovery-read.ts",
+    "test:discovery-read": "tsx --conditions=react-server scripts/test-discovery-read.ts",
+    "test:discovery-db": "./scripts/test-discovery-db.sh",
     "commitments:sync": "./scripts/sync-commitments.sh"
   },
   "dependencies": {

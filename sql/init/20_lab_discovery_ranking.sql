@@ -178,17 +178,20 @@ BEGIN
   -- Why it ranked where it did. Built from the stored pincode-level score, not
   -- from the request-specific one, which is not stored and would be misleading
   -- on a CRM card that outlives the request.
+  -- Built from the structured columns rather than from score_reasons, which is
+  -- derived from those same columns: including both said "NABL" twice and the
+  -- rating twice in one sentence. Each fact appears once, and the ones that
+  -- are only claims are labelled as claims.
   evidence := concat_ws(' · ',
     CASE WHEN d.base_score IS NOT NULL
          THEN 'Ranked ' || round(d.base_score)::text || '/100 at discovery' END,
-    CASE WHEN array_length(d.score_reasons, 1) > 0
-         THEN array_to_string(d.score_reasons, '; ') END,
+    CASE WHEN array_length(d.disciplines, 1) > 0
+         THEN 'does ' || array_to_string(d.disciplines, ', ') END,
     CASE WHEN array_length(d.accreditation, 1) > 0
          THEN 'claims ' || array_to_string(d.accreditation, '/') || ' (unverified)' END,
     CASE WHEN d.rating IS NOT NULL AND COALESCE(d.rating_count, 0) > 0
-         THEN d.rating::text || ' from ' || d.rating_count || ' reviews' END,
-    CASE WHEN array_length(d.disciplines, 1) > 0
-         THEN 'does ' || array_to_string(d.disciplines, ', ') END,
+         THEN 'rated ' || d.rating::text || ' from ' || d.rating_count || ' reviews' END,
+    CASE WHEN d.home_collection THEN 'offers home collection' END,
     d.note);
 
   -- Same columns and same values as before, `notes` excepted. In particular
