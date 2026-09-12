@@ -2,12 +2,15 @@
 
 import { useMemo, useState, useTransition } from 'react';
 import * as XLSX from 'xlsx';
-import { Building2, Download, Loader2, Play, Search, X } from 'lucide-react';
+import { Building2, Download, Loader2, Play, Plug, Search, X } from 'lucide-react';
 import { Card, CardBody } from '@/components/ui/Card';
 import { KpiTile } from '@/components/KpiTile';
 import { runPanelGap } from './actions';
 
-type Lab = { lab_id: number; name: string; city: string | null; pincodes: number };
+type Lab = {
+  lab_id: number; name: string; city: string | null; pincodes: number;
+  api_provider: string | null; api_home_sample: boolean;
+};
 type Row = {
   pincode: string; city: string | null; state: string | null;
   labs: string[]; lab_count: number; orders_all_time: number | null;
@@ -32,6 +35,10 @@ const n = (v: number | null | undefined) => (v ?? 0).toLocaleString('en-IN');
 export function LabPanelGap({ labs }: { labs: Lab[] }) {
   const [picked, setPicked] = useState<number[]>([]);
   const [q, setQ] = useState('');
+  // Eleven of 269 labs take orders over an API, and they are the ones a panel
+  // is usually built around — everything else is email and a portal. Worth a
+  // filter of its own rather than eleven names to remember.
+  const [apiOnly, setApiOnly] = useState(false);
   const [summary, setSummary] = useState<Summary | null>(null);
   const [mode, setMode] = useState<Mode>('exclude');
   // What the shown numbers were computed with, so the labels never describe a
@@ -41,13 +48,21 @@ export function LabPanelGap({ labs }: { labs: Lab[] }) {
   const [err, setErr] = useState<string | null>(null);
   const [pending, start] = useTransition();
 
-  const visible = useMemo(() => {
+  const apiLabs = useMemo(() => labs.filter((l) => l.api_provider), [labs]);
+
+  const matching = useMemo(() => {
     const t = q.trim().toLowerCase();
-    const list = t
-      ? labs.filter((l) => l.name.toLowerCase().includes(t) || (l.city ?? '').toLowerCase().includes(t))
-      : labs;
-    return list.slice(0, 60);
-  }, [labs, q]);
+    const base = apiOnly ? apiLabs : labs;
+    return t
+      ? base.filter((l) => l.name.toLowerCase().includes(t) || (l.city ?? '').toLowerCase().includes(t))
+      : base;
+  }, [labs, apiLabs, apiOnly, q]);
+
+  // Sixty is enough to scan; the integrated list is short enough to show whole.
+  const visible = useMemo(
+    () => (apiOnly ? matching : matching.slice(0, 60)),
+    [matching, apiOnly],
+  );
 
   const chosen = useMemo(
     () => labs.filter((l) => picked.includes(l.lab_id)),
@@ -98,6 +113,24 @@ export function LabPanelGap({ labs }: { labs: Lab[] }) {
           <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_300px] items-start">
             {/* Left: search over the full lab list */}
             <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-1.5 mb-2">
+                <FilterChip active={!apiOnly} onClick={() => setApiOnly(false)}>
+                  All labs <span className="tabular-nums opacity-70">{n(labs.length)}</span>
+                </FilterChip>
+                <FilterChip active={apiOnly} onClick={() => setApiOnly(true)}>
+                  <Plug className="w-3 h-3" /> API integrated{' '}
+                  <span className="tabular-nums opacity-70">{n(apiLabs.length)}</span>
+                </FilterChip>
+                {apiOnly && apiLabs.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setPicked((p) => [...new Set([...p, ...apiLabs.map((l) => l.lab_id)])])}
+                    className="text-[11px] text-brand-600 hover:text-brand-700 font-medium ml-1"
+                  >
+                    Add all {apiLabs.length} to panel
+                  </button>
+                )}
+              </div>
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-ink-400" />
                 <input
@@ -124,8 +157,16 @@ export function LabPanelGap({ labs }: { labs: Lab[] }) {
                             ? 'border-brand-500 bg-brand-50 text-brand-700 dark:text-brand-400 font-medium'
                             : 'border-ink-200 bg-surface text-ink-700 hover:bg-ink-100'
                         }`}
-                        title={l.city ?? undefined}
+                        title={[l.city, l.api_provider && `API · ${l.api_provider.replace(/_/g, ' ')}`
+                                + (l.api_home_sample ? ' · home collection' : '')]
+                               .filter(Boolean).join(' — ') || undefined}
                       >
+                        {l.api_provider && (
+                          <Plug
+                            className="inline w-3 h-3 mr-1 -mt-0.5 text-brand-600 dark:text-brand-400"
+                            aria-label={`Integrated over ${l.api_provider}`}
+                          />
+                        )}
                         {l.name}
                         <span className="ml-1.5 text-ink-400">{n(l.pincodes)}</span>
                       </button>
@@ -135,9 +176,11 @@ export function LabPanelGap({ labs }: { labs: Lab[] }) {
                 </div>
               </div>
               <div className="text-[11px] text-ink-400 mt-1.5">
-                {q.trim()
-                  ? `${visible.length} of ${n(labs.length)} labs match`
-                  : `Showing the ${visible.length} widest of ${n(labs.length)} labs — search to reach the rest`}
+                {apiOnly
+                  ? `${visible.length} lab${visible.length === 1 ? '' : 's'} we place orders with over an API`
+                  : q.trim()
+                    ? `${matching.length} of ${n(labs.length)} labs match`
+                    : `Showing the ${visible.length} widest of ${n(labs.length)} labs — search to reach the rest`}
               </div>
             </div>
 
@@ -332,5 +375,25 @@ export function LabPanelGap({ labs }: { labs: Lab[] }) {
         </Card>
       )}
     </div>
+  );
+}
+
+/** A one-line filter toggle, the same shape as the chips elsewhere. */
+function FilterChip({
+  active, onClick, children,
+}: { active: boolean; onClick: () => void; children: React.ReactNode }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      className={`inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs font-medium transition ${
+        active
+          ? 'border-brand-600 bg-brand-600 text-white'
+          : 'border-ink-200 bg-surface text-ink-700 hover:bg-ink-100'
+      }`}
+    >
+      {children}
+    </button>
   );
 }

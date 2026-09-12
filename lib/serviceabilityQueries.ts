@@ -243,13 +243,31 @@ export async function getPanelGap(
   return { summary: summary ?? empty, rows, mode };
 }
 
+export type CoverageLab = {
+  lab_id: number;
+  name: string;
+  city: string | null;
+  pincodes: number;
+  /**
+   * The partner we place orders with over an API — null for the majority, who
+   * are worked by email and portal. NO_PROVIDER is the console's way of
+   * saying "none", and reads as null here so a caller cannot mistake the
+   * string for an integration.
+   */
+  api_provider: string | null;
+  /** Whether home-collection orders specifically go over that integration. */
+  api_home_sample: boolean;
+};
+
 /** Labs that actually have home-collection coverage, for the picker. */
 export async function listCoverageLabs() {
-  return query<{ lab_id: number; name: string; city: string | null; pincodes: number }>(`
-    SELECT lph.lab_id, l."labName" AS name, l.city, COUNT(*)::int AS pincodes
+  return query<CoverageLab>(`
+    SELECT lph.lab_id, l."labName" AS name, l.city, COUNT(*)::int AS pincodes,
+           NULLIF(l."apiProvider"::text, 'NO_PROVIDER') AS api_provider,
+           COALESCE(l."isApiHomeSample", false) AS api_home_sample
     FROM analytics.mv_lab_pincode_home lph
     JOIN src_local."Lab" l ON l.id = lph.lab_id
-    GROUP BY 1, 2, 3
+    GROUP BY 1, 2, 3, 5, 6
     ORDER BY COUNT(*) DESC, l."labName"
   `);
 }
