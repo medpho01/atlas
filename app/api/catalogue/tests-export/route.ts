@@ -62,7 +62,12 @@ export async function GET(req: NextRequest) {
   const rateSheet = rates.map((r) => ({
     'Master ID': r.master_id,
     'LS ID': r.ls_id ?? '',
-    Test: r.test_name,
+    // Master name first, lab test name beside it: the first is what makes two
+    // labs comparable, the second is what each of them calls it on the rate
+    // card you are checking against.
+    'Master name': r.test_name,
+    'Lab test name': r.lab_test_name ?? '',
+    'DOS ID': r.dos_id ?? '',
     Department: r.department?.toLowerCase() ?? '',
     Sample: r.sample ?? '',
     Lab: r.lab_name,
@@ -79,8 +84,8 @@ export async function GET(req: NextRequest) {
   const testSheet = tests.map((t) => ({
     'Master ID': t.master_id,
     'LS ID': t.ls_id ?? '',
-    Test: t.consumer_name ?? t.test_name,
     'Master name': t.test_name,
+    'Display name': t.consumer_name ?? '',
     Department: t.department?.toLowerCase() ?? '',
     Sample: t.sample ?? '',
     'Labs offering': t.labs_count,

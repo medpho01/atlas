@@ -64,9 +64,10 @@ export default async function TestsPage({
           <h1 className="text-2xl font-bold text-ink-900">Catalogue</h1>
         </div>
         <p className="text-sm text-ink-600 max-w-3xl">
-          Every test with at least one lab rate — what we can actually quote. Search matches
-          official names and aliases, so a request phrased the client&rsquo;s way still finds the
-          test we file under something else.
+          Every test with at least one lab rate — what we can actually quote. Named by the
+          master, which is what every lab prices against: two labs calling one test two things
+          still compare like with like. Search matches official names and aliases, so a request
+          phrased the client&rsquo;s way still finds it.
         </p>
       </div>
 
@@ -137,8 +138,8 @@ export default async function TestsPage({
             <table className="w-full text-sm">
               <thead>
                 <tr className="text-[11px] uppercase tracking-wide text-ink-400 border-b border-ink-200">
-                  <th className="text-left font-medium px-5 py-2">Test</th>
-                  <th className="text-left font-medium px-2 py-2">Master</th>
+                  <th className="text-left font-medium px-5 py-2">Master name</th>
+                  <th className="text-left font-medium px-2 py-2">LS ID</th>
                   <th className="text-left font-medium px-2 py-2">Department</th>
                   <th className="text-left font-medium px-2 py-2">Sample</th>
                   <th className="text-right font-medium px-2 py-2">MRP</th>
@@ -151,10 +152,15 @@ export default async function TestsPage({
               <tbody>
                 {tests.map((t) => (
                   <tr key={t.master_id} className="border-b border-ink-100 last:border-0">
+                    {/* The master's name leads, not the consumer-facing one.
+                        Every lab that carries this test prices it against this
+                        name, so it is the only one that compares like with
+                        like; the friendlier name is for a client-facing quote
+                        and sits underneath. */}
                     <td className="px-5 py-1.5 text-ink-900 max-w-lg">
-                      {t.consumer_name ?? t.test_name}
+                      {t.test_name}
                       {t.consumer_name && t.consumer_name !== t.test_name && (
-                        <span className="text-[11px] text-ink-400 ml-1.5">{t.test_name}</span>
+                        <span className="block text-[11px] text-ink-400">{t.consumer_name}</span>
                       )}
                       {t.why_it_matters && <div className="text-[11px] text-ink-500">{t.why_it_matters}</div>}
                       <span className="ml-1">
@@ -166,13 +172,8 @@ export default async function TestsPage({
                     {/* The console's id and official name, together: the id is
                         what a rate card is checked against, the name is what
                         makes the id legible without looking it up. */}
-                    <td className="px-2 py-1.5 text-xs text-ink-500 max-w-[16rem]">
+                    <td className="px-2 py-1.5 text-xs text-ink-500 whitespace-nowrap">
                       <span className="font-mono text-[11px] text-ink-600">{t.ls_id ?? '—'}</span>
-                      {t.test_name !== (t.consumer_name ?? t.test_name) && (
-                        <span className="block text-[11px] text-ink-400 truncate" title={t.test_name}>
-                          {t.test_name}
-                        </span>
-                      )}
                     </td>
                     <td className="px-2 py-1.5 text-xs text-ink-500">
                       {t.department ? t.department.toLowerCase() : '—'}

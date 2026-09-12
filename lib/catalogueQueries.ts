@@ -418,7 +418,12 @@ export async function listRateLabs(): Promise<RateLab[]> {
 export type TestRateRow = {
   master_id: number;
   ls_id: string | null;
+  /** The canonical name, shared by every lab that carries the test. */
   test_name: string;
+  /** What this particular lab calls it on its own rate card. */
+  lab_test_name: string | null;
+  /** The lab's code for it, as it appears in the console's DOS table. */
+  dos_id: string | null;
   department: string | null;
   sample: string | null;
   lab_id: number;
@@ -451,7 +456,10 @@ export async function getTestRatesForExport(f: TestFilters = {}): Promise<TestRa
   }
 
   return query<TestRateRow>(`
-    SELECT r.master_id, r.ls_id, r.test_name, d.department,
+    SELECT r.master_id, r.ls_id, r.test_name,
+           dos."labTestName" AS lab_test_name,
+           COALESCE(dos."dosID", r.lab_code) AS dos_id,
+           d.department,
            atlas.sample_bucket(st."sampleType") AS sample,
            r.lab_id, r.lab_name, r.lab_city,
            NULLIF(l."apiProvider"::text, 'NO_PROVIDER') AS api_provider,
@@ -461,6 +469,17 @@ export async function getTestRatesForExport(f: TestFilters = {}): Promise<TestRa
     LEFT JOIN src."Master" m ON m.id = r.master_id
     LEFT JOIN src."SampleType" st ON st.id = m."sampleType_id"
     LEFT JOIN src."LabDepartment" d ON d.id = m."labDepartment_id"
+    -- The lab's own name for the test, which the rate view drops in favour of
+    -- the master's. Picked the same way the view picks its row — newest
+    -- updated of the active ones — so the name and the price belong together.
+    LEFT JOIN LATERAL (
+      SELECT dd."labTestName", dd."dosID"
+      FROM src."DOS" dd
+      WHERE dd.master_id = r.master_id AND dd.lab_id = r.lab_id
+        AND COALESCE(dd.active, false)
+      ORDER BY dd."updatedAt" DESC NULLS LAST
+      LIMIT 1
+    ) dos ON true
     WHERE r.master_id = ANY($1) ${labClause}
     ORDER BY r.test_name, r.b2b NULLS LAST, r.lab_name
   `, params);
