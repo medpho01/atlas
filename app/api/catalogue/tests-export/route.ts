@@ -60,6 +60,8 @@ export async function GET(req: NextRequest) {
   const num = (v: string | null) => (v == null ? null : Math.round(Number(v)));
 
   const rateSheet = rates.map((r) => ({
+    'Master ID': r.master_id,
+    'LS ID': r.ls_id ?? '',
     Test: r.test_name,
     Department: r.department?.toLowerCase() ?? '',
     Sample: r.sample ?? '',
@@ -75,8 +77,10 @@ export async function GET(req: NextRequest) {
   }));
 
   const testSheet = tests.map((t) => ({
+    'Master ID': t.master_id,
+    'LS ID': t.ls_id ?? '',
     Test: t.consumer_name ?? t.test_name,
-    'Official name': t.test_name,
+    'Master name': t.test_name,
     Department: t.department?.toLowerCase() ?? '',
     Sample: t.sample ?? '',
     'Labs offering': t.labs_count,

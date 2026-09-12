@@ -280,6 +280,14 @@ export async function getPackageLabs(id: number, limit = 12): Promise<PackageLab
 
 export type TestRow = {
   master_id: number;
+  /**
+   * The console's own id for the test — LSL100015 and the like.
+   *
+   * On screen and in the export because a rate is only checkable against the
+   * thing it prices: two labs can call the same test three names, and the
+   * master id is what makes "is this the same test" answerable.
+   */
+  ls_id: string | null;
   test_name: string;
   department: string | null;
   labs_count: number;
@@ -366,7 +374,7 @@ export async function browseTests(f: TestFilters = {}): Promise<TestRow[]> {
   params.push(f.limit ?? 300);
 
   return query<TestRow>(`
-    SELECT tc.master_id, tc.test_name, d.department, ${priceSource},
+    SELECT tc.master_id, tc.ls_id, tc.test_name, d.department, ${priceSource},
            atlas.sample_bucket(st."sampleType") AS sample,
            st."sampleType"                      AS sample_raw,
            te.categories, te.consumer_name, te.why_it_matters
@@ -408,6 +416,8 @@ export async function listRateLabs(): Promise<RateLab[]> {
 }
 
 export type TestRateRow = {
+  master_id: number;
+  ls_id: string | null;
   test_name: string;
   department: string | null;
   sample: string | null;
@@ -441,7 +451,7 @@ export async function getTestRatesForExport(f: TestFilters = {}): Promise<TestRa
   }
 
   return query<TestRateRow>(`
-    SELECT r.test_name, d.department,
+    SELECT r.master_id, r.ls_id, r.test_name, d.department,
            atlas.sample_bucket(st."sampleType") AS sample,
            r.lab_id, r.lab_name, r.lab_city,
            NULLIF(l."apiProvider"::text, 'NO_PROVIDER') AS api_provider,

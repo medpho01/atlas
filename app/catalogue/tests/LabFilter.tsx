@@ -1,8 +1,8 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, useTransition } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { Download, Loader2, Plug, Search, X } from 'lucide-react';
+import { Check, Download, Loader2, Plug, Search, X } from 'lucide-react';
 import type { RateLab } from '@/lib/catalogueQueries';
 
 const n = (v: number) => v.toLocaleString('en-IN');
@@ -27,11 +27,30 @@ export function LabFilter({ labs }: { labs: RateLab[] }) {
   const [open, setOpen] = useState(false);
   const [apiOnly, setApiOnly] = useState(false);
   const [downloading, setDownloading] = useState(false);
+  const [pending, startTransition] = useTransition();
 
-  const picked = useMemo(() => {
+  // What the page is currently showing.
+  const applied = useMemo(() => {
     const raw = params.get('labs');
     return raw ? raw.split(',').map(Number).filter(Boolean) : [];
   }, [params]);
+
+  // What you are in the middle of choosing.
+  //
+  // Every tick used to be a navigation: ten labs meant ten server round trips,
+  // each one re-running the catalogue query, and the picker froze between
+  // them. Selection is now local and goes to the server once, when you apply
+  // it — which is also how a multi-select is expected to behave.
+  const [draft, setDraft] = useState<number[]>(applied);
+  useEffect(() => { setDraft(applied); }, [applied]);
+
+  const dirty = useMemo(() => {
+    if (draft.length !== applied.length) return true;
+    const a = new Set(applied);
+    return draft.some((id) => !a.has(id));
+  }, [draft, applied]);
+
+  const picked = draft;
 
   const apiLabs = useMemo(() => labs.filter((l) => l.api_provider), [labs]);
 
@@ -44,20 +63,23 @@ export function LabFilter({ labs }: { labs: RateLab[] }) {
     return apiOnly ? list : list.slice(0, 40);
   }, [labs, apiLabs, apiOnly, q]);
 
-  const setLabs = (ids: number[]) => {
+  const apply = (ids: number[]) => {
     const next = new URLSearchParams(params.toString());
-    if (ids.length) next.set('labs', [...new Set(ids)].join(','));
+    const clean = [...new Set(ids)];
+    if (clean.length) next.set('labs', clean.join(','));
     else next.delete('labs');
     const qs = next.toString();
-    router.push(`/catalogue/tests${qs ? `?${qs}` : ''}`);
+    startTransition(() => router.push(`/catalogue/tests${qs ? `?${qs}` : ''}`));
   };
 
   const toggle = (id: number) =>
-    setLabs(picked.includes(id) ? picked.filter((x) => x !== id) : [...picked, id]);
+    setDraft((d) => (d.includes(id) ? d.filter((x) => x !== id) : [...d, id]));
 
   const chosen = labs.filter((l) => picked.includes(l.lab_id));
 
   const download = async () => {
+    // Deliberately the applied filters: the file has to match the screen, and
+    // an unapplied draft is not on the screen yet.
     setDownloading(true);
     try {
       const qs = new URLSearchParams(params.toString()).toString();
@@ -85,6 +107,7 @@ export function LabFilter({ labs }: { labs: RateLab[] }) {
           }`}
         >
           {picked.length ? `${picked.length} lab${picked.length === 1 ? '' : 's'} selected` : 'All labs'}
+          {dirty && <span className="opacity-80">&nbsp;· not applied</span>}
         </button>
 
         <button
@@ -96,8 +119,20 @@ export function LabFilter({ labs }: { labs: RateLab[] }) {
           <Plug className="w-3 h-3" /> API integrated <span className="opacity-60 tabular-nums">{apiLabs.length}</span>
         </button>
 
-        {picked.length > 0 && (
-          <button type="button" onClick={() => setLabs([])}
+        {dirty && (
+          <button
+            type="button"
+            onClick={() => apply(draft)}
+            disabled={pending}
+            className="inline-flex items-center gap-1.5 rounded-md bg-brand-600 px-2.5 py-1 text-xs font-semibold text-white hover:bg-brand-700 disabled:opacity-60"
+          >
+            {pending ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />}
+            Apply
+          </button>
+        )}
+
+        {(picked.length > 0 || applied.length > 0) && (
+          <button type="button" onClick={() => { setDraft([]); apply([]); }}
                   className="text-[11px] text-ink-500 hover:text-ink-900">clear</button>
         )}
 
@@ -150,14 +185,19 @@ export function LabFilter({ labs }: { labs: RateLab[] }) {
             {apiOnly && apiLabs.length > 0 && (
               <button
                 type="button"
-                onClick={() => setLabs([...picked, ...apiLabs.map((l) => l.lab_id)])}
+                onClick={() => setDraft((d) => [...new Set([...d, ...apiLabs.map((l) => l.lab_id)])])}
                 className="text-[11px] text-brand-600 hover:text-brand-700 font-medium"
               >
                 Select all {apiLabs.length}
               </button>
             )}
-            <button type="button" onClick={() => setOpen(false)}
-                    className="text-[11px] text-ink-500 hover:text-ink-900">done</button>
+            <button
+              type="button"
+              onClick={() => { if (dirty) apply(draft); setOpen(false); }}
+              className="text-[11px] font-medium text-brand-600 hover:text-brand-700"
+            >
+              {dirty ? 'Apply & close' : 'done'}
+            </button>
           </div>
 
           <div className="max-h-56 overflow-y-auto">

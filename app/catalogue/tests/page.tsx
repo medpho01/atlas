@@ -138,6 +138,7 @@ export default async function TestsPage({
               <thead>
                 <tr className="text-[11px] uppercase tracking-wide text-ink-400 border-b border-ink-200">
                   <th className="text-left font-medium px-5 py-2">Test</th>
+                  <th className="text-left font-medium px-2 py-2">Master</th>
                   <th className="text-left font-medium px-2 py-2">Department</th>
                   <th className="text-left font-medium px-2 py-2">Sample</th>
                   <th className="text-right font-medium px-2 py-2">MRP</th>
@@ -162,6 +163,17 @@ export default async function TestsPage({
                         ))}
                       </span>
                     </td>
+                    {/* The console's id and official name, together: the id is
+                        what a rate card is checked against, the name is what
+                        makes the id legible without looking it up. */}
+                    <td className="px-2 py-1.5 text-xs text-ink-500 max-w-[16rem]">
+                      <span className="font-mono text-[11px] text-ink-600">{t.ls_id ?? '—'}</span>
+                      {t.test_name !== (t.consumer_name ?? t.test_name) && (
+                        <span className="block text-[11px] text-ink-400 truncate" title={t.test_name}>
+                          {t.test_name}
+                        </span>
+                      )}
+                    </td>
                     <td className="px-2 py-1.5 text-xs text-ink-500">
                       {t.department ? t.department.toLowerCase() : '—'}
                     </td>
@@ -175,7 +187,7 @@ export default async function TestsPage({
                 ))}
                 {!tests.length && (
                   <tr>
-                    <td colSpan={5} className="px-5 py-8 text-sm text-ink-500">
+                    <td colSpan={7} className="px-5 py-8 text-sm text-ink-500">
                       Nothing matches. Try a shorter search term, or clear the department filter.
                     </td>
                   </tr>
