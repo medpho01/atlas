@@ -301,6 +301,15 @@ export type TestFilters = {
   department?: string;
   priceMin?: number;
   priceMax?: number;
+  /**
+   * Narrow to what these labs actually carry.
+   *
+   * With labs chosen, every figure on the page is about them: the count is how
+   * many of the selected labs carry the test, and the prices are their prices.
+   * A catalogue-wide minimum quoted next to a two-lab panel would be a number
+   * nobody in that panel can honour.
+   */
+  labIds?: number[];
   limit?: number;
 };
 
@@ -312,6 +321,7 @@ export type TestFilters = {
 export async function browseTests(f: TestFilters = {}): Promise<TestRow[]> {
   const params: unknown[] = [];
   const where: string[] = [];
+  const labs = (f.labIds ?? []).filter((n) => Number.isFinite(n));
 
   if (f.q?.trim()) {
     params.push(`%${f.q.trim().toLowerCase()}%`);
@@ -328,13 +338,35 @@ export async function browseTests(f: TestFilters = {}): Promise<TestRow[]> {
     params.push(f.department);
     where.push(`d.department = $${params.length}`);
   }
-  if (f.priceMin != null) { params.push(f.priceMin); where.push(`tc.mrp_min >= $${params.length}`); }
-  if (f.priceMax != null) { params.push(f.priceMax); where.push(`tc.mrp_min <= $${params.length}`); }
+
+  // With a lab filter the figures come from those labs' own rates; without
+  // one they come from the precomputed catalogue, which is the whole network.
+  let priceSource = `tc.labs_count, tc.mrp_min::text, tc.mrp_max::text, tc.b2b_min::text`;
+  let priceJoin = '';
+  let priceGate = '';
+  if (labs.length) {
+    params.push(labs);
+    const p = `$${params.length}`;
+    priceJoin = `
+    JOIN LATERAL (
+      SELECT COUNT(*)::int AS labs_count,
+             MIN(r.mrp) AS mrp_min, MAX(r.mrp) AS mrp_max, MIN(r.b2b) AS b2b_min
+      FROM analytics.mv_test_rates r
+      WHERE r.master_id = tc.master_id AND r.lab_id = ANY(${p})
+    ) sel ON true`;
+    priceSource = `sel.labs_count, sel.mrp_min::text, sel.mrp_max::text, sel.b2b_min::text`;
+    priceGate = `sel.labs_count > 0`;
+  }
+  // Price bands read against whichever price is being shown, so filtering to a
+  // band cannot return a row whose visible MRP sits outside it.
+  const mrpCol = labs.length ? 'sel.mrp_min' : 'tc.mrp_min';
+  if (f.priceMin != null) { params.push(f.priceMin); where.push(`${mrpCol} >= $${params.length}`); }
+  if (f.priceMax != null) { params.push(f.priceMax); where.push(`${mrpCol} <= $${params.length}`); }
+  if (priceGate) where.push(priceGate);
   params.push(f.limit ?? 300);
 
   return query<TestRow>(`
-    SELECT tc.master_id, tc.test_name, d.department, tc.labs_count,
-           tc.mrp_min::text, tc.mrp_max::text, tc.b2b_min::text,
+    SELECT tc.master_id, tc.test_name, d.department, ${priceSource},
            atlas.sample_bucket(st."sampleType") AS sample,
            st."sampleType"                      AS sample_raw,
            te.categories, te.consumer_name, te.why_it_matters
@@ -342,10 +374,85 @@ export async function browseTests(f: TestFilters = {}): Promise<TestRow[]> {
     LEFT JOIN src."Master" m ON m.id = tc.master_id
     LEFT JOIN src."SampleType" st ON st.id = m."sampleType_id"
     LEFT JOIN src."LabDepartment" d ON d.id = m."labDepartment_id"
-    LEFT JOIN atlas.test_enrichment te ON te.master_id = tc.master_id
+    LEFT JOIN atlas.test_enrichment te ON te.master_id = tc.master_id${priceJoin}
     ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
-    ORDER BY tc.labs_count DESC, tc.test_name
+    ORDER BY ${labs.length ? 'sel.labs_count' : 'tc.labs_count'} DESC, tc.test_name
     LIMIT $${params.length}
+  `, params);
+}
+
+export type RateLab = {
+  lab_id: number;
+  lab_name: string;
+  lab_city: string | null;
+  tests: number;
+  api_provider: string | null;
+};
+
+/**
+ * Labs with a rate card, for the catalogue's lab filter.
+ *
+ * Ordered by how much of the catalogue they price, because a lab with four
+ * rates loaded is not a lab you build a quote from.
+ */
+export async function listRateLabs(): Promise<RateLab[]> {
+  return query<RateLab>(`
+    SELECT r.lab_id, MAX(r.lab_name) AS lab_name, MAX(r.lab_city) AS lab_city,
+           COUNT(DISTINCT r.master_id)::int AS tests,
+           NULLIF(MAX(l."apiProvider"::text), 'NO_PROVIDER') AS api_provider
+    FROM analytics.mv_test_rates r
+    LEFT JOIN src."Lab" l ON l.id = r.lab_id
+    GROUP BY r.lab_id
+    ORDER BY COUNT(DISTINCT r.master_id) DESC, MAX(r.lab_name)
+  `);
+}
+
+export type TestRateRow = {
+  test_name: string;
+  department: string | null;
+  sample: string | null;
+  lab_id: number;
+  lab_name: string;
+  lab_city: string | null;
+  api_provider: string | null;
+  mrp: string | null;
+  b2b: string | null;
+  tat_hours: number | null;
+  nabl: boolean | null;
+};
+
+/**
+ * One row per test per lab — the shape a rate card is negotiated from.
+ *
+ * Takes the same filters as the page, so what downloads is what was on screen
+ * rather than a fresh query somebody has to reconcile against it.
+ */
+export async function getTestRatesForExport(f: TestFilters = {}): Promise<TestRateRow[]> {
+  const tests = await browseTests({ ...f, limit: f.limit ?? 2000 });
+  if (!tests.length) return [];
+  const ids = tests.map((t) => t.master_id);
+  const labs = (f.labIds ?? []).filter((n) => Number.isFinite(n));
+
+  const params: unknown[] = [ids];
+  let labClause = '';
+  if (labs.length) {
+    params.push(labs);
+    labClause = `AND r.lab_id = ANY($${params.length})`;
+  }
+
+  return query<TestRateRow>(`
+    SELECT r.test_name, d.department,
+           atlas.sample_bucket(st."sampleType") AS sample,
+           r.lab_id, r.lab_name, r.lab_city,
+           NULLIF(l."apiProvider"::text, 'NO_PROVIDER') AS api_provider,
+           r.mrp::text, r.b2b::text, r.tat_hours, r.nabl
+    FROM analytics.mv_test_rates r
+    LEFT JOIN src."Lab" l ON l.id = r.lab_id
+    LEFT JOIN src."Master" m ON m.id = r.master_id
+    LEFT JOIN src."SampleType" st ON st.id = m."sampleType_id"
+    LEFT JOIN src."LabDepartment" d ON d.id = m."labDepartment_id"
+    WHERE r.master_id = ANY($1) ${labClause}
+    ORDER BY r.test_name, r.b2b NULLS LAST, r.lab_name
   `, params);
 }
 

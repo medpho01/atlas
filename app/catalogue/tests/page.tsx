@@ -5,7 +5,8 @@ import { RoleBlocked } from '@/components/RoleBlocked';
 import { CatalogueTabs } from '../CatalogueTabs';
 import { Card, CardBody, CardHeader } from '@/components/ui/Card';
 import { ChipButton, Pill } from '@/components/ui/Toggle';
-import { browseTests, getCategories, getDepartments } from '@/lib/catalogueQueries';
+import { browseTests, getCategories, getDepartments, listRateLabs } from '@/lib/catalogueQueries';
+import { LabFilter } from './LabFilter';
 
 export const dynamic = 'force-dynamic';
 
@@ -22,23 +23,29 @@ const BANDS = [
 export default async function TestsPage({
   searchParams,
 }: {
-  searchParams: { q?: string; category?: string; department?: string; band?: string };
+  searchParams: { q?: string; category?: string; department?: string; band?: string; labs?: string };
 }) {
   const { blocked } = await requireView('catalogue', '/catalogue/tests');
   if (blocked) return <RoleBlocked area="The catalogue" detail="the network, accounts and admin teams" />;
 
   const band = BANDS.find((b) => b.key === searchParams.band);
-  const [tests, categories, departments] = await Promise.all([
+  const labIds = (searchParams.labs ?? '')
+    .split(',').map(Number).filter((n) => Number.isFinite(n) && n > 0);
+
+  const [tests, categories, departments, rateLabs] = await Promise.all([
     browseTests({
       q: searchParams.q,
       category: searchParams.category,
       department: searchParams.department,
       priceMin: band?.min,
       priceMax: band?.max,
+      labIds,
     }),
     getCategories(),
     getDepartments(),
+    listRateLabs(),
   ]);
+  const pickedLabs = rateLabs.filter((l) => labIds.includes(l.lab_id));
 
   const withCategories = categories.filter((c) => c.tests > 0);
 
@@ -69,6 +76,7 @@ export default async function TestsPage({
         {searchParams.category && <input type="hidden" name="category" value={searchParams.category} />}
         {searchParams.department && <input type="hidden" name="department" value={searchParams.department} />}
         {searchParams.band && <input type="hidden" name="band" value={searchParams.band} />}
+        {searchParams.labs && <input type="hidden" name="labs" value={searchParams.labs} />}
         <input
           name="q"
           defaultValue={searchParams.q ?? ''}
@@ -79,6 +87,8 @@ export default async function TestsPage({
           <Link href={href({ q: undefined })} className="text-[11px] text-ink-500 hover:text-ink-900">clear</Link>
         )}
       </form>
+
+      <LabFilter labs={rateLabs} />
 
       <div className="flex flex-wrap items-center gap-1.5 mb-2">
         <span className="text-[11px] uppercase tracking-wide text-ink-400 mr-1">MRP</span>
@@ -115,7 +125,11 @@ export default async function TestsPage({
       <Card>
         <CardHeader
           title={`${tests.length} test${tests.length === 1 ? '' : 's'}`}
-          subtitle="Widest lab coverage first — the ones we can actually fulfil everywhere."
+          subtitle={
+            pickedLabs.length
+              ? `Carried by ${pickedLabs.length === 1 ? pickedLabs[0].lab_name : `${pickedLabs.length} selected labs`} — prices are theirs, not the network's.`
+              : 'Widest lab coverage first — the ones we can actually fulfil everywhere.'
+          }
           icon={<Beaker className="w-4 h-4" strokeWidth={2.25} />}
         />
         <CardBody className="pt-0">
@@ -128,7 +142,9 @@ export default async function TestsPage({
                   <th className="text-left font-medium px-2 py-2">Sample</th>
                   <th className="text-right font-medium px-2 py-2">MRP</th>
                   <th className="text-right font-medium px-2 py-2">Lab cost</th>
-                  <th className="text-right font-medium px-5 py-2">Labs</th>
+                  <th className="text-right font-medium px-5 py-2">
+                    {pickedLabs.length ? 'Of selected' : 'Labs'}
+                  </th>
                 </tr>
               </thead>
               <tbody>
@@ -171,7 +187,9 @@ export default async function TestsPage({
       </Card>
 
       <p className="mt-4 text-xs text-ink-500">
-        Showing at most 300 rows. MRP and lab cost are the lowest across labs carrying the test.
+        Showing at most 300 rows. MRP and lab cost are the lowest across{' '}
+        {pickedLabs.length ? 'the selected labs' : 'labs'} carrying the test — download the rates
+        for each lab&rsquo;s own figure.
       </p>
     </main>
   );
