@@ -415,6 +415,55 @@ export async function listRateLabs(): Promise<RateLab[]> {
   `);
 }
 
+export type TestExtremes = {
+  master_id: number;
+  mrp_min: string | null;
+  mrp_min_lab: string | null;
+  mrp_max: string | null;
+  mrp_max_lab: string | null;
+  b2b_min: string | null;
+  b2b_min_lab: string | null;
+  b2b_max: string | null;
+  b2b_max_lab: string | null;
+};
+
+/**
+ * Cheapest and dearest, with a name against each.
+ *
+ * A range on its own says a test costs between ₹59 and ₹240 somewhere in the
+ * network, which is not a fact anybody can act on. The lab that sets each end
+ * is the fact: it is who to route to, and who to go back to on price.
+ *
+ * Scoped to the same labs the export is scoped to — a "lowest" drawn from labs
+ * the reader has filtered out is worse than no number.
+ */
+export async function getTestRateExtremes(
+  masterIds: number[],
+  labIds: number[] = [],
+): Promise<TestExtremes[]> {
+  if (!masterIds.length) return [];
+  const params: unknown[] = [masterIds];
+  let labClause = '';
+  if (labIds.length) {
+    params.push(labIds);
+    labClause = `AND r.lab_id = ANY($${params.length})`;
+  }
+  return query<TestExtremes>(`
+    SELECT r.master_id,
+           MIN(r.mrp)::text AS mrp_min,
+           (array_agg(r.lab_name ORDER BY r.mrp ASC  NULLS LAST))[1] AS mrp_min_lab,
+           MAX(r.mrp)::text AS mrp_max,
+           (array_agg(r.lab_name ORDER BY r.mrp DESC NULLS LAST))[1] AS mrp_max_lab,
+           MIN(r.b2b)::text AS b2b_min,
+           (array_agg(r.lab_name ORDER BY r.b2b ASC  NULLS LAST))[1] AS b2b_min_lab,
+           MAX(r.b2b)::text AS b2b_max,
+           (array_agg(r.lab_name ORDER BY r.b2b DESC NULLS LAST))[1] AS b2b_max_lab
+    FROM analytics.mv_test_rates r
+    WHERE r.master_id = ANY($1) ${labClause}
+    GROUP BY r.master_id
+  `, params);
+}
+
 export type TestRateRow = {
   master_id: number;
   ls_id: string | null;

@@ -2,7 +2,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import * as XLSX from 'xlsx';
 import { getSessionUser } from '@/lib/auth';
 import { canAccess } from '@/lib/access';
-import { getTestRatesForExport, browseTests, listRateLabs } from '@/lib/catalogueQueries';
+import {
+  getTestRatesForExport, browseTests, listRateLabs, getTestRateExtremes,
+} from '@/lib/catalogueQueries';
 
 export const dynamic = 'force-dynamic';
 
@@ -53,6 +55,13 @@ export async function GET(req: NextRequest) {
     listRateLabs(),
   ]);
 
+  // Who sets each end of the range, scoped to the same labs as everything
+  // else here.
+  const extremes = new Map(
+    (await getTestRateExtremes(tests.map((t) => t.master_id), labIds))
+      .map((e) => [e.master_id, e]),
+  );
+
   if (!rates.length) {
     return NextResponse.json({ error: 'Nothing to export for these filters' }, { status: 404 });
   }
@@ -81,18 +90,29 @@ export async function GET(req: NextRequest) {
     NABL: r.nabl == null ? '' : r.nabl ? 'Yes' : 'No',
   }));
 
-  const testSheet = tests.map((t) => ({
-    'Master ID': t.master_id,
-    'LS ID': t.ls_id ?? '',
-    'Master name': t.test_name,
-    'Display name': t.consumer_name ?? '',
-    Department: t.department?.toLowerCase() ?? '',
-    Sample: t.sample ?? '',
-    'Labs offering': t.labs_count,
-    'MRP low': num(t.mrp_min),
-    'MRP high': num(t.mrp_max),
-    'Lab cost low (B2B / L2L)': num(t.b2b_min),
-  }));
+  const testSheet = tests.map((t) => {
+    const e = extremes.get(t.master_id);
+    return {
+      'Master ID': t.master_id,
+      'LS ID': t.ls_id ?? '',
+      'Master name': t.test_name,
+      'Display name': t.consumer_name ?? '',
+      Department: t.department?.toLowerCase() ?? '',
+      Sample: t.sample ?? '',
+      'Labs offering': t.labs_count,
+      // Each end of the range with the lab that sets it: a spread from ₹59 to
+      // ₹240 is only actionable once you know who is at each end — who to
+      // route to, and who to go back to on price.
+      'Lab cost low (B2B / L2L)': num(e?.b2b_min ?? t.b2b_min),
+      'Lowest lab cost — lab': e?.b2b_min_lab ?? '',
+      'Lab cost high (B2B / L2L)': num(e?.b2b_max ?? null),
+      'Highest lab cost — lab': e?.b2b_max_lab ?? '',
+      'MRP low': num(e?.mrp_min ?? t.mrp_min),
+      'Lowest MRP — lab': e?.mrp_min_lab ?? '',
+      'MRP high': num(e?.mrp_max ?? t.mrp_max),
+      'Highest MRP — lab': e?.mrp_max_lab ?? '',
+    };
+  });
 
   const selected = labIds.length
     ? labs.filter((l) => labIds.includes(l.lab_id)).map((l) => ({
