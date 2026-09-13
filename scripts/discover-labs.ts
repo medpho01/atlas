@@ -114,7 +114,9 @@ async function search(t: Target): Promise<FoundLab[]> {
     // a truncated response is a parse failure rather than a short list.
     max_tokens: 8000,
     system: [{ type: 'text', text: SEARCH_SYSTEM, cache_control: { type: 'ephemeral' } }],
-    tools: [{ type: 'web_search_20260209', name: 'web_search', max_uses: 6 }],
+    // Ten, for the same reason as the app's path: six was being exhausted
+    // before the model had verified anything.
+    tools: [{ type: 'web_search_20260209', name: 'web_search', max_uses: 10 }],
     // Verifying that a business exists and is currently operating is a
     // judgement over messy sources, not a lookup — worth the effort. At 'low'
     // the new fields come back empty, every lead scores alike, and the ranking

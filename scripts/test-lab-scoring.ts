@@ -455,10 +455,41 @@ group('shouldAutoSearch mirrors claim_discovery');
     answer({ content: [{ type: 'web_search_tool_result' }] }), 'no text');
   failsWith('text that is not JSON',
     answer({ content: [{ type: 'text', text: 'I could not find any labs.' }] }), 'no json object');
-  failsWith('JSON carrying no labs array',
-    answer({ content: [{ type: 'text', text: '{"results":[]}' }] }), 'no labs array');
+  failsWith('JSON carrying no list at all',
+    answer({ content: [{ type: 'text', text: '{"message":"none found"}' }] }), 'no labs array');
+  check('results is accepted as the list, like providers',
+    readLabs(answer({ content: [{ type: 'text', text: '{"results":[]}' }] })).length === 0);
   failsWith('JSON that does not parse',
     answer({ content: [{ type: 'text', text: '{"labs": [' }] }), 'not valid json');
+
+  // The exact answer production returned for 413736: prose, a fenced block,
+  // and the key spelled "providers" because the schema was not in force.
+  const fromProd = `I was unable to complete this task: the web search tool returned "server tool use limit exceeded" on every attempt, so I could not verify a single real provider serving pincode 413736.
+
+Rather than fill the list from recollection, I am returning an empty result.
+
+\`\`\`json
+{
+  "pincode": "413736",
+  "providers": []
+}
+\`\`\`
+
+To get a real answer, raise the search budget.`;
+  check('the 413736 answer parses instead of crashing',
+    readLabs(answer({ content: [{ type: 'text', text: fromProd }] })).length === 0);
+
+  check('a fenced labs block parses',
+    readLabs(answer({ content: [{ type: 'text',
+      text: '```json\n{"labs":[{"name":"B","source_url":"u","confidence":0.5}]}\n```' }] }))[0].name === 'B');
+
+  {
+    let msg = '';
+    try { readLabs(answer({ content: [{ type: 'text', text: '{"foo":1,"bar":2}' }] })); }
+    catch (e) { msg = (e as Error).message; }
+    check('an object with no list at all names the keys it did have',
+      msg.includes('foo') && msg.includes('bar'));
+  }
 
   const labs = readLabs(answer({ content: [{ type: 'text',
     text: 'Here is what I found:\n{"labs":[{"name":"A","source_url":"u","confidence":0.9}]}\nThat is all.' }] }));

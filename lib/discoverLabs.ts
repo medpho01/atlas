@@ -141,9 +141,16 @@ export async function search(
     // lab, and a truncated response is a parse failure, not a short list.
     max_tokens: 8000,
     system: [{ type: 'text', text: SEARCH_SYSTEM, cache_control: { type: 'ephemeral' } }],
-    // Four, not six: each use pulls page content back through the model,
-    // and memory is the binding constraint in this container.
-    tools: [{ type: 'web_search_20260209', name: 'web_search', max_uses: 3 }],
+    // Ten, not three.
+    //
+    // Three was chosen to keep memory down, and it is what the model hit: a
+    // probe against 413736 came back "the web search tool returned 'server
+    // tool use limit exceeded' on every attempt, so I could not verify a
+    // single real provider" — and then, correctly, refused to invent any. The
+    // searches this feature exists to make are several queries deep, and
+    // dynamic filtering spends some of the budget on code execution of its
+    // own, so the limit was being reached before the work was done.
+    tools: [{ type: 'web_search_20260209', name: 'web_search', max_uses: 10 }],
     messages: [{ role: 'user', content: searchPrompt(pincode, city, state, disciplines) }],
   };
   // 'medium', not 'low'. At low effort the model answers out of the search
