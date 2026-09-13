@@ -129,6 +129,42 @@ async function claim(
 let schemaRejected = false;
 
 
+/**
+ * A canned answer, for exercising the whole path without spending money.
+ *
+ * Set DISCOVERY_FAKE=1 (and optionally DISCOVERY_FAKE_MS) and a search returns
+ * this instead of calling the API. It is not a mock of the SDK — it is a real
+ * answer in the shape the model actually replied in for 413736, prose and a
+ * fenced block and all, so the claim, the background run, the store, the poll
+ * and the card can all be tested locally and in that order.
+ *
+ * Never reachable in production: the flag is not set there, and the deploy
+ * does not set it.
+ */
+async function fakeSearch(pincode: string): Promise<SearchAnswer> {
+  const ms = Number(process.env.DISCOVERY_FAKE_MS ?? 8000);
+  await new Promise((r) => setTimeout(r, ms));
+  const labs = [
+    { name: `Sunrise Diagnostics ${pincode}`, address: '12 MG Road', phone: '+91 98200 00000',
+      source_url: 'https://example.test/sunrise', confidence: 0.82,
+      disciplines: ['PATHOLOGY', 'RADIOLOGY'], accreditation: 'NABL, ISO 9001',
+      services: 'CBC, MRI 1.5T', rating: 4.4, rating_count: 380,
+      home_collection: true, in_pincode: true, hours: '8am-8pm',
+      note: 'Main branch, runs its own imaging.' },
+    { name: `Minimal Lab ${pincode}`, source_url: 'https://example.test/minimal', confidence: 0.4 },
+  ];
+  return {
+    stop_reason: 'end_turn',
+    continuations: 0,
+    content: [
+      { type: 'thinking' },
+      { type: 'server_tool_use' },
+      { type: 'web_search_tool_result' },
+      { type: 'text', text: `Here is what I found.\n\n\`\`\`json\n${JSON.stringify({ labs })}\n\`\`\`` },
+    ],
+  };
+}
+
 export async function search(
   anthropic: Anthropic,
   pincode: string, city?: string | null, state?: string | null,
@@ -163,6 +199,8 @@ export async function search(
   };
 
   const withoutSchema = { ...request, output_config: { effort: 'medium' } };
+
+  if (process.env.DISCOVERY_FAKE === '1') return await fakeSearch(pincode);
 
   const once = async (body: object): Promise<SearchAnswer> =>
     await anthropic.messages.stream(body as never).finalMessage();
