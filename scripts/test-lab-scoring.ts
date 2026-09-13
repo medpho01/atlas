@@ -15,7 +15,7 @@
 
 import {
   scoreLead, rankLeads, scoreBand, adjustedRating, shouldAutoSearch, isSearchRunning,
-  autoSearchEnabled,
+  autoSearchEnabled, readLabs, type SearchAnswer,
   WEIGHTS, WEIGHT_TOTAL, num, type LabFacts, type RunRow,
 } from '../lib/labDiscovery';
 
@@ -427,6 +427,44 @@ group('shouldAutoSearch mirrors claim_discovery');
   check('auto-search ignores case and space', autoSearchEnabled('  On '));
   check('a Date is accepted as well as a string',
     isSearchRunning({ ran_at: null, started_at: new Date(now - 30_000), found: 0, error: null }, now));
+}
+
+
+// ---------------------------------------------------------------------------
+// Reading the answer
+//
+// Every one of these came back from production as "Cannot read properties of
+// undefined (reading 'map')" — a sentence about this parse, not about the
+// search, which cost two deploys. A failure here has to name what arrived.
+// ---------------------------------------------------------------------------
+{
+  const answer = (o: Partial<SearchAnswer>): SearchAnswer =>
+    ({ stop_reason: 'end_turn', content: [], ...o });
+  const failsWith = (what: string, a: SearchAnswer, expect: string) => {
+    let msg = '(nothing thrown)';
+    try { readLabs(a); } catch (e) { msg = (e as Error).message; }
+    check(`${what} — says so`, msg.toLowerCase().includes(expect.toLowerCase()));
+    check(`${what} — not a TypeError`, !msg.includes("undefined (reading"));
+  };
+
+  failsWith('a paused turn that never resumed',
+    answer({ stop_reason: 'pause_turn', continuations: 4,
+             content: [{ type: 'server_tool_use' }, { type: 'web_search_tool_result' }] }),
+    'paused');
+  failsWith('an answer with no text block',
+    answer({ content: [{ type: 'web_search_tool_result' }] }), 'no text');
+  failsWith('text that is not JSON',
+    answer({ content: [{ type: 'text', text: 'I could not find any labs.' }] }), 'no json object');
+  failsWith('JSON carrying no labs array',
+    answer({ content: [{ type: 'text', text: '{"results":[]}' }] }), 'no labs array');
+  failsWith('JSON that does not parse',
+    answer({ content: [{ type: 'text', text: '{"labs": [' }] }), 'not valid json');
+
+  const labs = readLabs(answer({ content: [{ type: 'text',
+    text: 'Here is what I found:\n{"labs":[{"name":"A","source_url":"u","confidence":0.9}]}\nThat is all.' }] }));
+  check('JSON wrapped in prose still parses', labs.length === 1 && labs[0].name === 'A');
+  check('an empty labs array is an answer, not a failure',
+    readLabs(answer({ content: [{ type: 'text', text: '{"labs":[]}' }] })).length === 0);
 }
 
 // ---------------------------------------------------------------------------

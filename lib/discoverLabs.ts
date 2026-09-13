@@ -5,6 +5,7 @@ import {
   SEARCH_SYSTEM, SEARCH_SCHEMA, searchPrompt, DISCOVERY_STALE_DAYS,
   scoreLead, rankLeads, num, isSearchRunning, shouldAutoSearch,
   type LabFacts, type RunRow, type Ranked, autoSearchEnabled, splitLine,
+  readLabs, MAX_CONTINUATIONS, type SearchAnswer,
 } from './labDiscovery';
 
 /**
@@ -32,7 +33,8 @@ const MODEL = 'claude-opus-5';
 // predicates and the reads from one place, while the logic itself stays
 // testable without Next. shouldAutoSearch mirrors atlas.claim_discovery's
 // WHERE clause and is fixture-tested in scripts/test-lab-scoring.ts.
-export { isSearchRunning, shouldAutoSearch, autoSearchEnabled };
+export { isSearchRunning, shouldAutoSearch, autoSearchEnabled, readLabs };
+export type { SearchAnswer };
 
 /**
  * Turn an SDK error into something worth writing to discovery_run.error.
@@ -126,15 +128,12 @@ async function claim(
  */
 let schemaRejected = false;
 
-async function search(
+
+export async function search(
   anthropic: Anthropic,
   pincode: string, city?: string | null, state?: string | null,
   disciplines?: string[] | null,
-): Promise<{
-  stop_reason?: string | null;
-  stop_details?: { category?: string | null } | null;
-  content: { type: string; text?: string }[];
-}> {
+): Promise<SearchAnswer> {
   const request = {
     model: MODEL,
     // 4000 was enough for four labs of name, address and phone. The schema
@@ -158,11 +157,40 @@ async function search(
 
   const withoutSchema = { ...request, output_config: { effort: 'medium' } };
 
-  if (schemaRejected) {
-    return await anthropic.messages.stream(withoutSchema as never).finalMessage();
-  }
+  const once = async (body: object): Promise<SearchAnswer> =>
+    await anthropic.messages.stream(body as never).finalMessage();
+
+  /**
+   * Run it, and resume it when the server pauses.
+   *
+   * web_search runs a sampling loop on Anthropic's side, and when that loop
+   * hits its iteration limit the turn comes back with stop_reason
+   * "pause_turn" and NO final answer in it — the searches happened, the JSON
+   * has not been written yet. Sending the assistant turn straight back
+   * resumes it where it stopped; an extra "continue" message is wrong and the
+   * API says so.
+   *
+   * Not handling this was a crash, not a degradation: with no text block the
+   * parse read `.labs` off undefined and the run recorded "Cannot read
+   * properties of undefined (reading 'map')", which says nothing about what
+   * actually happened.
+   */
+  const withResume = async (body: { messages: unknown[] }): Promise<SearchAnswer> => {
+    let answer = await once(body);
+    const messages = [...body.messages];
+    let continuations = 0;
+    while (answer.stop_reason === 'pause_turn' && continuations < MAX_CONTINUATIONS) {
+      continuations += 1;
+      messages.push({ role: 'assistant', content: answer.content });
+      console.warn(`[discovery] ${pincode}: server paused the tool loop, resuming (${continuations})`);
+      answer = await once({ ...body, messages });
+    }
+    return { ...answer, continuations };
+  };
+
+  if (schemaRejected) return await withResume(withoutSchema);
   try {
-    return await anthropic.messages.stream(withSchema as never).finalMessage();
+    return await withResume(withSchema);
   } catch (e) {
     const err = e as { status?: number; message?: string };
     const isSchema = err?.status === 400 && /schema/i.test(err?.message ?? '');
@@ -170,8 +198,8 @@ async function search(
     schemaRejected = true;
     console.warn(`[discovery] ${pincode}: the API rejected the output schema (${err.message}). ` +
                  'Falling back to the prompt alone for the rest of this process — ' +
-                 'run `npm run check:discovery-schema` to see whether it still fits.');
-    return await anthropic.messages.stream(withoutSchema as never).finalMessage();
+                 'ask /api/discovery/schema-check whether it still fits.');
+    return await withResume(withoutSchema);
   }
 }
 
@@ -259,17 +287,7 @@ export async function discoverForPincode(
     if (response.stop_reason === 'refusal') {
       throw new Error(`Model declined (${response.stop_details?.category ?? 'no category'})`);
     }
-    const text = response.content.filter((b) => b.type === 'text').pop();
-    // Without the schema the answer is prose-shaped JSON, so take the last
-    // text block and the outermost braces in it rather than assuming the
-    // block is nothing but JSON.
-    const body = text?.text?.trim();
-    if (!body) throw new Error('No text block in response');
-    const json = body.startsWith('{') ? body : body.slice(body.indexOf('{'), body.lastIndexOf('}') + 1);
-    if (!json) throw new Error('No JSON object in the response text');
-    const raw = JSON.parse(json).labs as (LabFacts & {
-      name: string; address?: string; source_url: string; confidence: number;
-    })[];
+    const raw = readLabs(response);
     // services and accreditation come back as comma-separated lines now — see
     // SEARCH_SCHEMA. Everything downstream works in arrays.
     const labs = raw.map((l) => ({

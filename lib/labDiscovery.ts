@@ -702,3 +702,67 @@ export function shouldAutoSearch(
   if (barren && now - ranAt > DAY_MS) return true;
   return now - ranAt > staleDays * DAY_MS;
 }
+
+// ---------------------------------------------------------------------------
+// Reading the answer
+// ---------------------------------------------------------------------------
+
+/** How many times a paused server tool loop may be resumed before giving up. */
+export const MAX_CONTINUATIONS = 4;
+
+export type SearchAnswer = {
+  stop_reason?: string | null;
+  stop_details?: { category?: string | null } | null;
+  content: { type: string; text?: string }[];
+  /** How many times the server-side tool loop had to be resumed. */
+  continuations?: number;
+};
+
+/**
+ * The labs out of an answer, or an error that says what was there instead.
+ *
+ * Every failure here used to surface as a JavaScript TypeError — "Cannot read
+ * properties of undefined (reading 'map')" — recorded against the pincode and
+ * shown on the card. That sentence describes this function's bug, not the
+ * search's, and sent two deploys chasing the wrong thing. Now the message
+ * names the stop reason and the block types that came back, which is enough to
+ * tell a paused turn from a refusal from a model that answered in prose.
+ */
+export function readLabs(answer: SearchAnswer): (LabFacts & {
+  name: string; address?: string; source_url: string; confidence: number;
+})[] {
+  const shape = () =>
+    `stop_reason ${answer.stop_reason ?? 'none'}` +
+    (answer.continuations ? `, ${answer.continuations} continuation(s)` : '') +
+    `, blocks [${[...new Set(answer.content.map((b) => b.type))].join(', ') || 'none'}]`;
+
+  const text = answer.content.filter((b) => b.type === 'text').pop();
+  // Without the schema the answer is prose-shaped JSON, so take the last text
+  // block and the outermost braces in it rather than assuming the block is
+  // nothing but JSON.
+  const body = text?.text?.trim();
+  if (!body) {
+    throw new Error(answer.stop_reason === 'pause_turn'
+      ? `The search paused and could not be resumed within ${MAX_CONTINUATIONS} continuations (${shape()})`
+      : `The model returned no text to parse (${shape()})`);
+  }
+  const json = body.startsWith('{')
+    ? body
+    : body.slice(body.indexOf('{'), body.lastIndexOf('}') + 1);
+  if (!json) throw new Error(`No JSON object in the answer (${shape()})`);
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(json);
+  } catch {
+    throw new Error(`The answer was not valid JSON (${shape()})`);
+  }
+  const labs = (parsed as { labs?: unknown })?.labs;
+  if (!Array.isArray(labs)) {
+    throw new Error(`The answer carried no labs array (${shape()})`);
+  }
+  return labs as (LabFacts & {
+    name: string; address?: string; source_url: string; confidence: number;
+  })[];
+}
+
