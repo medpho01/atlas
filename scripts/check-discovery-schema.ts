@@ -8,6 +8,13 @@
  *
  *   npm run check:discovery-schema
  *
+ * Local only. The server has no Node — the app runs from a standalone build
+ * inside a container, which carries neither this file nor the TypeScript it
+ * imports. Ask a deployed host through the route instead, which runs the same
+ * check with that container's key:
+ *
+ *   GET /api/discovery/schema-check
+ *
  * Uses messages.count_tokens, which validates the whole request — schema,
  * tools and system prompt — and runs no inference, so it costs nothing.
  * Reads the key the app reads: ANTHROPIC_API_KEY, or ANTHROPIC_AUTH_TOKEN.
@@ -25,7 +32,7 @@ const count = (o: unknown): number =>
 async function main() {
   if (!process.env.ANTHROPIC_API_KEY && !process.env.ANTHROPIC_AUTH_TOKEN) {
     console.error('No ANTHROPIC_API_KEY or ANTHROPIC_AUTH_TOKEN in the environment.');
-    console.error('On the server:  set -a && . ./.env.production && set +a && npm run check:discovery-schema');
+    console.error('For a deployed host, use the route instead: GET /api/discovery/schema-check');
     process.exit(2);
   }
 

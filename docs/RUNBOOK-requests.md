@@ -126,6 +126,19 @@ docs/SPEC-requests.md, "Searching on page load", for why.
 becoming a search on every page load. It returns true, and takes the claim, in
 one statement, so two tabs opening the same request cannot both pay for it.
 
+Is the output schema being accepted? Ask the app — it runs no inference and
+costs nothing:
+
+```bash
+curl -s -b "atlas_session=$YOUR_SESSION" localhost:8001/api/discovery/schema-check
+```
+
+or just open `/api/discovery/schema-check` in a browser you are signed into.
+`accepted` means searches carry the structured-output guarantee; `rejected`
+means they are running on the prompt alone, which still works — see
+SEARCH_SCHEMA in lib/labDiscovery.ts. The server has no Node, so the
+equivalent `npm run check:discovery-schema` is for a laptop only.
+
 To see what it is costing:
 
 ```sql
