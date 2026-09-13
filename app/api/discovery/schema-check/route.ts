@@ -42,20 +42,22 @@ export async function GET() {
     }, { status: 503 });
   }
 
-  const request = {
+  // No max_tokens. count_tokens does not take it — it counts the input — and
+  // sending it is a 400 that reads exactly like a schema rejection would:
+  // `max_tokens: Extra inputs are not permitted`. That is what the first
+  // version of this route reported, which is why the shape below is typed by
+  // the SDK rather than cast past it.
+  const request: Anthropic.MessageCountTokensParams = {
     model: 'claude-opus-5',
-    max_tokens: 8000,
     system: [{ type: 'text', text: SEARCH_SYSTEM, cache_control: { type: 'ephemeral' } }],
-    tools: [{ type: 'web_search_20260209', name: 'web_search', max_uses: 3 }],
+    tools: [{ type: 'web_search_20260209', name: 'web_search', max_uses: 3 }] as never,
     messages: [{ role: 'user', content: searchPrompt('560001', 'Bengaluru', 'Karnataka', ['PATHOLOGY']) }],
+    output_config: { effort: 'medium', format: { type: 'json_schema', schema: SEARCH_SCHEMA } } as never,
   };
 
   const anthropic = new Anthropic({ timeout: 60_000, maxRetries: 0 });
   try {
-    const r = await anthropic.messages.countTokens({
-      ...request,
-      output_config: { effort: 'medium', format: { type: 'json_schema', schema: SEARCH_SCHEMA } },
-    } as never);
+    const r = await anthropic.messages.countTokens(request);
     return NextResponse.json({
       verdict: 'accepted',
       detail: 'Searches run with the structured-output guarantee.',

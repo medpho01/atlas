@@ -41,19 +41,17 @@ async function main() {
   console.log(`Schema: ${Object.keys(props).length} properties per lab, ${count(SEARCH_SCHEMA)} nodes.\n`);
 
   const anthropic = new Anthropic({ timeout: 60_000, maxRetries: 0 });
-  const request = {
+  // No max_tokens: count_tokens counts the input and rejects it outright.
+  const request: Anthropic.MessageCountTokensParams = {
     model: MODEL,
-    max_tokens: 8000,
     system: [{ type: 'text', text: SEARCH_SYSTEM, cache_control: { type: 'ephemeral' } }],
-    tools: [{ type: 'web_search_20260209', name: 'web_search', max_uses: 3 }],
+    tools: [{ type: 'web_search_20260209', name: 'web_search', max_uses: 3 }] as never,
     messages: [{ role: 'user', content: searchPrompt('560001', 'Bengaluru', 'Karnataka', ['PATHOLOGY']) }],
+    output_config: { effort: 'medium', format: { type: 'json_schema', schema: SEARCH_SCHEMA } } as never,
   };
 
   try {
-    const r = await anthropic.messages.countTokens({
-      ...request,
-      output_config: { effort: 'medium', format: { type: 'json_schema', schema: SEARCH_SCHEMA } },
-    } as never);
+    const r = await anthropic.messages.countTokens(request);
     console.log(`ACCEPTED — the schema is within the limit (${r.input_tokens} input tokens).`);
     console.log('Searches run with the structured-output guarantee.');
   } catch (e) {
