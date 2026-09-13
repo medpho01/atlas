@@ -4,7 +4,7 @@ import { revalidatePath } from 'next/cache';
 import { getSessionUser } from '@/lib/auth';
 import { queryOne } from '@/lib/db';
 import { canManage } from '@/lib/access';
-import { discoverForPincode } from '@/lib/discoverLabs';
+import { startDiscovery } from '@/lib/discoverLabs';
 
 type R = { ok: boolean; error?: string; id?: number };
 
@@ -84,7 +84,7 @@ export async function findLabsForPincode(
   pincode: string, city?: string | null, state?: string | null,
   disciplines?: string[] | null,
   trigger: 'manual' | 'request_page' = 'manual',
-): Promise<R & { found?: number; declined?: boolean }> {
+): Promise<R & { started?: boolean; declined?: boolean }> {
   const me = await getSessionUser();
   if (!me) return { ok: false, error: 'unauthenticated' };
   if (!canManage(me, 'commitments')) {
@@ -95,13 +95,26 @@ export async function findLabsForPincode(
   // more expensive staleness window.
   const t = trigger === 'request_page' ? 'request_page' : 'manual';
 
-  const r = await discoverForPincode(pincode, city, state, disciplines, { trigger: t });
-  revalidatePath(`/requests`);
+  // Started, not awaited.
+  //
+  // A search reads several listings and runs for minutes. Awaiting it held the
+  // browser's POST open for all of it, and in production that ended as a
+  // client-side exception after fifty seconds — a white page, on the request
+  // somebody was working, while the search itself was fine.
+  //
+  // So the action returns as soon as the claim is taken. The search carries on
+  // in this process and writes its result to atlas.discovery_run, which the
+  // card polls. Nothing is lost if the tab is closed, and no proxy between the
+  // browser and here has to hold a connection open for minutes.
+  const started = await startDiscovery(pincode, city, state, disciplines, t);
+  revalidatePath('/requests');
   // A declined claim is not a failure — somebody else is already searching
-  // this pincode, or it was answered recently enough. The caller re-reads
-  // rather than showing an error.
-  if (r.declined) return { ok: true, found: 0, declined: true };
-  return r.error ? { ok: false, error: r.error, found: 0 } : { ok: true, found: r.found };
+  // this pincode, or it was answered recently enough. The caller polls and
+  // sees their result.
+  if (started.error) return { ok: false, error: started.error };
+  return started.claimed
+    ? { ok: true, started: true }
+    : { ok: true, started: false, declined: true };
 }
 
 /**

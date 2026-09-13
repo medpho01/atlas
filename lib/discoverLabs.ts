@@ -175,10 +175,51 @@ async function search(
   }
 }
 
+/**
+ * Take the claim, then let the search run without anybody waiting on it.
+ *
+ * The claim is awaited because its answer is what the caller needs: whether
+ * this click bought a search or found one already running. The search itself
+ * is not — it runs for minutes, and holding an HTTP request open for that long
+ * is what put a white page in front of somebody working a request.
+ *
+ * Nothing is dropped by not awaiting it. Every outcome, including every
+ * failure, is written to atlas.discovery_run by discoverForPincode's own
+ * try/catch, which is where the card reads from. The one thing that must never
+ * happen here is an unhandled rejection taking the process down with it, so
+ * the promise carries its own catch.
+ */
+const NO_CREDENTIAL =
+  'No Anthropic credential in this container. The app loads .env.production, ' +
+  'not .env — the key has to be in the file compose actually reads. ' +
+  'ANTHROPIC_API_KEY is documented in .env.production.example.';
+
+const hasCredential = () =>
+  !!(process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_AUTH_TOKEN);
+
+export async function startDiscovery(
+  pincode: string, city?: string | null, state?: string | null,
+  disciplines?: string[] | null,
+  trigger: DiscoveryTrigger = 'manual',
+): Promise<{ claimed: boolean; error?: string }> {
+  // Before the claim, not after. A claim taken for a search that cannot start
+  // leaves the row marked in-flight with nothing running, and the card then
+  // says "a search is already running" for two minutes about nothing.
+  if (!hasCredential()) return { claimed: false, error: NO_CREDENTIAL };
+
+  const staleDays = trigger === 'request_page' ? DISCOVERY_STALE_DAYS : 0;
+  if (!(await claim(pincode, staleDays, trigger))) return { claimed: false };
+
+  // Claimed already, so tell discoverForPincode not to claim again.
+  void discoverForPincode(pincode, city, state, disciplines, { trigger, claimed: true })
+    .catch((e) => console.error(`[discovery] ${pincode}: unhandled`, e));
+  return { claimed: true };
+}
+
 export async function discoverForPincode(
   pincode: string, city?: string | null, state?: string | null,
   disciplines?: string[] | null,
-  opts: { trigger?: DiscoveryTrigger; staleDays?: number } = {},
+  opts: { trigger?: DiscoveryTrigger; staleDays?: number; claimed?: boolean } = {},
 ): Promise<DiscoveryResult> {
   const trigger = opts.trigger ?? 'manual';
   // A human clicking "Search again" gets 0 — they asked for it, so only the
@@ -186,18 +227,12 @@ export async function discoverForPincode(
   // staleness window, because nobody asked and it has to justify the spend.
   const staleDays = opts.staleDays ?? (trigger === 'request_page' ? DISCOVERY_STALE_DAYS : 0);
 
-  if (!process.env.ANTHROPIC_API_KEY && !process.env.ANTHROPIC_AUTH_TOKEN) {
-    return {
-      found: 0,
-      error: 'No Anthropic credential in this container. The app loads .env.production, ' +
-             'not .env — the key has to be in the file compose actually reads. ' +
-             'ANTHROPIC_API_KEY is documented in .env.production.example.',
-    };
-  }
+  if (!hasCredential()) return { found: 0, error: NO_CREDENTIAL };
 
   // Claimed before a rupee is spent. Two tabs opening the same request race
   // here and exactly one wins; the loser renders the winner's result.
-  if (!(await claim(pincode, staleDays, trigger))) {
+  // startDiscovery has usually taken the claim already and says so.
+  if (!opts.claimed && !(await claim(pincode, staleDays, trigger))) {
     return { found: 0, declined: true };
   }
 

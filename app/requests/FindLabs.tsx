@@ -45,21 +45,63 @@ export function FindLabs({
   // True only for a search this component started without being asked, so the
   // card can explain itself to somebody who clicked nothing.
   const [auto, setAuto] = useState(!!autoSearch);
+  // True while this tab is waiting on a search — its own or one it found
+  // already in flight.
+  const [watching, setWatching] = useState(false);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  /**
+   * Start a search, then watch for it to finish.
+   *
+   * The action no longer waits for the search — it takes the claim and
+   * returns, because awaiting a two-minute search over an HTTP request is what
+   * put a white page in front of this card. So the wait happens here, by
+   * asking a one-row endpoint every few seconds, and the card re-reads when
+   * the run row says there is something to read.
+   */
   const run = (trigger: 'manual' | 'request_page') => start(async () => {
+    setMsg(null);
     const r = await runAction(() => findLabsForPincode(pincode, city, state, disciplines, trigger));
-    setMsg(r.ok
-      ? ('declined' in r && r.declined
-          // Somebody else got the claim between the page rendering and this
-          // firing. Their result is the one to show, so just re-read.
-          ? 'already being searched'
-          : (r.found ? `${r.found} lead${r.found === 1 ? '' : 's'} found` : 'nothing found'))
-      : (r.error ?? 'search failed'));
-    // revalidatePath in the action is not enough on its own: the leads are
-    // rendered by a server component, and without this the new rows do not
-    // appear until the next navigation.
+    if (!r.ok) { setMsg(r.error ?? 'search failed'); return; }
+    setWatching(true);
     router.refresh();
   });
+
+  // Poll while a search is running — this tab's or anybody else's.
+  useEffect(() => {
+    if (!watching && !running) return;
+    let stop = false;
+    let tries = 0;
+    const tick = async () => {
+      if (stop) return;
+      tries += 1;
+      try {
+        const res = await fetch(`/api/discovery/run?pincode=${pincode}`, { cache: 'no-store' });
+        const row = await res.json() as { running?: boolean; found?: number | null; error?: string | null };
+        if (!row.running) {
+          setWatching(false);
+          setMsg(row.error
+            ? row.error
+            : row.found
+              ? `${row.found} lead${row.found === 1 ? '' : 's'} found`
+              : 'nothing found');
+          // The leads are rendered by a server component, so the rows only
+          // appear once the page is re-read.
+          router.refresh();
+          return;
+        }
+      } catch {
+        // A failed poll is not a failed search. Keep watching.
+      }
+      // Six minutes at five seconds, comfortably past the three-minute ceiling
+      // the search itself runs under.
+      if (tries < 72) timer.current = setTimeout(tick, 5000);
+      else { setWatching(false); setMsg('still running — reload in a moment'); }
+    };
+    timer.current = setTimeout(tick, 4000);
+    return () => { stop = true; if (timer.current) clearTimeout(timer.current); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [watching, running, pincode]);
 
   // Fire once, ever.
   //
@@ -76,28 +118,30 @@ export function FindLabs({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const busy = pending || watching;
+
   useEffect(() => {
-    if (!pending) { setSecs(0); return; }
+    if (!busy) { setSecs(0); return; }
     const t = setInterval(() => setSecs((n) => n + 1), 1000);
     return () => clearInterval(t);
-  }, [pending]);
+  }, [busy]);
 
   return (
     <div className="space-y-1.5">
       <div className="flex flex-wrap items-center gap-2">
         <button
           type="button"
-          disabled={pending}
+          disabled={busy}
           onClick={() => { setAuto(false); run('manual'); }}
           className="inline-flex items-center gap-1.5 rounded-md border border-brand-200 dark:border-brand-100
                      bg-brand-50 text-brand-700 dark:text-brand-400 px-2.5 py-1.5 text-xs font-medium
                      hover:bg-brand-100 disabled:opacity-50"
         >
-          {pending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Search className="w-3.5 h-3.5" />}
-          {pending ? `Searching the web… ${secs}s` : 'Search again'}
+          {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Search className="w-3.5 h-3.5" />}
+          {busy ? `Searching the web… ${secs}s` : 'Search again'}
         </button>
         {msg && <span className="text-[11px] text-ink-600">{msg}</span>}
-        {!msg && !pending && lastRun && (
+        {!msg && !busy && lastRun && (
           <span className="text-[11px] text-ink-400">
             Last searched {new Date(lastRun).toLocaleString('en-IN',
               { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' })}
@@ -107,7 +151,7 @@ export function FindLabs({
         {/* A stored failure with no date reads as current. This one sent an
             afternoon chasing an API error that had already been fixed by adding
             credits — the search just had not been retried. */}
-        {!msg && !pending && error && (
+        {!msg && !busy && error && (
           <span className="text-[11px] text-ink-500">
             Previous attempt failed
             {lastRun && ` on ${new Date(lastRun).toLocaleString('en-IN',
@@ -118,22 +162,30 @@ export function FindLabs({
       </div>
 
       {/* Somebody who clicked nothing is owed a reason the page is working. */}
-      {pending && auto && (
+      {busy && auto && (
         <p className="text-[11px] text-ink-500">
           No lab in the network reaches {pincode}, so Atlas is searching the open web
-          without waiting to be asked. Usually 20–40 seconds. Nothing is contacted —
+          without waiting to be asked. A minute or two. Nothing is contacted —
           these come back as leads to phone.
         </p>
       )}
-      {!pending && running && !msg && (
+      {busy && !auto && (
         <p className="text-[11px] text-ink-500">
-          A search for {pincode} is already running — started from another tab or by the
-          nightly job. Reload in a moment to see what it found.
+          Searching the open web for {pincode}. It reads several listings, so it takes a
+          minute or two — this page updates itself when it is done, and the search
+          carries on even if you navigate away.
         </p>
       )}
-      {pending && secs > 50 && (
+      {!busy && running && !msg && (
+        <p className="text-[11px] text-ink-500">
+          A search for {pincode} is already running — started from another tab or by the
+          nightly job. This page will update when it finishes.
+        </p>
+      )}
+      {busy && secs > 180 && (
         <p className="text-[11px] text-warn-600">
-          Taking longer than usual — it gives up at 45s and will report why.
+          Longer than the three-minute ceiling. The result will still be recorded —
+          reload in a moment.
         </p>
       )}
     </div>
