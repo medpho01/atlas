@@ -113,11 +113,12 @@ Rules:
   site". POSITIVE EVIDENCE ONLY. Leave the field out unless the page actually
   tells you something is absent; a page that simply does not mention imaging is
   not evidence that there is none, and must not appear here.
-- services: notable named tests or equipment you saw (e.g. "MRI 1.5T", "CBC",
-  "TMT", "home sample collection"). A handful at most, roughly as published.
-- accreditation: recognised marks the provider claims — NABL, CAP, ICMR, NABH,
-  ISO. Empty list if none is published; do not infer one from words like
-  "certified" or "trusted".
+- services: notable named tests or equipment you saw, comma-separated in one
+  line (e.g. "MRI 1.5T, CBC, TMT, home sample collection"). A handful at most,
+  roughly as published.
+- accreditation: recognised marks the provider claims, comma-separated in one
+  line — NABL, CAP, ICMR, NABH, ISO. Leave the field out if none is published;
+  do not infer one from words like "certified" or "trusted".
 - rating and rating_count: the public rating and how many reviews it is over,
   from the same source. Both together or neither — a rating with no count
   cannot be weighed and is treated as unrated.
@@ -151,8 +152,13 @@ export const SEARCH_SCHEMA = {
           confidence: { type: 'number' },
           disciplines: { type: 'array', items: { type: 'string', enum: DISCIPLINES } },
           disciplines_absent: { type: 'array', items: { type: 'string', enum: DISCIPLINES } },
-          services: { type: 'array', items: { type: 'string' } },
-          accreditation: { type: 'array', items: { type: 'string' } },
+          // Comma-separated strings, not arrays. The API rejected the
+          // schema outright — "Schema is too complex" — and these two were
+          // the cheapest nodes to give up: both are free text nobody queries
+          // structurally, and splitLine() turns them back into the text[]
+          // columns the table and the scoring already use.
+          services: { type: 'string' },
+          accreditation: { type: 'string' },
           rating: { type: 'number' },
           rating_count: { type: 'integer' },
           home_collection: { type: 'boolean' },
@@ -170,6 +176,24 @@ export const SEARCH_SCHEMA = {
   required: ['labs'],
   additionalProperties: false,
 } as const;
+
+/**
+ * A comma-separated line back into the array the table stores.
+ *
+ * The schema asks for a string because the structured-output schema had to
+ * lose nodes; everything downstream — the column, the scoring, the card —
+ * still works in arrays, so the conversion belongs here at the boundary and
+ * nowhere else.
+ */
+export function splitLine(v: unknown): string[] | null {
+  if (Array.isArray(v)) {
+    const kept = v.map((x) => String(x).trim()).filter(Boolean);
+    return kept.length ? kept : null;
+  }
+  if (typeof v !== 'string') return null;
+  const parts = v.split(/[,;]/).map((x) => x.trim()).filter(Boolean);
+  return parts.length ? parts : null;
+}
 
 /** One provider, as the search reports it and as the table stores it. */
 export type LabFacts = {

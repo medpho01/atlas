@@ -28,7 +28,7 @@ import { Pool } from 'pg';
 import Anthropic from '@anthropic-ai/sdk';
 import {
   SEARCH_SYSTEM, SEARCH_SCHEMA, searchPrompt, DISCOVERY_STALE_DAYS, scoreLead,
-  type LabFacts,
+  type LabFacts, splitLine,
 } from '../lib/labDiscovery';
 
 const MODEL = 'claude-opus-5';
@@ -132,7 +132,14 @@ async function search(t: Target): Promise<FoundLab[]> {
   }
   const text = response.content.filter((b: { type: string }) => b.type === 'text').pop();
   if (!text || text.type !== 'text') throw new Error('No text block in response');
-  return JSON.parse(text.text).labs as FoundLab[];
+  const labs = JSON.parse(text.text).labs as FoundLab[];
+  // Same boundary conversion as the app: the schema asks for comma-separated
+  // lines, the table and the scoring work in arrays.
+  return labs.map((l) => ({
+    ...l,
+    services: splitLine(l.services),
+    accreditation: splitLine(l.accreditation),
+  }));
 }
 
 /**

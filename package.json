@@ -17,7 +17,8 @@
     "test:scoring": "tsx scripts/test-lab-scoring.ts",
     "test:discovery-read": "tsx --conditions=react-server scripts/test-discovery-read.ts",
     "test:discovery-db": "./scripts/test-discovery-db.sh",
-    "commitments:sync": "./scripts/sync-commitments.sh"
+    "commitments:sync": "./scripts/sync-commitments.sh",
+    "check:discovery-schema": "tsx scripts/check-discovery-schema.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.115.0",

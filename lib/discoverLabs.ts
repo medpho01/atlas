@@ -4,7 +4,7 @@ import { query, queryOne } from './db';
 import {
   SEARCH_SYSTEM, SEARCH_SCHEMA, searchPrompt, DISCOVERY_STALE_DAYS,
   scoreLead, rankLeads, num, isSearchRunning, shouldAutoSearch,
-  type LabFacts, type RunRow, type Ranked, autoSearchEnabled,
+  type LabFacts, type RunRow, type Ranked, autoSearchEnabled, splitLine,
 } from './labDiscovery';
 
 /**
@@ -100,6 +100,81 @@ async function claim(
   }
 }
 
+/**
+ * One search, with the structured-output schema — and without it if the API
+ * will not take the schema.
+ *
+ * Production answered `HTTP 400: Schema is too complex`, which took the whole
+ * feature down: every search failed, and the only way back was a deploy. The
+ * schema has been slimmed (see SEARCH_SCHEMA), but a limit nobody can read
+ * from here is a limit that can be hit again by adding one field, so the
+ * failure is now recoverable in flight.
+ *
+ * The fallback keeps the same prompt — which describes every field and asks
+ * for JSON — and loses only the guarantee that the answer parses. A malformed
+ * answer was always possible and is already handled: it throws, and the run
+ * records the error.
+ */
+/**
+ * Set once the API has told us it will not take the schema.
+ *
+ * Without it every search pays for a rejected request before the retry that
+ * works. The limit is a property of the API and the schema, not of the
+ * pincode, so one answer holds for the life of the process — and a deploy
+ * clears it, which is the right granularity for something a schema edit
+ * changes.
+ */
+let schemaRejected = false;
+
+async function search(
+  anthropic: Anthropic,
+  pincode: string, city?: string | null, state?: string | null,
+  disciplines?: string[] | null,
+): Promise<{
+  stop_reason?: string | null;
+  stop_details?: { category?: string | null } | null;
+  content: { type: string; text?: string }[];
+}> {
+  const request = {
+    model: MODEL,
+    // 4000 was enough for four labs of name, address and phone. The schema
+    // now asks for disciplines, accreditation, ratings, hours and a note per
+    // lab, and a truncated response is a parse failure, not a short list.
+    max_tokens: 8000,
+    system: [{ type: 'text', text: SEARCH_SYSTEM, cache_control: { type: 'ephemeral' } }],
+    // Four, not six: each use pulls page content back through the model,
+    // and memory is the binding constraint in this container.
+    tools: [{ type: 'web_search_20260209', name: 'web_search', max_uses: 3 }],
+    messages: [{ role: 'user', content: searchPrompt(pincode, city, state, disciplines) }],
+  };
+  // 'medium', not 'low'. At low effort the model answers out of the search
+  // snippets and leaves every new field empty — which makes every lead score
+  // alike and the whole ranking pointless. Reading a listing closely enough
+  // to say whether it claims NABL is the work here, not a lookup.
+  const withSchema = {
+    ...request,
+    output_config: { effort: 'medium', format: { type: 'json_schema', schema: SEARCH_SCHEMA } },
+  };
+
+  const withoutSchema = { ...request, output_config: { effort: 'medium' } };
+
+  if (schemaRejected) {
+    return await anthropic.messages.stream(withoutSchema as never).finalMessage();
+  }
+  try {
+    return await anthropic.messages.stream(withSchema as never).finalMessage();
+  } catch (e) {
+    const err = e as { status?: number; message?: string };
+    const isSchema = err?.status === 400 && /schema/i.test(err?.message ?? '');
+    if (!isSchema) throw e;
+    schemaRejected = true;
+    console.warn(`[discovery] ${pincode}: the API rejected the output schema (${err.message}). ` +
+                 'Falling back to the prompt alone for the rest of this process — ' +
+                 'run `npm run check:discovery-schema` to see whether it still fits.');
+    return await anthropic.messages.stream(withoutSchema as never).finalMessage();
+  }
+}
+
 export async function discoverForPincode(
   pincode: string, city?: string | null, state?: string | null,
   disciplines?: string[] | null,
@@ -144,33 +219,29 @@ export async function discoverForPincode(
     // waiting on, and the claim row means the next click picks up where this
     // left off rather than starting again from nothing.
     const anthropic = new Anthropic({ timeout: 180_000, maxRetries: 0 });
-    const stream = anthropic.messages.stream({
-      model: MODEL,
-      // 4000 was enough for four labs of name, address and phone. The schema
-      // now asks for disciplines, accreditation, ratings, hours and a note per
-      // lab, and a truncated response is a parse failure, not a short list.
-      max_tokens: 8000,
-      system: [{ type: 'text', text: SEARCH_SYSTEM, cache_control: { type: 'ephemeral' } }],
-      // Four, not six: each use pulls page content back through the model,
-      // and memory is the binding constraint in this container.
-      tools: [{ type: 'web_search_20260209', name: 'web_search', max_uses: 3 }],
-      // 'medium', not 'low'. At low effort the model answers out of the search
-      // snippets and leaves every new field empty — which makes every lead
-      // score alike and the whole ranking pointless. Reading a listing closely
-      // enough to say whether it claims NABL is the work here, not a lookup.
-      output_config: { effort: 'medium', format: { type: 'json_schema', schema: SEARCH_SCHEMA } },
-      messages: [{ role: 'user', content: searchPrompt(pincode, city, state, disciplines) }],
-    } as never);
-    const response = await stream.finalMessage();
+    const response = await search(anthropic, pincode, city, state, disciplines);
 
     if (response.stop_reason === 'refusal') {
       throw new Error(`Model declined (${response.stop_details?.category ?? 'no category'})`);
     }
-    const text = response.content.filter((b: { type: string }) => b.type === 'text').pop();
-    if (!text || text.type !== 'text') throw new Error('No text block in response');
-    const labs = JSON.parse(text.text).labs as (LabFacts & {
+    const text = response.content.filter((b) => b.type === 'text').pop();
+    // Without the schema the answer is prose-shaped JSON, so take the last
+    // text block and the outermost braces in it rather than assuming the
+    // block is nothing but JSON.
+    const body = text?.text?.trim();
+    if (!body) throw new Error('No text block in response');
+    const json = body.startsWith('{') ? body : body.slice(body.indexOf('{'), body.lastIndexOf('}') + 1);
+    if (!json) throw new Error('No JSON object in the response text');
+    const raw = JSON.parse(json).labs as (LabFacts & {
       name: string; address?: string; source_url: string; confidence: number;
     })[];
+    // services and accreditation come back as comma-separated lines now — see
+    // SEARCH_SCHEMA. Everything downstream works in arrays.
+    const labs = raw.map((l) => ({
+      ...l,
+      services: splitLine(l.services),
+      accreditation: splitLine(l.accreditation),
+    }));
 
     for (const l of labs) await storeLead(pincode, city, state, l);
 
