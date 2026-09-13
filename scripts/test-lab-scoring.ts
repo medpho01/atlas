@@ -16,7 +16,7 @@
 import {
   scoreLead, rankLeads, scoreBand, adjustedRating, shouldAutoSearch, isSearchRunning,
   autoSearchEnabled, readLabs, type SearchAnswer,
-  maxSearchUses, estimateCostUsd,
+  maxSearchUses, estimateCostUsd, discoveryEnabled,
   WEIGHTS, WEIGHT_TOTAL, num, type LabFacts, type RunRow,
 } from '../lib/labDiscovery';
 
@@ -515,6 +515,18 @@ To get a real answer, raise the search budget.`;
                                 cache_read_input_tokens: 50_000 });
   check('a cost estimate is in the right order of magnitude', usd > 1 && usd < 2);
   check('no usage means no cost', estimateCostUsd(null) === 0);
+}
+
+
+// The switch. Off is the default, and only an explicit on turns it on.
+{
+  check('discovery is off when nothing is set', !discoveryEnabled(undefined));
+  check('discovery is off for an empty value', !discoveryEnabled(''));
+  check('discovery is off for "off"', !discoveryEnabled('off'));
+  check('discovery is off for "false"', !discoveryEnabled('false'));
+  check('discovery is on for "on"', discoveryEnabled('on'));
+  check('discovery is on for "1" and "true"', discoveryEnabled('1') && discoveryEnabled('true'));
+  check('discovery ignores case and space', discoveryEnabled('  ON '));
 }
 
 // ---------------------------------------------------------------------------

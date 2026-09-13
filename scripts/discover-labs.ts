@@ -28,7 +28,7 @@ import { Pool } from 'pg';
 import Anthropic from '@anthropic-ai/sdk';
 import {
   SEARCH_SYSTEM, SEARCH_SCHEMA, searchPrompt, DISCOVERY_STALE_DAYS, scoreLead,
-  type LabFacts, splitLine,
+  type LabFacts, splitLine, discoveryEnabled,
 } from '../lib/labDiscovery';
 
 const MODEL = 'claude-opus-5';
@@ -199,6 +199,14 @@ async function store(t: Target, l: FoundLab) {
 }
 
 async function main() {
+  if (!discoveryEnabled()) {
+    console.error(
+      'Web lab discovery is switched off (DISCOVERY_ENABLED is not "on").\n' +
+      'It works, but at about $1.50 a pincode for fields a places API returns\n' +
+      'for a fraction of that. See .env.production.example.');
+    process.exit(2);
+  }
+
   const list = await targets();
   console.log(`${list.length} pincode(s) to search` +
     (ONE ? '' : ` (unsearched or older than ${STALE_DAYS} days, busiest first)`));

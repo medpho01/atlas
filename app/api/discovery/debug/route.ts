@@ -3,7 +3,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import { getSessionUser } from '@/lib/auth';
 import { canManage } from '@/lib/access';
 import { search } from '@/lib/discoverLabs';
-import { readLabs, estimateCostUsd, maxSearchUses } from '@/lib/labDiscovery';
+import { readLabs, estimateCostUsd, maxSearchUses, discoveryEnabled } from '@/lib/labDiscovery';
 
 export const dynamic = 'force-dynamic';
 
@@ -62,6 +62,13 @@ export async function GET(req: NextRequest) {
       seconds: Math.round((Date.now() - existing.startedAt) / 1000),
       note: 'Reload this URL in a few seconds. A search reads several listings.',
     });
+  }
+
+  // This probe is a real search with a real bill, so the switch governs it too.
+  if (!discoveryEnabled()) {
+    return NextResponse.json({
+      error: 'Web lab discovery is switched off (DISCOVERY_ENABLED). This probe runs a real search, so it is off too.',
+    }, { status: 503 });
   }
 
   const key = process.env.ANTHROPIC_API_KEY ?? process.env.ANTHROPIC_AUTH_TOKEN;

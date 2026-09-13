@@ -12,7 +12,7 @@ import {
 } from '@/lib/requestQueries';
 import {
   lastDiscoveryRun, rankedLeadsForPincode, shouldAutoSearch, isSearchRunning,
-  autoSearchEnabled,
+  autoSearchEnabled, discoveryEnabled,
 } from '@/lib/discoverLabs';
 import {
   STATE_SHORT, STATE_TONE, TONE_CHIP, BASIS_LABEL, BASIS_STRENGTH, DISCIPLINE_LABEL,
@@ -78,7 +78,10 @@ export default async function RequestDetail({ params }: { params: { id: string }
   // Off by default — see autoSearchEnabled(). Everything else that had to be
   // true still has to be true, so turning the flag on restores exactly the
   // behaviour the tests cover rather than a looser version of it.
-  const autoSearch = autoSearchEnabled()
+  // Switched off for now — see discoveryEnabled(). Existing leads are still
+  // shown where a pincode has them; what stops is spending money on new ones.
+  const discoveryOn = discoveryEnabled();
+  const autoSearch = discoveryOn && autoSearchEnabled()
     && !!r.pincode && noLabHere && leads.length === 0
     && canManage(gate.user, 'commitments') && shouldAutoSearch(lastRun);
   const searchRunning = isSearchRunning(lastRun);
@@ -235,7 +238,7 @@ export default async function RequestDetail({ params }: { params: { id: string }
             </CardBody>
           </Card>
 
-          {(noLabHere || leads.length > 0) && r.pincode && (
+          {((discoveryOn && noLabHere) || leads.length > 0) && r.pincode && (
             <Card>
               <CardHeader
                 title="Labs found on the open web"
@@ -243,21 +246,30 @@ export default async function RequestDetail({ params }: { params: { id: string }
                   ? 'Unverified search results, best call first — leads to phone, not network records.'
                   : 'Unverified search results — leads to call, not network records.'} />
               <CardBody className="pt-0">
-                <div className="mb-3">
-                  <FindLabs pincode={r.pincode} city={r.city} state={r.state_name}
-                            lastRun={lastRun?.ran_at ?? null} found={lastRun?.found ?? null}
-                            error={lastRun?.error ?? null}
-                            disciplines={r.disciplines}
-                            autoSearch={autoSearch} running={searchRunning} />
-                  {lastRun?.error && (
-                    <p className="text-[11px] text-ink-500 mt-1">
-                      <span className="text-danger-500">{lastRun.error}</span>
-                    </p>
-                  )}
-                </div>
+                {discoveryOn ? (
+                  <div className="mb-3">
+                    <FindLabs pincode={r.pincode} city={r.city} state={r.state_name}
+                              lastRun={lastRun?.ran_at ?? null} found={lastRun?.found ?? null}
+                              error={lastRun?.error ?? null}
+                              disciplines={r.disciplines}
+                              autoSearch={autoSearch} running={searchRunning} />
+                    {lastRun?.error && (
+                      <p className="text-[11px] text-ink-500 mt-1">
+                        <span className="text-danger-500">{lastRun.error}</span>
+                      </p>
+                    )}
+                  </div>
+                ) : (
+                  // Leads from before the pause are still worth calling; new
+                  // ones are what has stopped.
+                  <p className="text-[11px] text-ink-500 mb-3">
+                    Searching the open web is switched off for now. These are
+                    what earlier searches found.
+                  </p>
+                )}
                 {/* Only when the page is not about to search anyway —
                     otherwise this contradicts the spinner underneath it. */}
-                {leads.length === 0 && !autoSearch && !searchRunning && (
+                {discoveryOn && leads.length === 0 && !autoSearch && !searchRunning && (
                   <p className="text-xs text-ink-500">
                     Nothing found yet for {r.pincode}. Searching costs a few seconds and the
                     results are cached, so it is worth doing once per pincode rather than once

@@ -139,6 +139,18 @@ means they are running on the prompt alone, which still works — see
 SEARCH_SCHEMA in lib/labDiscovery.ts. The server has no Node, so the
 equivalent `npm run check:discovery-schema` is for a laptop only.
 
+Switched off
+------------
+
+Web lab discovery is off by default (`DISCOVERY_ENABLED`). While it is off,
+nothing claims a pincode, nothing reaches the API and nothing is billed; the
+card disappears from requests that have no leads, and any leads found earlier
+are still listed. `scripts/discover-labs.ts` exits, and the debug probe
+refuses, because it runs a real search.
+
+To turn it back on, set `DISCOVERY_ENABLED=on` in `.env.production` and
+restart atlas-web. The rest of this section applies when it is on.
+
 What one search costs, and how to spend less
 --------------------------------------------
 

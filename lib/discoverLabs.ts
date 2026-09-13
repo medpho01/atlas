@@ -5,7 +5,7 @@ import {
   SEARCH_SYSTEM, SEARCH_SCHEMA, searchPrompt, DISCOVERY_STALE_DAYS,
   scoreLead, rankLeads, num, isSearchRunning, shouldAutoSearch,
   type LabFacts, type RunRow, type Ranked, autoSearchEnabled, splitLine,
-  maxSearchUses, estimateCostUsd, type SearchUsage,
+  maxSearchUses, estimateCostUsd, type SearchUsage, discoveryEnabled,
   readLabs, MAX_CONTINUATIONS, type SearchAnswer,
 } from './labDiscovery';
 
@@ -34,7 +34,7 @@ const MODEL = 'claude-opus-5';
 // predicates and the reads from one place, while the logic itself stays
 // testable without Next. shouldAutoSearch mirrors atlas.claim_discovery's
 // WHERE clause and is fixture-tested in scripts/test-lab-scoring.ts.
-export { isSearchRunning, shouldAutoSearch, autoSearchEnabled, readLabs };
+export { isSearchRunning, shouldAutoSearch, autoSearchEnabled, readLabs, discoveryEnabled };
 export type { SearchAnswer };
 
 /**
@@ -276,6 +276,11 @@ export async function search(
  * happen here is an unhandled rejection taking the process down with it, so
  * the promise carries its own catch.
  */
+const DISABLED =
+  'Web lab discovery is switched off. It works, but at about a dollar and a half ' +
+  'a pincode for data a places API returns for a fraction of that — see ' +
+  'DISCOVERY_ENABLED in .env.production.example.';
+
 const NO_CREDENTIAL =
   'No Anthropic credential in this container. The app loads .env.production, ' +
   'not .env — the key has to be in the file compose actually reads. ' +
@@ -289,6 +294,10 @@ export async function startDiscovery(
   disciplines?: string[] | null,
   trigger: DiscoveryTrigger = 'manual',
 ): Promise<{ claimed: boolean; error?: string }> {
+  // Before everything. A disabled feature must not claim a pincode, must not
+  // reach the API, and must not leave a row behind saying it tried.
+  if (!discoveryEnabled()) return { claimed: false, error: DISABLED };
+
   // Before the claim, not after. A claim taken for a search that cannot start
   // leaves the row marked in-flight with nothing running, and the card then
   // says "a search is already running" for two minutes about nothing.
@@ -314,6 +323,7 @@ export async function discoverForPincode(
   // staleness window, because nobody asked and it has to justify the spend.
   const staleDays = opts.staleDays ?? (trigger === 'request_page' ? DISCOVERY_STALE_DAYS : 0);
 
+  if (!discoveryEnabled()) return { found: 0, error: DISABLED };
   if (!hasCredential()) return { found: 0, error: NO_CREDENTIAL };
 
   // Claimed before a rupee is spent. Two tabs opening the same request race

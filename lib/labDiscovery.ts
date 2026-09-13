@@ -831,3 +831,24 @@ export function estimateCostUsd(u?: SearchUsage | null): number {
   const outTok = u.output_tokens ?? 0;
   return Math.round(((inTok * 5 + cached * 0.5 + outTok * 25) / 1e6) * 10000) / 10000;
 }
+
+/**
+ * Is web discovery switched on at all?
+ *
+ * Off unless DISCOVERY_ENABLED says otherwise, and off is the default on
+ * purpose. The feature works — a search for 413736 returned three real,
+ * callable labs — but it costs about a dollar and a half a pincode, because it
+ * has a language model read the open web when what the ranking actually needs
+ * is a name, an address, a phone number, a rating and a review count. Those
+ * are places-API fields, at roughly a fiftieth of the price and in under a
+ * second, and the ranking does not care where they came from.
+ *
+ * So this is a pause, not a deletion. Everything downstream of the source —
+ * the scoring, the reasons and caveats, the card, the claim, the storage, the
+ * promote-to-CRM path — is source-agnostic and stays. Set DISCOVERY_ENABLED=on
+ * to turn the current source back on in the meantime.
+ */
+export function discoveryEnabled(env = process.env.DISCOVERY_ENABLED): boolean {
+  const v = (env ?? '').trim().toLowerCase();
+  return v === 'on' || v === '1' || v === 'true';
+}
