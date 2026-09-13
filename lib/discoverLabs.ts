@@ -5,6 +5,7 @@ import {
   SEARCH_SYSTEM, SEARCH_SCHEMA, searchPrompt, DISCOVERY_STALE_DAYS,
   scoreLead, rankLeads, num, isSearchRunning, shouldAutoSearch,
   type LabFacts, type RunRow, type Ranked, autoSearchEnabled, splitLine,
+  maxSearchUses, estimateCostUsd, type SearchUsage,
   readLabs, MAX_CONTINUATIONS, type SearchAnswer,
 } from './labDiscovery';
 
@@ -186,7 +187,7 @@ export async function search(
     // searches this feature exists to make are several queries deep, and
     // dynamic filtering spends some of the budget on code execution of its
     // own, so the limit was being reached before the work was done.
-    tools: [{ type: 'web_search_20260209', name: 'web_search', max_uses: 10 }],
+    tools: [{ type: 'web_search_20260209', name: 'web_search', max_uses: maxSearchUses() }],
     messages: [{ role: 'user', content: searchPrompt(pincode, city, state, disciplines) }],
   };
   // 'medium', not 'low'. At low effort the model answers out of the search
@@ -224,13 +225,26 @@ export async function search(
     let answer = await once(body);
     const messages = [...body.messages];
     let continuations = 0;
+    // Usage accumulates across continuations — each one is a billed request.
+    const total: SearchUsage = { input_tokens: 0, output_tokens: 0,
+                                 cache_read_input_tokens: 0, cache_creation_input_tokens: 0 };
+    const add = (u?: SearchUsage) => {
+      total.input_tokens = (total.input_tokens ?? 0) + (u?.input_tokens ?? 0);
+      total.output_tokens = (total.output_tokens ?? 0) + (u?.output_tokens ?? 0);
+      total.cache_read_input_tokens = (total.cache_read_input_tokens ?? 0) + (u?.cache_read_input_tokens ?? 0);
+      total.cache_creation_input_tokens =
+        (total.cache_creation_input_tokens ?? 0) + (u?.cache_creation_input_tokens ?? 0);
+      if (u?.server_tool_use) total.server_tool_use = u.server_tool_use;
+    };
+    add(answer.usage);
     while (answer.stop_reason === 'pause_turn' && continuations < MAX_CONTINUATIONS) {
       continuations += 1;
       messages.push({ role: 'assistant', content: answer.content });
       console.warn(`[discovery] ${pincode}: server paused the tool loop, resuming (${continuations})`);
       answer = await once({ ...body, messages });
+      add(answer.usage);
     }
-    return { ...answer, continuations };
+    return { ...answer, continuations, usage: total };
   };
 
   if (schemaRejected) return await withResume(withoutSchema);
@@ -340,6 +354,13 @@ export async function discoverForPincode(
       services: splitLine(l.services),
       accreditation: splitLine(l.accreditation),
     }));
+
+    const cost = estimateCostUsd(response.usage);
+    const searches = response.usage?.server_tool_use?.web_search_requests ?? '?';
+    console.log(
+      `[discovery] ${pincode}: ${labs.length} lead(s), ${searches} web search(es), ` +
+      `${response.usage?.input_tokens ?? '?'} in / ${response.usage?.output_tokens ?? '?'} out ` +
+      `(+${response.usage?.cache_read_input_tokens ?? 0} cached) ≈ $${cost.toFixed(3)}`);
 
     for (const l of labs) await storeLead(pincode, city, state, l);
 

@@ -16,6 +16,7 @@
 import {
   scoreLead, rankLeads, scoreBand, adjustedRating, shouldAutoSearch, isSearchRunning,
   autoSearchEnabled, readLabs, type SearchAnswer,
+  maxSearchUses, estimateCostUsd,
   WEIGHTS, WEIGHT_TOTAL, num, type LabFacts, type RunRow,
 } from '../lib/labDiscovery';
 
@@ -496,6 +497,24 @@ To get a real answer, raise the search budget.`;
   check('JSON wrapped in prose still parses', labs.length === 1 && labs[0].name === 'A');
   check('an empty labs array is an answer, not a failure',
     readLabs(answer({ content: [{ type: 'text', text: '{"labs":[]}' }] })).length === 0);
+}
+
+
+// ---------------------------------------------------------------------------
+// What a search is allowed to cost
+// ---------------------------------------------------------------------------
+{
+  check('max uses defaults to 10', maxSearchUses(undefined) === 10);
+  check('max uses can be dialled down without a deploy', maxSearchUses('4') === 4);
+  check('max uses is clamped at 20', maxSearchUses('500') === 20);
+  check('max uses is never zero', maxSearchUses('0') === 1);
+  check('rubbish falls back to the default', maxSearchUses('lots') === 10);
+
+  // 200k in, 4k out, 50k of it cached: (200000*5 + 50000*0.5 + 4000*25) / 1e6
+  const usd = estimateCostUsd({ input_tokens: 200_000, output_tokens: 4_000,
+                                cache_read_input_tokens: 50_000 });
+  check('a cost estimate is in the right order of magnitude', usd > 1 && usd < 2);
+  check('no usage means no cost', estimateCostUsd(null) === 0);
 }
 
 // ---------------------------------------------------------------------------

@@ -720,12 +720,23 @@ export function shouldAutoSearch(
 /** How many times a paused server tool loop may be resumed before giving up. */
 export const MAX_CONTINUATIONS = 4;
 
+/** What one search cost, in the numbers the Console bills on. */
+export type SearchUsage = {
+  input_tokens?: number | null;
+  output_tokens?: number | null;
+  cache_read_input_tokens?: number | null;
+  cache_creation_input_tokens?: number | null;
+  server_tool_use?: { web_search_requests?: number | null } | null;
+};
+
 export type SearchAnswer = {
   stop_reason?: string | null;
   stop_details?: { category?: string | null } | null;
   content: { type: string; text?: string }[];
   /** How many times the server-side tool loop had to be resumed. */
   continuations?: number;
+  /** What it cost, summed over the first request and any continuations. */
+  usage?: SearchUsage;
 };
 
 /**
@@ -784,3 +795,39 @@ export function readLabs(answer: SearchAnswer): (LabFacts & {
   })[];
 }
 
+/**
+ * How many web searches one discovery may make, and what that costs.
+ *
+ * This is the single biggest lever on the bill. Each use pulls page content
+ * back through the model, and the server-side tool loop re-reads the growing
+ * conversation on every iteration — so the cost of a search grows faster than
+ * the number of searches in it.
+ *
+ * It was 3, which was too few to answer: the model ran out of searches, said
+ * "server tool use limit exceeded", and correctly refused to invent labs. It
+ * is 10 now, which answers — and costs several times more per search.
+ *
+ * Set DISCOVERY_MAX_USES to move it without a deploy. Below about 5 the
+ * searches start coming back empty again; above 10 they mostly get longer
+ * rather than better.
+ */
+export function maxSearchUses(env = process.env.DISCOVERY_MAX_USES): number {
+  const n = Number(env);
+  if (!Number.isFinite(n)) return 10;
+  return Math.min(Math.max(Math.round(n), 1), 20);
+}
+
+/**
+ * A rough rupee figure for one search, at Opus 5 list prices.
+ *
+ * Rough on purpose: it exists so "what is this costing" has an answer in the
+ * log next to each search, not to reconcile with an invoice. USD, at $5/M in
+ * and $25/M out, with cache reads at a tenth of input.
+ */
+export function estimateCostUsd(u?: SearchUsage | null): number {
+  if (!u) return 0;
+  const inTok = (u.input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0);
+  const cached = u.cache_read_input_tokens ?? 0;
+  const outTok = u.output_tokens ?? 0;
+  return Math.round(((inTok * 5 + cached * 0.5 + outTok * 25) / 1e6) * 10000) / 10000;
+}

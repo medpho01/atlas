@@ -139,6 +139,34 @@ means they are running on the prompt alone, which still works — see
 SEARCH_SCHEMA in lib/labDiscovery.ts. The server has no Node, so the
 equivalent `npm run check:discovery-schema` is for a laptop only.
 
+What one search costs, and how to spend less
+--------------------------------------------
+
+Each search is one Opus request that makes up to `DISCOVERY_MAX_USES` web
+searches (default 10), and every one of those pulls page content back through
+the model — so cost grows faster than the number of searches. A verified answer
+for one pincode ran 77 seconds and about a dollar and a half.
+
+The container logs a line per search:
+
+```bash
+docker compose logs atlas-web | grep '\[discovery\]'
+```
+
+`/api/discovery/debug?pincode=NNNNNN` reports the same numbers for a single
+probe — but note it runs a real search, so asking costs one.
+
+The dial is an env var, no deploy needed beyond a restart:
+
+```bash
+# in .env.production
+DISCOVERY_MAX_USES=5
+```
+
+Below about 5 the searches start coming back empty ("server tool use limit
+exceeded"), which is how this feature was broken for a day. Above 10 they
+mostly get longer rather than better.
+
 To see what it is costing:
 
 ```sql

@@ -3,7 +3,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import { getSessionUser } from '@/lib/auth';
 import { canManage } from '@/lib/access';
 import { search } from '@/lib/discoverLabs';
-import { readLabs } from '@/lib/labDiscovery';
+import { readLabs, estimateCostUsd, maxSearchUses } from '@/lib/labDiscovery';
 
 export const dynamic = 'force-dynamic';
 
@@ -91,6 +91,16 @@ export async function GET(req: NextRequest) {
         seconds: Math.round((Date.now() - probe.startedAt) / 100) / 10,
         stop_reason: answer.stop_reason ?? null,
         continuations: answer.continuations ?? 0,
+        // What this one search cost, which is the question behind "why is the
+        // bill like that".
+        cost: {
+          usd_estimate: estimateCostUsd(answer.usage),
+          web_searches: answer.usage?.server_tool_use?.web_search_requests ?? null,
+          max_uses_setting: maxSearchUses(),
+          input_tokens: answer.usage?.input_tokens ?? null,
+          cached_input_tokens: answer.usage?.cache_read_input_tokens ?? null,
+          output_tokens: answer.usage?.output_tokens ?? null,
+        },
         blocks: answer.content.map((b) => b.type),
         parsed: labs
           ? { count: labs.length, names: labs.map((l) => (l as { name?: string }).name ?? '?') }
