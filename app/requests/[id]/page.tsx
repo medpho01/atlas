@@ -12,6 +12,7 @@ import {
 } from '@/lib/requestQueries';
 import {
   lastDiscoveryRun, rankedLeadsForPincode, shouldAutoSearch, isSearchRunning,
+  autoSearchEnabled,
 } from '@/lib/discoverLabs';
 import {
   STATE_SHORT, STATE_TONE, TONE_CHIP, BASIS_LABEL, BASIS_STRENGTH, DISCIPLINE_LABEL,
@@ -74,7 +75,11 @@ export default async function RequestDetail({ params }: { params: { id: string }
   // commitments, so without this they would auto-fire a search, get back
   // "needs the network or admin role", and see a red error on every
   // supply-gap request for something they never asked for and cannot fix.
-  const autoSearch = !!r.pincode && noLabHere && leads.length === 0
+  // Off by default — see autoSearchEnabled(). Everything else that had to be
+  // true still has to be true, so turning the flag on restores exactly the
+  // behaviour the tests cover rather than a looser version of it.
+  const autoSearch = autoSearchEnabled()
+    && !!r.pincode && noLabHere && leads.length === 0
     && canManage(gate.user, 'commitments') && shouldAutoSearch(lastRun);
   const searchRunning = isSearchRunning(lastRun);
 

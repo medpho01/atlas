@@ -15,6 +15,7 @@
 
 import {
   scoreLead, rankLeads, scoreBand, adjustedRating, shouldAutoSearch, isSearchRunning,
+  autoSearchEnabled,
   WEIGHTS, WEIGHT_TOTAL, num, type LabFacts, type RunRow,
 } from '../lib/labDiscovery';
 
@@ -411,6 +412,19 @@ group('shouldAutoSearch mirrors claim_discovery');
   check('isSearchRunning is false outside it',
     !isSearchRunning(run({ started_at: ago(5) }), now));
   check('isSearchRunning is false with no row at all', !isSearchRunning(null, now));
+  // An attempt that already answered is not still running, however recently it
+  // started. Without this the card announced "a search is already running"
+  // for two minutes underneath the error that search had just returned.
+  check('isSearchRunning is false once the attempt has answered',
+    !isSearchRunning(run({ started_at: ago(0.5), ran_at: ago(0.2), error: 'Request timed out' }), now));
+  check('isSearchRunning is true again when an old answer is re-claimed',
+    isSearchRunning(run({ started_at: ago(0.5), ran_at: ago(60), found: 3 }), now));
+
+  // The page only searches on its own where somebody turned it on.
+  check('auto-search is off when the flag is unset', !autoSearchEnabled(undefined));
+  check('auto-search is off for any value but on', !autoSearchEnabled('off'));
+  check('auto-search is on for on', autoSearchEnabled('on'));
+  check('auto-search ignores case and space', autoSearchEnabled('  On '));
   check('a Date is accepted as well as a string',
     isSearchRunning({ ran_at: null, started_at: new Date(now - 30_000), found: 0, error: null }, now));
 }

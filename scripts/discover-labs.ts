@@ -48,7 +48,10 @@ function client(): Anthropic {
   if (!process.env.ANTHROPIC_API_KEY && !process.env.ANTHROPIC_AUTH_TOKEN) {
     throw new Error('No Anthropic credential — set ANTHROPIC_API_KEY.');
   }
-  return (_client ??= new Anthropic());
+  // Streamed like the app's path, and for the same reason: a search that
+  // reads listings closely runs for minutes, and a non-streaming request
+  // holds a silent connection for all of it.
+  return (_client ??= new Anthropic({ timeout: 180_000, maxRetries: 1 }));
 }
 
 const argv = process.argv.slice(2);
@@ -105,7 +108,7 @@ type FoundLab = LabFacts & {
 };
 
 async function search(t: Target): Promise<FoundLab[]> {
-  const response = await client().messages.create({
+  const stream = client().messages.stream({
     model: MODEL,
     // The schema now asks for eleven more fields per lab than it used to, and
     // a truncated response is a parse failure rather than a short list.
@@ -122,6 +125,7 @@ async function search(t: Target): Promise<FoundLab[]> {
       content: searchPrompt(t.pincode, t.city, t.state_name, t.disciplines),
     }],
   } as never);
+  const response = await stream.finalMessage();
 
   if (response.stop_reason === 'refusal') {
     throw new Error(`Model declined (${response.stop_details?.category ?? 'no category'})`);

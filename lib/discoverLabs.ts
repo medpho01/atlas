@@ -4,7 +4,7 @@ import { query, queryOne } from './db';
 import {
   SEARCH_SYSTEM, SEARCH_SCHEMA, searchPrompt, DISCOVERY_STALE_DAYS,
   scoreLead, rankLeads, num, isSearchRunning, shouldAutoSearch,
-  type LabFacts, type RunRow, type Ranked,
+  type LabFacts, type RunRow, type Ranked, autoSearchEnabled,
 } from './labDiscovery';
 
 /**
@@ -32,7 +32,7 @@ const MODEL = 'claude-opus-5';
 // predicates and the reads from one place, while the logic itself stays
 // testable without Next. shouldAutoSearch mirrors atlas.claim_discovery's
 // WHERE clause and is fixture-tested in scripts/test-lab-scoring.ts.
-export { isSearchRunning, shouldAutoSearch };
+export { isSearchRunning, shouldAutoSearch, autoSearchEnabled };
 
 /**
  * Turn an SDK error into something worth writing to discovery_run.error.
@@ -53,7 +53,13 @@ function describe(e: unknown): string {
   // Last four characters only: enough to match against the Console, not
   // enough to be a credential.
   const key = process.env.ANTHROPIC_API_KEY ?? process.env.ANTHROPIC_AUTH_TOKEN;
-  return key ? `${base} (key …${key.slice(-4)})` : base;
+  const withKey = key ? `${base} (key …${key.slice(-4)})` : base;
+  // A timeout is the one failure a person can do something about, so say what.
+  // Reading three listings closely takes a minute or two; the bare SDK message
+  // reads like a broken integration.
+  return /timed? ?out/i.test(withKey)
+    ? `${withKey} — a search reads several listings and can take a couple of minutes. Try again.`
+    : withKey;
 }
 
 /** Where a search came from. Recorded so "what is the page load costing us"
@@ -124,16 +130,21 @@ export async function discoverForPincode(
   // outside, so a bad key or a bad config threw an unhandled rejection out of a
   // server action rather than returning an error the page could show.
   try {
-    // 45 seconds, no retry.
+    // Streamed, with a three-minute ceiling and no retry.
     //
-    // This runs inside a server action, so the browser holds an open HTTP
-    // request for its whole duration. Reverse proxies commonly cut idle
-    // responses at 60s, and when that happens the client never receives an
-    // answer at all — the button spins forever and no error is ever shown.
-    // Better to fail inside the window with something to read than to exceed
-    // it and hang. A retry would double the wall time, so there isn't one.
-    const anthropic = new Anthropic({ timeout: 45_000, maxRetries: 0 });
-    const response = await anthropic.messages.create({
+    // It was a non-streaming call on a 45-second timeout, and in production
+    // that timed out: Opus reading three listings closely enough to say
+    // whether each claims NABL is minutes of work, not seconds, and a
+    // non-streaming request has to hold a silent connection for all of it.
+    // Streaming keeps data moving, which is what the SDK asks for on any long
+    // or high-max_tokens request, and it is why the ceiling can be raised
+    // without the connection going idle and being cut.
+    //
+    // Still no retry: a retry doubles the wall time of something a person is
+    // waiting on, and the claim row means the next click picks up where this
+    // left off rather than starting again from nothing.
+    const anthropic = new Anthropic({ timeout: 180_000, maxRetries: 0 });
+    const stream = anthropic.messages.stream({
       model: MODEL,
       // 4000 was enough for four labs of name, address and phone. The schema
       // now asks for disciplines, accreditation, ratings, hours and a note per
@@ -150,6 +161,7 @@ export async function discoverForPincode(
       output_config: { effort: 'medium', format: { type: 'json_schema', schema: SEARCH_SCHEMA } },
       messages: [{ role: 'user', content: searchPrompt(pincode, city, state, disciplines) }],
     } as never);
+    const response = await stream.finalMessage();
 
     if (response.stop_reason === 'refusal') {
       throw new Error(`Model declined (${response.stop_details?.category ?? 'no category'})`);

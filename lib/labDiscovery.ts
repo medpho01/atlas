@@ -629,7 +629,29 @@ const ms = (v: string | Date | null | undefined): number | null => {
  */
 export function isSearchRunning(run?: RunRow | null, now = Date.now()): boolean {
   const started = ms(run?.started_at);
-  return started != null && now - started < IN_FLIGHT_MS;
+  if (started == null || now - started >= IN_FLIGHT_MS) return false;
+  // An attempt that has already answered is not still running, however
+  // recently it started. Without this a search that failed in ten seconds
+  // told the card "a search is already running — reload in a moment" for the
+  // next two minutes, directly under the error it had just returned.
+  const ranAt = ms(run?.ran_at);
+  return ranAt == null || ranAt < started;
+}
+
+/**
+ * Whether a page may start a search nobody asked for.
+ *
+ * Off unless DISCOVERY_AUTO_SEARCH is set to 'on'. Searching on page load was
+ * the point of the original change and it reads well on paper — the next step
+ * for a stranded request is always this search — but in practice it spends
+ * money on every open of a request somebody is only reading, and the person
+ * who opened the page never asked for it. The button is one click and it says
+ * what it will do.
+ *
+ * The whole mechanism is still here and still tested; this is the switch.
+ */
+export function autoSearchEnabled(env: string | undefined = process.env.DISCOVERY_AUTO_SEARCH): boolean {
+  return (env ?? '').trim().toLowerCase() === 'on';
 }
 
 /**
