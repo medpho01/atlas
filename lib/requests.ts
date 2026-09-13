@@ -176,12 +176,15 @@ export const DISCIPLINE_LABEL: Record<string, string> = {
   CARDIO_DIAGNOSTIC: 'cardiac & functional testing',
 };
 
-/** What to go looking for, in words a search prompt can use. */
-export const DISCIPLINE_SEARCH: Record<string, string> = {
-  PATHOLOGY: 'diagnostic laboratories and sample-collection centres',
-  RADIOLOGY: 'radiology and imaging centres (X-ray, ultrasound, CT, MRI)',
-  CARDIO_DIAGNOSTIC: 'centres offering ECG, echocardiography and similar functional tests',
-};
+/**
+ * What to go looking for, in words a search prompt can use.
+ *
+ * Defined in lib/labDiscovery.ts and re-exported here, where callers already
+ * expect it. There were three copies of this map — one here, one in
+ * lib/discoverLabs.ts and one in scripts/discover-labs.ts — and they had
+ * started to differ.
+ */
+export { DISCIPLINE_SEARCH } from './labDiscovery';
 
 /**
  * The console's own stage for a request — where it sits in LabStack's workflow,
