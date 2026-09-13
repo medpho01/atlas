@@ -41,11 +41,12 @@ async function main() {
   console.log(`Schema: ${Object.keys(props).length} properties per lab, ${count(SEARCH_SCHEMA)} nodes.\n`);
 
   const anthropic = new Anthropic({ timeout: 60_000, maxRetries: 0 });
-  // No max_tokens: count_tokens counts the input and rejects it outright.
+  // count_tokens takes neither max_tokens nor a server tool — web_search is
+  // one — so this checks the schema, the system prompt and the message. That
+  // is the part the complexity limit applies to.
   const request: Anthropic.MessageCountTokensParams = {
     model: MODEL,
     system: [{ type: 'text', text: SEARCH_SYSTEM, cache_control: { type: 'ephemeral' } }],
-    tools: [{ type: 'web_search_20260209', name: 'web_search', max_uses: 3 }] as never,
     messages: [{ role: 'user', content: searchPrompt('560001', 'Bengaluru', 'Karnataka', ['PATHOLOGY']) }],
     output_config: { effort: 'medium', format: { type: 'json_schema', schema: SEARCH_SCHEMA } } as never,
   };

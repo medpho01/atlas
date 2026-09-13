@@ -19,8 +19,9 @@ export const dynamic = 'force-dynamic';
  * scripts and no TypeScript source. This route runs in that container, with
  * that container's key and the exact schema the search uses.
  *
- * count_tokens validates the whole request — schema, tools, system prompt —
- * and runs no inference, so asking costs nothing.
+ * count_tokens runs no inference, so asking costs nothing. It will not take
+ * the web_search tool, so what it validates is the schema, the system prompt
+ * and the message — which is where the complexity limit applies.
  */
 export async function GET() {
   const me = await getSessionUser();
@@ -42,18 +43,25 @@ export async function GET() {
     }, { status: 503 });
   }
 
-  // No max_tokens. count_tokens does not take it — it counts the input — and
-  // sending it is a 400 that reads exactly like a schema rejection would:
-  // `max_tokens: Extra inputs are not permitted`. That is what the first
-  // version of this route reported, which is why the shape below is typed by
-  // the SDK rather than cast past it.
+  // What count_tokens will and will not take, learned the hard way:
+  //
+  //   max_tokens  — rejected. It counts the input; an output cap is not input.
+  //   tools       — rejected when any of them is a server tool. web_search is
+  //                 one, and the API expands it to code_execution as well:
+  //                 "Server tools are not supported in the count_tokens
+  //                 endpoint … Use the /v1/messages endpoint instead."
+  //
+  // So this validates the schema, the system prompt and the message — which is
+  // what the question is about, since the limit that bit is on the schema —
+  // and says in its answer that the tools were not part of the check.
   const request: Anthropic.MessageCountTokensParams = {
     model: 'claude-opus-5',
     system: [{ type: 'text', text: SEARCH_SYSTEM, cache_control: { type: 'ephemeral' } }],
-    tools: [{ type: 'web_search_20260209', name: 'web_search', max_uses: 3 }] as never,
     messages: [{ role: 'user', content: searchPrompt('560001', 'Bengaluru', 'Karnataka', ['PATHOLOGY']) }],
     output_config: { effort: 'medium', format: { type: 'json_schema', schema: SEARCH_SCHEMA } } as never,
   };
+  const caveat = 'Schema, system prompt and message only — count_tokens refuses server tools, ' +
+                 'so the web_search tool is not part of this check.';
 
   const anthropic = new Anthropic({ timeout: 60_000, maxRetries: 0 });
   try {
@@ -61,6 +69,7 @@ export async function GET() {
     return NextResponse.json({
       verdict: 'accepted',
       detail: 'Searches run with the structured-output guarantee.',
+      checked: caveat,
       input_tokens: r.input_tokens,
       key_suffix: `…${key.slice(-4)}`,
       ...shape,
@@ -70,6 +79,7 @@ export async function GET() {
     const schemaRefused = err?.status === 400 && /schema/i.test(err?.message ?? '');
     return NextResponse.json({
       verdict: schemaRefused ? 'rejected' : 'unknown',
+      checked: caveat,
       detail: schemaRefused
         ? 'Searches still work — the code falls back to the prompt alone. To restore the ' +
           'guarantee, drop fields from SEARCH_SCHEMA in lib/labDiscovery.ts.'
