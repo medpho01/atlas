@@ -28,7 +28,6 @@ export async function promoteDiscoveredLab(leadId: number): Promise<R> {
   try {
     const row = await queryOne<{ id: number }>(
       `SELECT atlas.promote_discovered_lab($1, $2) AS id`, [leadId, me.id]);
-    revalidatePath('/commitments');
     return { ok: true, id: row?.id };
   } catch (e) {
     return { ok: false, error: (e as Error).message };
@@ -43,28 +42,7 @@ export async function dismissDiscoveredLab(leadId: number): Promise<R> {
     return { ok: false, error: 'Dismissing a lead needs the network or admin role' };
   }
   await queryOne(`UPDATE atlas.discovered_lab SET dismissed = true WHERE id = $1`, [leadId]);
-  revalidatePath('/commitments');
   return { ok: true };
-}
-
-/**
- * Reconcile the ledger against the console on demand.
- *
- * The poller runs every few minutes anyway; this exists so somebody who has
- * just moved an order in the console can see it reflected without waiting,
- * which is the moment they are most likely to distrust the screen.
- */
-export async function syncCommitments(): Promise<R & { opened?: number; closed?: number }> {
-  const me = await getSessionUser();
-  if (!me) return { ok: false, error: 'unauthenticated' };
-  if (!canManage(me, 'commitments')) {
-    return { ok: false, error: 'Needs the network or admin role' };
-  }
-  const row = await queryOne<{ opened: number; closed: number; expired: number; crm_created: number }>(
-    `SELECT * FROM atlas.sync_commitments_full()`);
-  revalidatePath('/commitments');
-  revalidatePath('/fulfilment');
-  return { ok: true, opened: row?.opened, closed: row?.closed };
 }
 
 /**

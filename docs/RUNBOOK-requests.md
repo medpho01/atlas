@@ -23,7 +23,6 @@ twice before.
 cd ~/atlas && git pull
 docker exec -i atlas-db psql -U atlas -d atlas -v ON_ERROR_STOP=1 -f - < sql/init/16_requests.sql
 docker exec -i atlas-db psql -U atlas -d atlas -v ON_ERROR_STOP=1 -f - < sql/init/20_lab_discovery_ranking.sql
-docker exec -i atlas-db psql -U atlas -d atlas -v ON_ERROR_STOP=1 -f - < sql/init/21_fulfilment_desk.sql
 docker compose up -d --build atlas-web atlas-commitments atlas-refresh
 ```
 

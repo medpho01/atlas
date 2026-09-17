@@ -344,9 +344,6 @@ export default async function RequestDetail({ params }: { params: { id: string }
                 <Link href={`/pincode/${r.pincode}`} className="block text-brand-600 hover:underline">
                   Coverage in {r.pincode} →
                 </Link>
-                <Link href={`/commitments`} className="block text-brand-600 hover:underline">
-                  Network bucket →
-                </Link>
               </CardBody>
             </Card>
           )}

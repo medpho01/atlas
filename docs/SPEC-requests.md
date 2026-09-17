@@ -157,8 +157,10 @@ Ordering does the job assignment would have done. With one person working the
 queue, a good sort order is the entire prioritisation system, and it costs
 nothing to build.
 
-**2 · Network bucket** (network) — one row per open commitment, sorted by
-days-left ascending, breaching rows at the top:
+**2 · Network bucket** (network) — **removed 2026-09-17.** It was built, used,
+and judged not worth keeping; the surface that replaces it is being designed
+from scratch. The ledger underneath it (`atlas.commitment`, the poller, the
+CRM hand-off) is untouched — only the screen is gone. What it looked like:
 
 | Request | Pincode | Promised | Days left | Suggested labs | Ask |
 |---|---|---|---|---|---|
