@@ -23,10 +23,11 @@ twice before.
 cd ~/atlas && git pull
 docker exec -i atlas-db psql -U atlas -d atlas -v ON_ERROR_STOP=1 -f - < sql/init/16_requests.sql
 docker exec -i atlas-db psql -U atlas -d atlas -v ON_ERROR_STOP=1 -f - < sql/init/20_lab_discovery_ranking.sql
+docker exec -i atlas-db psql -U atlas -d atlas -v ON_ERROR_STOP=1 -f - < sql/init/21_fulfilment_desk.sql
 docker compose up -d --build atlas-web atlas-commitments atlas-refresh
 ```
 
-`sql/init/` only runs on a database's first boot, so both files above are
+`sql/init/` only runs on a database's first boot, so the files above are
 applied by hand on a host that already exists. See "Applying
 20_lab_discovery_ranking.sql to an existing host" under Web discovery.
 

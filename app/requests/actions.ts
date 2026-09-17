@@ -63,6 +63,7 @@ export async function syncCommitments(): Promise<R & { opened?: number; closed?:
   const row = await queryOne<{ opened: number; closed: number; expired: number; crm_created: number }>(
     `SELECT * FROM atlas.sync_commitments_full()`);
   revalidatePath('/commitments');
+  revalidatePath('/fulfilment');
   return { ok: true, opened: row?.opened, closed: row?.closed };
 }
 

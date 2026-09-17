@@ -48,6 +48,7 @@ export const NAV: NavGroup[] = [
     items: [
       { href: '/requests', label: 'Requests', feature: 'requests', alsoActiveOn: ['/request'] },
       { href: '/commitments', label: 'Network bucket', feature: 'commitments' },
+      { href: '/fulfilment', label: 'Fulfilment desk', feature: 'commitments' },
     ],
   },
   {

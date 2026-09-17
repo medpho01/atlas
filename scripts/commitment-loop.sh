@@ -36,7 +36,12 @@ while true; do
   # reading as "nothing identifiable was requested".
   out=$(psql -h "$PGHOST" -U atlas -d atlas -tA \
         -c "SELECT opened || ' opened, ' || closed || ' closed, ' || expired ||
-                   ' expired, ' || crm_created || ' CRM rows'
+                   ' expired, ' || crm_created || ' CRM rows' ||
+                   -- Appended only when it happened, so the quiet case stays
+                   -- byte-identical and the poller stays quiet.
+                   CASE WHEN appointment_moved > 0
+                        THEN ', ' || appointment_moved || ' appointments moved'
+                        ELSE '' END
               FROM atlas.sync_commitments_full();" \
         -c "SELECT CASE WHEN pkg_links + test_links + items = 0 THEN ''
                         ELSE pkg_links || ' pkg links, ' || test_links ||
