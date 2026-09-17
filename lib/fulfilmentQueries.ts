@@ -99,62 +99,78 @@ export type DayRow = {
   lab_failed: number | null;
   appointment_moves: number;
   prev_appointment_time: string | null;
+  lab_moves: number;
   on_placeholder: boolean | null;
+  request_city: string | null;
+  /** Why this row is where it is in the list. Drawn as the reason chip. */
+  attention: 'no_lab' | 'first_order' | 'new_lab' | 'moved' | 'routine';
+};
+
+/** What the day's table can be narrowed to. Every one of these is a URL chip. */
+export type DayFilters = {
+  from?: 'requests' | 'all';
+  lab?: 'any' | 'none';
+  first?: boolean;
+  moved?: boolean;
+  cancelled?: boolean;
 };
 
 /**
- * Lane 2 — happening on the day.
+ * The day's orders, hardest first.
  *
- * First orders first, then the rest. The ordering is the point: a lab that has
- * never done one of these is where the day's attention belongs, and of the 98
- * labs that have ever taken an order, 41 have taken exactly one.
+ * One read with filters rather than three fixed lanes. The lanes were me
+ * deciding which three questions mattered; the questions are the same rows
+ * sliced differently, and a slice that is a URL is a slice somebody can send
+ * to somebody else.
+ *
+ * The default sort is the whole point of the page: it is the order in which
+ * the day should be worked. An order with no lab is not a record to read, it
+ * is a phone call nobody has made yet — so it sits at the top whatever time it
+ * is booked for, and the reason is written on the row.
  */
-export async function getDayAppointments(day: string, opts: { onlyRequests?: boolean } = {}): Promise<DayRow[]> {
-  const where = opts.onlyRequests ? 'AND d.request_id IS NOT NULL' : '';
+export async function getDayOrders(day: string, f: DayFilters = {}): Promise<DayRow[]> {
+  const where: string[] = ['d.appointment_date = $1::date'];
+  if (f.from !== 'all')  where.push('d.request_id IS NOT NULL');
+  if (f.lab === 'none')  where.push('(d.on_placeholder OR d.lab_id IS NULL)');
+  if (f.first)           where.push('d.is_first_order');
+  if (f.moved)           where.push('(d.appointment_moves > 0 OR d.lab_moves > 0)');
+  // Cancelled orders are not work. They are kept one chip away rather than
+  // deleted, because "why did this fall over" is a question too.
+  if (!f.cancelled)      where.push(`d.order_status NOT IN ('CANCELED', 'PATIENT_MISSED')`);
+
   return query<DayRow>(`
     SELECT d.order_id, d.appointment_time::text, d.order_status, d.order_type,
            d.lab_id, d.lab_name, d.lab_city, d.store_name,
-           d.request_id, d.request_pincode, d.requester_name, d.requester_mobile,
-           d.quoted_price::text,
+           d.request_id, d.request_pincode, d.request_city,
+           d.requester_name, d.requester_mobile, d.quoted_price::text,
            d.is_first_order, d.lab_orders_all_time, d.lab_delivered, d.lab_failed,
-           d.appointment_moves, d.prev_appointment_time::text, d.on_placeholder
+           d.appointment_moves, d.prev_appointment_time::text,
+           d.lab_moves, d.on_placeholder,
+           CASE
+             WHEN d.on_placeholder OR d.lab_id IS NULL      THEN 'no_lab'
+             WHEN d.is_first_order                          THEN 'first_order'
+             WHEN COALESCE(d.lab_orders_all_time, 0) <= 3   THEN 'new_lab'
+             WHEN d.appointment_moves > 0 OR d.lab_moves > 0 THEN 'moved'
+             ELSE 'routine'
+           END AS attention
     FROM analytics.v_fulfilment_day d
-    WHERE d.appointment_date = $1::date ${where}
-    ORDER BY d.is_first_order DESC NULLS LAST, d.on_placeholder DESC NULLS LAST,
+    WHERE ${where.join(' AND ')}
+    ORDER BY CASE
+               WHEN d.on_placeholder OR d.lab_id IS NULL      THEN 0
+               WHEN d.is_first_order                          THEN 1
+               WHEN COALESCE(d.lab_orders_all_time, 0) <= 3   THEN 2
+               WHEN d.appointment_moves > 0 OR d.lab_moves > 0 THEN 3
+               ELSE 4
+             END,
              d.appointment_time, d.order_id
-    LIMIT 300
+    LIMIT 400
   `, [day]);
 }
 
-export type MovedRow = DayRow & { moved_at: string | null; lab_moves: number; prev_lab_id: number | null };
-
-/**
- * Lane 3 — moved since we last looked.
- *
- * Only possible because atlas.order_watch remembers: the snapshot is rebuilt
- * nightly, so yesterday's date is otherwise simply gone. A promise that has
- * slipped three times is a different conversation from one booked yesterday,
- * and only the count says which.
- */
-export async function getRecentMoves(day: string, withinDays = 7): Promise<MovedRow[]> {
-  return query<MovedRow>(`
-    SELECT d.order_id, d.appointment_time::text, d.order_status, d.order_type,
-           d.lab_id, d.lab_name, d.lab_city, d.store_name,
-           d.request_id, d.request_pincode, d.requester_name, d.requester_mobile,
-           d.quoted_price::text,
-           d.is_first_order, d.lab_orders_all_time, d.lab_delivered, d.lab_failed,
-           d.appointment_moves, d.prev_appointment_time::text, d.on_placeholder,
-           d.moved_at::text, d.lab_moves, d.prev_lab_id
-    FROM analytics.v_fulfilment_day d
-    WHERE d.moved_at IS NOT NULL
-      AND d.moved_at > $1::date - make_interval(days => $2)
-      AND (d.appointment_moves > 0 OR d.lab_moves > 0)
-    ORDER BY d.moved_at DESC
-    LIMIT 100
-  `, [day, withinDays]);
-}
-
-export type DayCount = { day: string; appointments: number; first_orders: number; unallocated: number };
+export type DayCount = {
+  day: string; appointments: number; first_orders: number;
+  unallocated: number; from_requests: number;
+};
 
 /** The date strip: what each nearby day is carrying, before you open it. */
 export async function getDayCounts(from: string, to: string): Promise<DayCount[]> {
@@ -162,30 +178,136 @@ export async function getDayCounts(from: string, to: string): Promise<DayCount[]
     SELECT appointment_date::text AS day,
            count(*)::int AS appointments,
            count(*) FILTER (WHERE is_first_order)::int AS first_orders,
-           count(*) FILTER (WHERE on_placeholder)::int AS unallocated
+           count(*) FILTER (WHERE on_placeholder OR lab_id IS NULL)::int AS unallocated,
+           count(*) FILTER (WHERE request_id IS NOT NULL)::int AS from_requests
     FROM analytics.v_fulfilment_day
     WHERE appointment_date BETWEEN $1::date AND $2::date
+      AND order_status NOT IN ('CANCELED', 'PATIENT_MISSED')
     GROUP BY 1 ORDER BY 1
   `, [from, to]);
 }
 
-/** The one-line summary above the lanes. */
+/** The tiles above the table. Counted on the day, not on the current filter. */
 export async function getDeskSummary(day: string) {
   return queryOne<{
-    due_or_overdue: number; overdue: number;
-    appointments: number; first_orders: number; unallocated: number; moved: number;
+    appointments: number; from_requests: number; first_orders: number;
+    no_lab: number; moved: number; promises: number; overdue: number;
   }>(`
+    WITH d AS (
+      SELECT * FROM analytics.v_fulfilment_day
+      WHERE appointment_date = $1::date
+        AND order_status NOT IN ('CANCELED', 'PATIENT_MISSED')
+    )
     SELECT
-      (SELECT count(*)::int FROM analytics.v_commitment_queue
-        WHERE promised_date IS NULL OR promised_date <= $1::date)                      AS due_or_overdue,
-      (SELECT count(*)::int FROM analytics.v_commitment_queue WHERE breached)          AS overdue,
-      (SELECT count(*)::int FROM analytics.v_fulfilment_day
-        WHERE appointment_date = $1::date)                                             AS appointments,
-      (SELECT count(*)::int FROM analytics.v_fulfilment_day
-        WHERE appointment_date = $1::date AND is_first_order)                          AS first_orders,
-      (SELECT count(*)::int FROM analytics.v_fulfilment_day
-        WHERE appointment_date = $1::date AND on_placeholder)                          AS unallocated,
-      (SELECT count(*)::int FROM analytics.v_fulfilment_day
-        WHERE moved_at > $1::date - interval '7 days')                                 AS moved
+      (SELECT count(*)::int FROM d)                                            AS appointments,
+      (SELECT count(*)::int FROM d WHERE request_id IS NOT NULL)               AS from_requests,
+      (SELECT count(*)::int FROM d WHERE is_first_order)                       AS first_orders,
+      (SELECT count(*)::int FROM d WHERE on_placeholder OR lab_id IS NULL)     AS no_lab,
+      (SELECT count(*)::int FROM d WHERE appointment_moves > 0 OR lab_moves > 0) AS moved,
+      (SELECT count(*)::int FROM analytics.v_commitment_queue)                 AS promises,
+      (SELECT count(*)::int FROM analytics.v_commitment_queue WHERE breached)  AS overdue
   `, [day]);
+}
+
+export type LabContext = {
+  order: DayRow | null;
+  /** Labs already in the network that reach this pincode. */
+  covering: {
+    lab_id: number; lab_name: string; city: string | null;
+    missing: number | null; missing_items: string[]; cost: string | null;
+    orders_all_time: number | null; delivered: number | null; failed: number | null;
+  }[];
+  /** How the assigned lab has performed lately — the last few orders, whatever their day. */
+  recent: { order_id: number; appointment_time: string; order_status: string | null }[];
+};
+
+/**
+ * Everything the drawer needs about one order's lab situation.
+ *
+ * Two reads because they answer two different questions — who is on it, and
+ * who else could be. The covering-labs query is the same one the request page
+ * uses, so "who can collect here" has one definition rather than two that
+ * drift.
+ */
+export async function getLabContext(orderId: number): Promise<LabContext> {
+  const order = await queryOne<DayRow>(`
+    SELECT d.order_id, d.appointment_time::text, d.order_status, d.order_type,
+           d.lab_id, d.lab_name, d.lab_city, d.store_name,
+           d.request_id, d.request_pincode, d.request_city,
+           d.requester_name, d.requester_mobile, d.quoted_price::text,
+           d.is_first_order, d.lab_orders_all_time, d.lab_delivered, d.lab_failed,
+           d.appointment_moves, d.prev_appointment_time::text,
+           d.lab_moves, d.on_placeholder, 'routine' AS attention
+    FROM analytics.v_fulfilment_day d WHERE d.order_id = $1
+  `, [orderId]);
+  if (!order) return { order: null, covering: [], recent: [] };
+
+  const [covering, recent] = await Promise.all([
+    order.request_id ? coveringLabsForRequest(order.request_id) : Promise.resolve([]),
+    order.lab_id && !order.on_placeholder ? recentOrdersForLab(order.lab_id) : Promise.resolve([]),
+  ]);
+  return { order, covering, recent };
+}
+
+/**
+ * Labs contracted to this request's store that reach its pincode, with what
+ * each is missing — and, unlike the request page, with what each has actually
+ * delivered. Choosing between two labs that can both serve is a question about
+ * track record, and the desk is where that choice gets made.
+ */
+async function coveringLabsForRequest(requestId: number): Promise<LabContext['covering']> {
+  return query<LabContext['covering'][number]>(`
+    WITH want AS (
+      SELECT DISTINCT kind, COALESCE(package_id, master_id) AS item_id
+      FROM atlas.request_item
+      WHERE request_id = $1 AND (package_id IS NOT NULL OR master_id IS NOT NULL)
+    ),
+    labs AS (
+      SELECT DISTINCT lph.lab_id
+      FROM analytics.mv_request_state s
+      JOIN analytics.mv_lab_pincode_home lph ON lph.pincode = s.pincode
+      WHERE s.request_id = $1
+        AND (s.store_id IS NULL
+             OR NOT atlas.store_lab_gate_active()
+             OR EXISTS (SELECT 1 FROM src_local."LabsOnStore" los
+                         WHERE los."storeId" = s.store_id AND los."labId" = lph.lab_id))
+    )
+    SELECT l.lab_id, lb."labName" AS lab_name, lb.city,
+           CASE WHEN COUNT(w.item_id) = 0 THEN NULL
+                ELSE COUNT(*) FILTER (WHERE w.item_id IS NOT NULL AND lo.lab_id IS NULL)::int
+           END AS missing,
+           ARRAY_REMOVE(ARRAY_AGG(
+             CASE WHEN w.item_id IS NOT NULL AND lo.lab_id IS NULL
+                  THEN COALESCE(p."packageName", m.name, '#' || w.item_id) END), NULL) AS missing_items,
+           ROUND(SUM(lo.cost)::numeric, 2) AS cost,
+           MAX(h.orders_all_time)::int AS orders_all_time,
+           MAX(h.delivered)::int       AS delivered,
+           MAX(h.failed)::int          AS failed
+    FROM labs l
+    LEFT JOIN want w ON true
+    LEFT JOIN analytics.mv_lab_offering lo
+           ON lo.lab_id = l.lab_id AND lo.kind = w.kind AND lo.item_id = w.item_id
+    LEFT JOIN src_local."Package" p ON w.kind = 'PACKAGE' AND p.id = w.item_id
+    LEFT JOIN src_local."Master"  m ON w.kind = 'TEST'    AND m.id = w.item_id
+    JOIN src_local."Lab" lb ON lb.id = l.lab_id
+    LEFT JOIN analytics.v_lab_order_history h ON h.lab_id = l.lab_id
+    GROUP BY l.lab_id, lb."labName", lb.city
+    ORDER BY (CASE WHEN COUNT(w.item_id) = 0 THEN 1
+                   ELSE COUNT(*) FILTER (WHERE w.item_id IS NOT NULL AND lo.lab_id IS NULL) END),
+             SUM(lo.cost) NULLS LAST
+    LIMIT 12
+  `, [requestId]);
+}
+
+/** The assigned lab's last few orders, so "can they do this" has evidence. */
+async function recentOrdersForLab(labId: number) {
+  return query<{ order_id: number; appointment_time: string; order_status: string | null }>(`
+    SELECT o.id AS order_id,
+           (o."appointmentTime" AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata')::text AS appointment_time,
+           o."orderStatus"::text AS order_status
+    FROM src_local."Order" o
+    WHERE o."labId" = $1 AND o."appointmentTime" IS NOT NULL
+    ORDER BY o."appointmentTime" DESC
+    LIMIT 8
+  `, [labId]);
 }

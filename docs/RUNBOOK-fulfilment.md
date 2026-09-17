@@ -1,12 +1,45 @@
 # Runbook — the fulfilment desk
 
-`/fulfilment`. One day, three lanes. It answers the two questions that live
-between a quote and a report, neither of which any other page could answer,
-because both are about a **date** rather than about a record:
+`/fulfilment`. One day, one table, filters that are links. It exists to say
+what the team should work on today, in order.
 
-1. Which requests became orders for a given day's appointment, and which of
-   those have been moved since.
-2. Which of the day's appointments are a lab's **first ever** order.
+Two different objects live here, and they are two tabs rather than two lanes,
+because only one of them has an appointment date:
+
+- **Day's orders** — requests that became orders with an appointment on the
+  selected day. Filterable by source, whether a lab is assigned, first orders,
+  and whether the appointment has moved. Clicking a row opens the lab context.
+- **Promised, no order yet** — a quoted date with no order behind it. There is
+  no appointment to filter on until a lab exists, so this list is sorted by the
+  promised date instead.
+
+## The sort is the advice
+
+The default order of the day's table is the order the day should be worked:
+
+| Rank | Row | Why |
+|---|---|---|
+| 1 | No lab assigned | An appointment with nobody behind it. |
+| 2 | First order with this lab | Of the 98 labs that have ever taken an order, 41 have taken exactly one. |
+| 3 | Three orders or fewer | Barely more track record than a first order. |
+| 4 | Moved | Somebody has already rescheduled this. |
+| 5 | Everything else | By time. |
+
+`attention` in `getDayOrders` computes this once and the row prints the reason,
+so the position on the page and the chip on the row can never disagree.
+
+## The drawer
+
+Clicking a row calls `/api/fulfilment/context?order=<id>` and shows: the lab
+assigned with its delivered/failed record, every lab contracted to that store
+that reaches the pincode — with what each is **missing** and what each has
+actually delivered — and the assigned lab's last eight orders.
+
+It is a route rather than a page navigation so that the table keeps its scroll
+position and the filters stay where they were.
+
+Web discovery for pincodes no lab reaches is **off** and being rebuilt; the
+drawer says so rather than pretending the section is empty for another reason.
 
 ## What it is built on
 
