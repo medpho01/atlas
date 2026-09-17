@@ -19,6 +19,9 @@ COPY scripts/load-pincode-geo.sh /load-pincode-geo.sh
 COPY scripts/refresh-views.sh /refresh-views.sh
 COPY scripts/check-pincode-geo.sh /check-pincode-geo.sh
 COPY scripts/lib-pincode-csv.sh /lib-pincode-csv.sh
+# The snapshot indexes, applied by refresh-data.sh after it creates any
+# missing snapshot table. Copied in because the container has no repo.
+COPY sql/init/22_src_local_indexes.sql /sql/22_src_local_indexes.sql
 RUN chmod +x /refresh.sh /loop.sh /commitment-loop.sh /load-pincode-geo.sh /refresh-views.sh /check-pincode-geo.sh \
  && mkdir -p /var/log \
  && touch /var/log/atlas-refresh.log

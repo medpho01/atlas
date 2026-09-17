@@ -144,6 +144,25 @@ for t in DOS Master Package PackagesOnLab _MasterToPackage _PackageToRequest _Ma
   $PG -c "CREATE TABLE IF NOT EXISTS src_local.\"$t\" (LIKE src.\"$t\");" >>"$LOG" 2>&1 \
     || log "  WARN: snapshot table src_local.$t create failed"
 done
+# ---- Phase 0.55: indexes on the snapshot -----------------------------------
+# CREATE TABLE ... (LIKE src.X) copies columns and nothing else, so a freshly
+# bootstrapped host has snapshot tables with no indexes at all and every join
+# against them is a sequential scan. Applied here rather than trusted to have
+# been run once, because Phase 0.5 can create a table on any run.
+# /sql is where the image puts it; the repo path is for running this by hand
+# from a checkout.
+IDX_SQL=""
+for p in /sql/22_src_local_indexes.sql "$(dirname "$0")/../sql/init/22_src_local_indexes.sql"; do
+  [ -f "$p" ] && IDX_SQL="$p" && break
+done
+if [ -n "$IDX_SQL" ]; then
+  log "Phase 0.55/4 · ensure snapshot indexes"
+  $PG -f "$IDX_SQL" >>"$LOG" 2>&1 \
+    || log "  WARN: snapshot index creation failed (queries will be slow)"
+else
+  log "Phase 0.55/4 · WARN: 22_src_local_indexes.sql not found; snapshot will have no indexes"
+fi
+
 # Schema-drift guard: some environments lack Master.aliases at the source.
 # The pricing MVs reference it, so guarantee it exists on the snapshot
 # (empty array where the source has nothing to copy into it).
@@ -408,6 +427,17 @@ ANALYZE src_local."Profile";
 ANALYZE src_local."Store";
 ANALYZE src_local."Pharmacy";
 ANALYZE src_local."Request";
+-- The catalogue tables. The requests queue derives item names and covering
+-- labs by joining these per request, so stale stats here are felt on the
+-- slowest page in the application rather than on a report nobody watches.
+ANALYZE src_local."Master";
+ANALYZE src_local."Package";
+ANALYZE src_local."DOS";
+ANALYZE src_local."_MasterToPackage";
+ANALYZE src_local."_PackageToRequest";
+ANALYZE src_local."_MasterToRequest";
+ANALYZE src_local."PackagesOnStore";
+ANALYZE src_local."PackagesOnLab";
 SQL
 
 # ---- Phase 3.9: resolve pincode coordinates ---------------------------------
