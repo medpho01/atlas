@@ -395,7 +395,7 @@ export async function discoverForPincode(
           ran_at = now(), found = EXCLUDED.found, model = NULL,
           source = EXCLUDED.source, error = NULL
       `, [pincode, chain.labs.length, chain.source]).catch(async (e) => {
-        // A host that has not applied 22_discovery_source.sql yet still gets
+        // A host that has not applied 23_discovery_source.sql yet still gets
         // working discovery, just without the source recorded.
         if ((e as { code?: string }).code !== '42703') throw e;
         await queryOne(`

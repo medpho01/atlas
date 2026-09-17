@@ -1,5 +1,5 @@
 -- ============================================================================
--- 22_discovery_source.sql — record which source produced a lead.
+-- 23_discovery_source.sql — record which source produced a lead.
 --
 -- 20_lab_discovery_ranking.sql made everything downstream of the source
 -- source-agnostic: the scoring, the reasons, the card, promote-to-CRM. What it
