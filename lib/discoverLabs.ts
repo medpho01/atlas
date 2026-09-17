@@ -8,6 +8,10 @@ import {
   maxSearchUses, estimateCostUsd, type SearchUsage, discoveryEnabled,
   readLabs, MAX_CONTINUATIONS, type SearchAnswer,
 } from './labDiscovery';
+import {
+  searchSources, anySourceConfigured,
+  type SourceName, type SourceTarget,
+} from './discoverySources';
 
 /**
  * Find labs on the open web for a pincode the network cannot reach.
@@ -282,12 +286,44 @@ const DISABLED =
   'DISCOVERY_ENABLED in .env.production.example.';
 
 const NO_CREDENTIAL =
-  'No Anthropic credential in this container. The app loads .env.production, ' +
-  'not .env — the key has to be in the file compose actually reads. ' +
-  'ANTHROPIC_API_KEY is documented in .env.production.example.';
+  'No discovery credential in this container. A places source needs one of ' +
+  'MAPPLS_CLIENT_ID/SECRET, OLA_MAPS_API_KEY or GOOGLE_PLACES_API_KEY; the ' +
+  'model fallback needs ANTHROPIC_API_KEY. The app loads .env.production, not ' +
+  '.env — the key has to be in the file compose actually reads. They are ' +
+  'all documented in .env.production.example.';
+
+const hasAnthropicKey = () =>
+  !!(process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_AUTH_TOKEN);
+
+/**
+ * Is the model allowed to answer when no places source could?
+ *
+ * Off by default, and separate from DISCOVERY_ENABLED on purpose. Turning
+ * discovery on should buy places-API lookups at a fraction of a cent; it must
+ * not quietly re-enable a $1.50-a-pincode model sweep, which is the thing that
+ * got discovery switched off in the first place.
+ */
+export function llmFallbackEnabled(env = process.env.DISCOVERY_LLM_FALLBACK): boolean {
+  const v = (env ?? '').trim().toLowerCase();
+  return v === 'on' || v === '1' || v === 'true';
+}
 
 const hasCredential = () =>
-  !!(process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_AUTH_TOKEN);
+  anySourceConfigured() || (llmFallbackEnabled() && hasAnthropicKey());
+
+/**
+ * The pincode's centroid, for anchoring a nearby search and measuring distance.
+ *
+ * atlas.pincode_geo is the resolved answer 18_pincode_geo.sql maintains. A
+ * pincode with no point is not an error: the text-search sources still answer,
+ * and scoreLead treats an unknown distance as unknown rather than as far.
+ */
+async function centroid(pincode: string): Promise<{ lat: number; lng: number } | null> {
+  const row = await queryOne<{ latitude: number; longitude: number }>(
+    `SELECT latitude, longitude FROM atlas.pincode_geo WHERE pincode = $1`, [pincode],
+  ).catch(() => null);
+  return row ? { lat: Number(row.latitude), lng: Number(row.longitude) } : null;
+}
 
 export async function startDiscovery(
   pincode: string, city?: string | null, state?: string | null,
@@ -337,6 +373,59 @@ export async function discoverForPincode(
   // outside, so a bad key or a bad config threw an unhandled rejection out of a
   // server action rather than returning an error the page could show.
   try {
+    // Places first.
+    //
+    // The whole point of the chain: a name, an address, a phone number, a
+    // rating and a review count are places-API fields, and buying them from a
+    // model reading the open web costs about fifty times as much. The chain
+    // stops at the first source with enough leads, so a pincode a free Indian
+    // directory can answer never reaches a metered one.
+    const at = await centroid(pincode);
+    const target: SourceTarget = {
+      pincode, city, state, disciplines, lat: at?.lat ?? null, lng: at?.lng ?? null,
+    };
+    const chain = await searchSources(target);
+
+    if (chain.labs.length) {
+      for (const l of chain.labs) await storeLead(pincode, city, state, l, chain.source, null);
+      await queryOne(`
+        INSERT INTO atlas.discovery_run (pincode, ran_at, found, model, source)
+        VALUES ($1, now(), $2, NULL, $3)
+        ON CONFLICT (pincode) DO UPDATE SET
+          ran_at = now(), found = EXCLUDED.found, model = NULL,
+          source = EXCLUDED.source, error = NULL
+      `, [pincode, chain.labs.length, chain.source]).catch(async (e) => {
+        // A host that has not applied 22_discovery_source.sql yet still gets
+        // working discovery, just without the source recorded.
+        if ((e as { code?: string }).code !== '42703') throw e;
+        await queryOne(`
+          INSERT INTO atlas.discovery_run (pincode, ran_at, found, model)
+          VALUES ($1, now(), $2, NULL)
+          ON CONFLICT (pincode) DO UPDATE SET
+            ran_at = now(), found = EXCLUDED.found, model = NULL, error = NULL
+        `, [pincode, chain.labs.length]);
+      });
+      console.log(
+        `[discovery] ${pincode}: ${chain.labs.length} lead(s) from ${chain.source}, ` +
+        `${chain.calls} call(s) = $${chain.costUsd.toFixed(4)}`);
+      return { found: chain.labs.length };
+    }
+
+    // No places source answered. Say why in the run row rather than leaving a
+    // bare zero that reads as "this pincode has no labs".
+    const whyNone = chain.attempts.find((a) => a.error)?.error
+      || chain.skipped.map((x) => `${x.source}: ${x.why}`).join(' \u00b7 ')
+      || 'no places source is configured, so nothing was searched';
+
+    if (!llmFallbackEnabled() || !hasAnthropicKey()) {
+      await queryOne(`
+        INSERT INTO atlas.discovery_run (pincode, ran_at, found, error)
+        VALUES ($1, now(), 0, $2)
+        ON CONFLICT (pincode) DO UPDATE SET ran_at = now(), found = 0, error = EXCLUDED.error
+      `, [pincode, whyNone]).catch(() => {});
+      return { found: 0, error: whyNone };
+    }
+
     // Streamed, with a three-minute ceiling and no retry.
     //
     // It was a non-streaming call on a 45-second timeout, and in production
@@ -372,7 +461,7 @@ export async function discoverForPincode(
       `${response.usage?.input_tokens ?? '?'} in / ${response.usage?.output_tokens ?? '?'} out ` +
       `(+${response.usage?.cache_read_input_tokens ?? 0} cached) ≈ $${cost.toFixed(3)}`);
 
-    for (const l of labs) await storeLead(pincode, city, state, l);
+    for (const l of labs) await storeLead(pincode, city, state, l, 'llm', MODEL);
 
     await queryOne(`
       INSERT INTO atlas.discovery_run (pincode, ran_at, found, model)
@@ -407,17 +496,18 @@ export async function discoverForPincode(
 async function storeLead(
   pincode: string, city: string | null | undefined, state: string | null | undefined,
   l: LabFacts & { name: string; address?: string; source_url: string },
+  source: SourceName | 'llm' | null = 'llm', model: string | null = MODEL,
 ): Promise<void> {
   const score = scoreLead(l, null);
   const args = [
     pincode, l.name, l.address ?? null, l.phone ?? null, l.source_url,
-    city ?? null, state ?? null, l.confidence ?? null, MODEL,
+    city ?? null, state ?? null, l.confidence ?? null, model,
     l.disciplines ?? null, l.disciplines_absent ?? null,
     l.services ?? null, l.accreditation ?? null,
     l.rating ?? null, l.rating_count ?? null, l.home_collection ?? null,
     l.in_pincode ?? null, l.distance_km ?? null, l.chain ?? null,
     l.website ?? null, l.hours ?? null, l.note ?? null,
-    score.total, score.reasons,
+    score.total, score.reasons, source,
   ];
   try {
     await queryOne(`
@@ -425,10 +515,10 @@ async function storeLead(
         (pincode, name, address, phone, source_url, city, state, confidence, model,
          disciplines, disciplines_absent, services, accreditation, rating, rating_count,
          home_collection, in_pincode, distance_km, chain, website, hours, note,
-         base_score, score_reasons, scored_at)
+         base_score, score_reasons, source, scored_at)
       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,
               $10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,
-              $23,$24,now())
+              $23,$24,$25,now())
       ON CONFLICT (pincode, lower(name)) DO UPDATE SET
         address = COALESCE(EXCLUDED.address, atlas.discovered_lab.address),
         phone = COALESCE(EXCLUDED.phone, atlas.discovered_lab.phone),
@@ -451,6 +541,7 @@ async function storeLead(
         note = COALESCE(EXCLUDED.note, atlas.discovered_lab.note),
         base_score = EXCLUDED.base_score,
         score_reasons = EXCLUDED.score_reasons,
+        source = EXCLUDED.source,
         scored_at = now(),
         retrieved_at = now()
       -- Never overwrite something a human has already checked.
