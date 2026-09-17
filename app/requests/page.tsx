@@ -37,7 +37,11 @@ export default async function RequestsPage({
     ? (searchParams.state as RequestState) : undefined;
   // Picking a settled stage implies wanting to see settled requests. Without
   // this, filtering to "Ordered" returns zero rows and reads as broken.
+  // Asking about appointments is asking about orders, and an order means the
+  // request converted — which the open queue hides. Filtering to "appointment
+  // today" and getting nothing would read as broken rather than as filtered.
   const openOnly = searchParams.all !== '1'
+    && !searchParams.oappt
     && !(searchParams.status && SETTLED_STAGES.has(searchParams.status));
   const f = {
     state,
@@ -57,6 +61,8 @@ export default async function RequestsPage({
     window: (searchParams.window as 'today' | 'week' | 'month' | 'all')
             ?? (searchParams.q ? 'all' : 'week'),
     appt: searchParams.appt as 'today' | 'tomorrow' | 'soon' | 'overdue' | 'none' | undefined,
+    eta: searchParams.eta as 'today' | 'tomorrow' | 'soon' | 'overdue' | 'none' | undefined,
+    oappt: searchParams.oappt as 'today' | 'tomorrow' | 'week' | 'past' | 'any' | undefined,
     openOnly,
     limit: 150,
   };
@@ -134,6 +140,34 @@ export default async function RequestsPage({
         ] as const).map(([k, label]) => (
           <ChipButton key={k} href={keep('appt', searchParams.appt === k ? undefined : k)}
                       active={searchParams.appt === k}>
+            {label}
+          </ChipButton>
+        ))}
+      </div>
+
+      {/* Three different dates hang off a request and they are not
+          interchangeable: what the customer wanted (above), what we promised
+          back, and when the order is actually booked. Filtering on the wrong
+          one is how a queue lies, so each gets its own labelled row. */}
+      <div className="flex flex-wrap items-center gap-1.5 mb-4">
+        <span className="text-[11px] uppercase tracking-wide text-ink-400 mr-1">ETA we gave</span>
+        {([
+          ['overdue', 'Date passed'], ['today', 'Today'], ['tomorrow', 'Tomorrow'],
+          ['soon', 'Within 3 days'], ['none', 'No date'],
+        ] as const).map(([k, label]) => (
+          <ChipButton key={k} href={keep('eta', searchParams.eta === k ? undefined : k)}
+                      active={searchParams.eta === k}>
+            {label}
+          </ChipButton>
+        ))}
+        <span className="w-px h-4 bg-ink-200 mx-2" />
+        <span className="text-[11px] uppercase tracking-wide text-ink-400 mr-1">Appointment</span>
+        {([
+          ['any', 'Has an order'], ['today', 'Today'], ['tomorrow', 'Tomorrow'],
+          ['week', 'Next 7 days'], ['past', 'Already past'],
+        ] as const).map(([k, label]) => (
+          <ChipButton key={k} href={keep('oappt', searchParams.oappt === k ? undefined : k)}
+                      active={searchParams.oappt === k}>
             {label}
           </ChipButton>
         ))}

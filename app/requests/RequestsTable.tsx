@@ -16,6 +16,17 @@ const day = (d: string | null) =>
   d ? new Date(d).toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' }) : null;
 
 /**
+ * The appointment clock, already in IST as text. Reading it through Date would
+ * shift it again by whatever timezone the browser is in.
+ */
+const appointmentTime = (t: string | null) => {
+  const m = t?.match(/ (\d{2}):(\d{2})/);
+  if (!m) return null;
+  const h = Number(m[1]);
+  return `${h % 12 === 0 ? 12 : h % 12}:${m[2]} ${h < 12 ? 'am' : 'pm'}`;
+};
+
+/**
  * The copy button is the whole point of the ops screen: the answer is computed
  * here and recorded in the console, so the handoff has to be one click and the
  * text has to survive a paste into a plain input.
@@ -83,7 +94,12 @@ export function RequestsTable({
   }
 
   return (
-    <table className="w-full text-sm tabular-nums">
+    // The columns have real minimum widths and there are eleven of them, so at
+    // anything under a wide desktop the table is wider than the card. Without
+    // a scroll container it simply drew over the card's edge — the rounded
+    // corner clipped the last column and there was no way to reach it.
+    <div className="overflow-x-auto">
+    <table className="w-full text-sm tabular-nums min-w-[1400px]">
       <thead>
         <tr className="text-[11px] uppercase tracking-wide text-ink-400 border-b border-ink-200">
           <th className="text-left font-medium px-5 py-2">Request</th>
@@ -94,8 +110,13 @@ export function RequestsTable({
           <th className="text-left font-medium px-2 py-2 w-[120px]">State</th>
           <th className="text-left font-medium px-2 py-2 min-w-[200px]">Labs / what&apos;s missing</th>
           <th className="text-right font-medium px-2 py-2">Quote</th>
-          <th className="text-left font-medium px-2 py-2">Earliest</th>
-          <th className="text-left font-medium px-5 py-2 w-20">Console</th>
+          <th className="text-left font-medium px-2 py-2">ETA</th>
+          <th className="text-left font-medium px-2 py-2 min-w-[150px]">Order</th>
+          {/* Pinned, because it is the action. Scrolling sideways to reach
+              the Copy button would make the one thing this page exists for
+              the hardest thing on it. */}
+          <th className="text-left font-medium px-5 py-2 w-20 sticky right-0 bg-surface
+                         border-l border-ink-150">Console</th>
         </tr>
       </thead>
       <tbody>
@@ -109,7 +130,7 @@ export function RequestsTable({
               <tr
                 key={r.request_id}
                 onClick={() => router.push(`/requests/${r.request_id}`)}
-                className="border-b border-ink-100 last:border-0 cursor-pointer hover:bg-ink-100/40 align-top"
+                className="group border-b border-ink-100 last:border-0 cursor-pointer hover:bg-ink-100/40 align-top"
               >
                 <td className="px-5 py-2.5 font-medium text-ink-900 whitespace-nowrap">
                   <ChevronRight className="inline w-3.5 h-3.5 mr-1 text-ink-400" />
@@ -199,9 +220,42 @@ export function RequestsTable({
                   )}
                 </td>
                 <td className="px-2 py-2.5 whitespace-nowrap text-ink-700">
-                  {day(r.promised_date) ?? <span className="text-[11px] text-danger-500">escalate</span>}
+                  {day(r.committed_date ?? r.promised_date)
+                    ?? <span className="text-[11px] text-danger-500">escalate</span>}
+                  {/* What was actually promised, where it differs from what
+                      Atlas would offer today. A commitment is a date somebody
+                      has already been given. */}
+                  {r.committed_date && r.committed_date !== r.promised_date && (
+                    <span className="block text-[10px] text-ink-400">promised</span>
+                  )}
                 </td>
-                <td className="px-5 py-2.5" onClick={(e) => e.stopPropagation()}>
+                {/* Converted, and what happened next. Until now the queue could
+                    say a request became an order but not which one, who is
+                    serving it, or when — so every follow-up meant opening the
+                    console to find out. */}
+                <td className="px-2 py-2.5 text-xs">
+                  {r.order_id ? (
+                    <>
+                      <span className="text-ink-900 font-medium">#{r.order_id}</span>
+                      {r.order_appointment && (
+                        <span className="block text-[10px] text-ink-600">
+                          {day(r.order_appointment.slice(0, 10))}
+                          {appointmentTime(r.order_appointment) && (
+                            <span className="text-ink-400"> · {appointmentTime(r.order_appointment)}</span>
+                          )}
+                        </span>
+                      )}
+                      <span className="block text-[10px] text-ink-500 truncate max-w-[150px]">
+                        {r.order_lab_name ?? <span className="text-danger-500">no lab</span>}
+                      </span>
+                    </>
+                  ) : (
+                    <span className="text-ink-300">—</span>
+                  )}
+                </td>
+                <td className="px-5 py-2.5 sticky right-0 bg-surface group-hover:bg-ink-100
+                               border-l border-ink-150"
+                    onClick={(e) => e.stopPropagation()}>
                   <CopyQuote row={r} />
                 </td>
               </tr>
@@ -209,5 +263,6 @@ export function RequestsTable({
         })}
       </tbody>
     </table>
+    </div>
   );
 }

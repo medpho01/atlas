@@ -108,6 +108,8 @@ export type RequestRow = {
   markup_pct: string | null;
   reason: string;
   commitment_id: number | null;
+  /** What was actually promised on the commitment, where there is one. */
+  committed_date: string | null;
   // Carried on the row so the table needs no per-row lookup.
   packages: string[] | null;
   tests: string[] | null;
@@ -124,6 +126,13 @@ export type RequestRow = {
   cost_avg: string | null;
   cost_max: string | null;
   cost_labs: number | null;
+  // The order a request became, where it became one. Joined on the row rather
+  // than looked up per render: "did this convert, who is serving it, and when"
+  // is one question, and three columns of it in three places is three answers.
+  order_appointment: string | null;
+  order_lab_id: number | null;
+  order_lab_name: string | null;
+  order_status: string | null;
 };
 
 export type CommitmentRow = {

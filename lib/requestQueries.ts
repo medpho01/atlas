@@ -29,6 +29,10 @@ export type RequestFilters = {
   window?: 'today' | 'week' | 'month' | 'all';
   /** Preferred appointment: today | tomorrow | soon (<=3d) | overdue | none. */
   appt?: 'today' | 'tomorrow' | 'soon' | 'overdue' | 'none';
+  /** The date we promised: today | tomorrow | soon (<=3d) | overdue | none. */
+  eta?: 'today' | 'tomorrow' | 'soon' | 'overdue' | 'none';
+  /** The appointment on the resulting order: today | tomorrow | week | past | any. */
+  oappt?: 'today' | 'tomorrow' | 'week' | 'past' | 'any';
   /** Include stores switched off in settings. Off by default. */
   includeUntracked?: boolean;
   limit?: number;
@@ -68,6 +72,32 @@ function build(f: RequestFilters) {
   if (f.appt === 'soon')     where.push('preferred_at::date BETWEEN atlas.ist_today() AND atlas.ist_today() + 3');
   if (f.appt === 'overdue')  where.push('preferred_at::date < atlas.ist_today()');
   if (f.appt === 'none')     where.push('preferred_at IS NULL');
+
+  // The date we told the store, which is not the date the customer asked for.
+  // committed_date is what was actually promised on a commitment; promised_date
+  // is what Atlas would offer today. The first wins where it exists.
+  const eta = 'COALESCE(committed_date, promised_date)';
+  if (f.eta === 'today')    where.push(`${eta} = atlas.ist_today()`);
+  if (f.eta === 'tomorrow') where.push(`${eta} = atlas.ist_today() + 1`);
+  if (f.eta === 'soon')     where.push(`${eta} BETWEEN atlas.ist_today() AND atlas.ist_today() + 3`);
+  if (f.eta === 'overdue')  where.push(`${eta} < atlas.ist_today()`);
+  if (f.eta === 'none')     where.push(`${eta} IS NULL`);
+
+  // The appointment on the order this request became.
+  //
+  // Written as EXISTS against the order rather than as a join, so the same
+  // clause works in the list, the count, the funnel and every facet — all of
+  // which read the view under different aliases. Order.id is indexed, so it
+  // is one lookup per row.
+  const onOrder = (cond: string) =>
+    `EXISTS (SELECT 1 FROM src_local."Order" o
+              WHERE o.id = order_id
+                AND (o."appointmentTime" AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata')::date ${cond})`;
+  if (f.oappt === 'today')    where.push(onOrder('= atlas.ist_today()'));
+  if (f.oappt === 'tomorrow') where.push(onOrder('= atlas.ist_today() + 1'));
+  if (f.oappt === 'week')     where.push(onOrder('BETWEEN atlas.ist_today() AND atlas.ist_today() + 7'));
+  if (f.oappt === 'past')     where.push(onOrder('< atlas.ist_today()'));
+  if (f.oappt === 'any')      where.push('order_id IS NOT NULL');
 
   // Stores the team has switched off. Absent means tracked, so a new partner
   // shows up without anyone configuring it.
@@ -145,13 +175,49 @@ export async function getRequests(f: RequestFilters = {}) {
 
   const limit = Math.min(f.limit ?? 100, 500);
   params.push(limit, f.offset ?? 0);
-  return query<RequestRow>(`
-    SELECT q.* FROM analytics.v_request_quote q
+  const rows = await query<RequestRow>(`
+    SELECT q.*, ord.*
+    FROM analytics.v_request_quote q
+    -- A lateral, not two joins. Joining "Order" and "Lab" directly puts their
+    -- own city, status and createdAt into scope, and the filter clause — which
+    -- is written in bare column names so the same one works for the count and
+    -- the facets — stopped resolving. Everything this returns is renamed.
+    -- Only the 150 rows on the page pay for it, and Order.id is indexed.
+    LEFT JOIN LATERAL (
+      SELECT (o."appointmentTime" AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata')::text
+                                   AS order_appointment,
+             o."labId"             AS order_lab_id,
+             o."orderStatus"::text AS order_status,
+             ol."labName"          AS order_lab_name
+      FROM src_local."Order" o
+      LEFT JOIN src_local."Lab" ol ON ol.id = o."labId"
+      WHERE o.id = q.order_id
+    ) ord ON true
     ${demandJoin}
     ${clause}
     ORDER BY ${order}
     LIMIT $${params.length - 1} OFFSET $${params.length}
   `, params);
+
+  // node-postgres hands back a Date for a `date` column, and a Date survives
+  // the trip to the browser as a Date. The queue rendered it fine, but the
+  // Copy button pasted `2026-09-17T00:00:00.000Z` into the console where a
+  // person expected a date — and comparing two of them compared references,
+  // so "promised differs from offered" was always true. One shape, here.
+  for (const r of rows) {
+    r.promised_date  = asDay(r.promised_date);
+    r.committed_date = asDay(r.committed_date);
+  }
+  return rows;
+}
+
+/** A date column as YYYY-MM-DD, whichever of the two shapes pg handed back. */
+function asDay(v: string | Date | null): string | null {
+  if (v == null) return null;
+  if (typeof v === 'string') return v.slice(0, 10);
+  const d = v as Date;
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
 }
 
 export async function countRequests(f: RequestFilters = {}) {
