@@ -23,7 +23,7 @@ const QUEUE = {
     dot: 'bg-danger-500',
     bar: 'border-danger-500',
     chip: 'bg-danger-500',
-    urgent: (n: number) => `${n} due today or tomorrow`,
+    urgent: (n: number) => `${n} due today`,
   },
   confirm_pickup: {
     label: 'Pickup today',

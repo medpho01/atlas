@@ -30,8 +30,9 @@ export const TASK_BLURB: Record<TaskKind, string> = {
     'Appointments today at labs with barely any history. Call the centre and confirm the '
     + 'sample was actually collected — a new lab missing a pickup is how an order fails silently.',
   chase_report:
-    '48 hours past the pickup with no report, at labs with barely any history. The sample is '
-    + 'taken and somebody is waiting — this is the one the customer feels.',
+    'The appointment has been and gone and no report has come back, at labs with barely any '
+    + 'history — whatever state it stopped in. The clock is 48 hours from the appointment or '
+    + 'the last update, whichever is later. This is the one the customer feels.',
 };
 
 export type TaskRow = {
@@ -43,6 +44,8 @@ export type TaskRow = {
   appointment_at: string;
   appointment_date: string;
   collected_at: string | null;
+  /** What the 48-hour clock counts from: the appointment or the last status change. */
+  clock_from: string | null;
   order_status: string | null;
   order_type: string | null;
   lab_id: number | null;

@@ -30,9 +30,17 @@ const initials = (name: string) =>
 /** How a deadline reads once it has passed. */
 function Due({ row }: { row: TaskRow }) {
   if (row.kind === 'chase_report') {
-    if (!row.overdue) return <span className="text-ink-700">Due today</span>;
-    const late = Math.abs(row.days_left ?? 0);
-    return <span className="font-bold text-danger-500">{late === 0 ? 'Today' : `${late} day${late === 1 ? '' : 's'}`}</span>;
+    // The queue now holds orders whose 48 hours have not run out yet — an
+    // appointment yesterday that nothing has come back from is outstanding,
+    // it is just not late. Reading every one of those as "Due today" was fine
+    // when the only rows here were already past the clock.
+    if (row.overdue) {
+      const late = Math.abs(row.days_left ?? 0);
+      return <span className="font-bold text-danger-500">{late === 0 ? 'Today' : `${late} day${late === 1 ? '' : 's'}`}</span>;
+    }
+    if (row.days_left === 0) return <span className="font-semibold text-warn-600">Due today</span>;
+    if (row.days_left === 1) return <span className="text-ink-700">Due tomorrow</span>;
+    return <span className="text-ink-700">Due in {row.days_left} days</span>;
   }
   if (row.overdue) return <span className="font-bold text-danger-500">Overdue</span>;
   if (row.days_left === 0) return <span className="font-semibold text-danger-500">Today</span>;
@@ -208,11 +216,13 @@ export function TaskTable({
                 </>
               ) : (
                 <>
-                  {kind === 'chase_report' && <th className="text-left font-medium px-2 py-2 w-[140px]">Collected</th>}
+                  {/* Not "Collected" any more: plenty of rows here have never
+                      been collected, which is the whole point of them. */}
+                  {kind === 'chase_report' && <th className="text-left font-medium px-2 py-2 w-[140px]">Appointment</th>}
                   <th className="text-left font-medium px-2 py-2">Lab</th>
                   <th className="text-left font-medium px-2 py-2 w-[150px]">Contact</th>
                   <th className="text-left font-medium px-2 py-2 w-[136px]">Lab record</th>
-                  {kind === 'confirm_pickup' && <th className="text-left font-medium px-2 py-2 w-[140px]">Order status</th>}
+                  <th className="text-left font-medium px-2 py-2 w-[140px]">Order status</th>
                 </>
               )}
               <th className="text-left font-medium px-2 pr-5 py-2 w-[168px]">Assigned to</th>
@@ -313,8 +323,8 @@ export function TaskTable({
                   <>
                     {kind === 'chase_report' && (
                       <td className="px-2 py-2.5 whitespace-nowrap text-ink-700">
-                        {day(r.collected_at)}
-                        <span className="block text-[11px] text-ink-400">{clock(r.collected_at)}</span>
+                        {day(r.appointment_at)}
+                        <span className="block text-[11px] text-ink-400">{clock(r.appointment_at)}</span>
                       </td>
                     )}
                     <td className="px-2 py-2.5">
@@ -327,9 +337,11 @@ export function TaskTable({
                       <Contact row={r} />
                     </td>
                     <td className="px-2 py-2.5"><LabRecord row={r} /></td>
-                    {kind === 'confirm_pickup' && (
-                      <td className="px-2 py-2.5"><Status s={r.order_status} /></td>
-                    )}
+                    {/* Where it actually got to matters more here than it used
+                        to: "phlebo assigned, appointment was Tuesday" and
+                        "sample delivered yesterday" are the same queue and
+                        two completely different phone calls. */}
+                    <td className="px-2 py-2.5"><Status s={r.order_status} /></td>
                   </>
                 )}
 

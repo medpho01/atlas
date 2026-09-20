@@ -95,17 +95,22 @@ tasks AS (
          (b.appointment_date - 1)                     AS due_date,
          (b.appointment_date - 1) < atlas.ist_today() AS overdue
   FROM base b
+  -- Strictly ahead of today. Once the appointment day arrives the question is
+  -- no longer "which lab gets this" but "is this one happening at all", and
+  -- that is the pickup queue's job — it already carries every unallocated
+  -- appointment for today. Leaving them in both put the same three orders in
+  -- two queues and made each look like the other's backlog.
   WHERE b.on_placeholder
-    AND b.appointment_date >= atlas.ist_today()
+    AND b.appointment_date > atlas.ist_today()
 
   UNION ALL
 
   -- Everything happening today that somebody should be watching, which is
   -- two kinds of row: an appointment at a lab with barely any history, and an
-  -- appointment that still has no lab at all. The second was excluded on the
-  -- grounds that it belongs in the allocation queue — it does, and it also
-  -- belongs here, because today's pickup list has to be the whole day or it
-  -- is not a pickup list.
+  -- appointment that still has no lab at all. The second sits here and only
+  -- here — the allocation queue stops at the end of yesterday, because on the
+  -- day itself an unallocated order is not an allocation problem to work
+  -- through in order, it is today's emergency.
   SELECT 'confirm_pickup'::text, b.*,
          b.appointment_date AS due_date,
          b.on_placeholder   AS overdue
@@ -117,14 +122,38 @@ tasks AS (
 
   UNION ALL
 
+  -- Everything the lab still owes us.
+  --
+  -- This used to name three statuses — collected, delivered, processed — on the
+  -- assumption that an order only becomes ours to chase once the sample is in
+  -- hand. It does not. An order whose appointment was on Tuesday and is still
+  -- sitting at PHLEBO_ASSIGNED or ORDER_SCHEDULED on Friday is the worst kind
+  -- of outstanding report: nothing has happened at all, and under the old rule
+  -- it appeared in no queue whatsoever. It left the pickup queue at midnight
+  -- and never arrived anywhere else.
+  --
+  -- So the rule is stated the other way round: the appointment has come and
+  -- gone (or the sample is already collected, which starts the clock on the
+  -- same day), and no report has come back. CANCELED and PATIENT_MISSED are
+  -- already gone in base — those are closed, not outstanding — and a future
+  -- RESCHEDULED date takes itself out through appointment_date.
+  --
+  -- The clock runs from whichever came later, the appointment or the last
+  -- status change. statusUpdatedAt is routinely BEFORE the appointment (a
+  -- phlebo is assigned in advance — every PHLEBO_ASSIGNED order in the mirror
+  -- is), so keying 48 hours off it alone made orders overdue before anybody
+  -- had been to the house.
   SELECT 'chase_report'::text, b.*,
-         (b.status_at + interval '48 hours')::date AS due_date,
-         (b.status_at + interval '48 hours') < (now() AT TIME ZONE 'Asia/Kolkata') AS overdue
+         (GREATEST(b.appointment_at, COALESCE(b.status_at, b.appointment_at))
+            + interval '48 hours')::date AS due_date,
+         (GREATEST(b.appointment_at, COALESCE(b.status_at, b.appointment_at))
+            + interval '48 hours') < (now() AT TIME ZONE 'Asia/Kolkata') AS overdue
   FROM base b
   WHERE NOT b.on_placeholder
     AND b.lab_orders_all_time < b.max_lifetime
-    AND b.order_status IN ('SAMPLE_COLLECTED', 'SAMPLE_DELIVERED', 'SAMPLE_PROCESSED')
-    AND b.status_at IS NOT NULL
+    AND b.order_status <> 'REPORT_DELIVERED'
+    AND (b.appointment_date < atlas.ist_today()
+         OR b.order_status IN ('SAMPLE_COLLECTED', 'SAMPLE_DELIVERED', 'SAMPLE_PROCESSED'))
 )
 SELECT
   t.kind,
@@ -135,6 +164,9 @@ SELECT
   t.appointment_at::text                  AS appointment_at,
   t.appointment_date::text                AS appointment_date,
   t.status_at::text                       AS collected_at,
+  -- What the clock is actually counting from, which is not always the status
+  -- change: see the chase_report branch above.
+  GREATEST(t.appointment_at, COALESCE(t.status_at, t.appointment_at))::text AS clock_from,
   t.order_status,
   t.order_type,
   t.lab_id, t.lab_name, t.lab_city, t.lab_pincode, t.lab_phone, t.lab_email,

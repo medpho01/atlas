@@ -12,9 +12,32 @@ The three queues, each with its own deadline:
 
 | Tab | Due | Applies to | Closes when |
 |---|---|---|---|
-| **Needs a lab** | day before the appointment | any order still on the placeholder lab | `labId` is no longer the placeholder |
+| **Needs a lab** | day before the appointment | orders still on the placeholder lab, appointment **strictly after today** | `labId` is no longer the placeholder, or the day arrives |
 | **Pickup today** | the day itself | today's appointments at a lab under the threshold **or** with no lab at all | status reaches `SAMPLE_COLLECTED` or beyond |
-| **Report outstanding** | pickup + 48 hours | the same cohort, sample taken | status reaches `REPORT_DELIVERED` |
+| **Report outstanding** | appointment or last update + 48 hours | at a lab under the threshold: the appointment has passed, **or** the sample is collected — in any status short of `REPORT_DELIVERED` | status reaches `REPORT_DELIVERED` (or the order is cancelled / the patient missed) |
+
+The three are disjoint by construction and, between them, leave no gap once an
+appointment date is set. *Needs a lab* stops at the end of yesterday because on
+the day itself an unallocated order is not an allocation problem to work
+through in order — it is today's emergency, and *Pickup today* already carries
+every unallocated appointment for today. *Report outstanding* picks up from
+where *Pickup today* stops: the statuses it excludes (collected, delivered,
+processed) are exactly the ones that start the 48-hour clock.
+
+**Report outstanding is defined by exclusion, not by a status list.** It used
+to name three statuses — collected, delivered, processed — which quietly meant
+that an order whose appointment was on Tuesday and was still sitting at
+`PHLEBO_ASSIGNED` on Friday appeared in *no queue at all*: it left the pickup
+queue at midnight and never arrived anywhere else. Now the rule is "the
+appointment happened and no report came back", whatever state it stopped in,
+so `ORDER_SCHEDULED`, `PHLEBO_ASSIGNED`, `KIT_DISPATCHED` and `PATIENT_VISITED`
+all land here. `CANCELED` and `PATIENT_MISSED` do not — those are closed, not
+outstanding — and a `RESCHEDULED` order takes itself out through its new date.
+
+The 48 hours run from **whichever is later, the appointment or the last status
+change**. `statusUpdatedAt` is routinely *before* the appointment — a phlebo is
+assigned in advance, so every `PHLEBO_ASSIGNED` order has one — and keying the
+clock off it alone marked orders late before anybody had been to the house.
 
 ## Derived, not filed
 
@@ -115,10 +138,11 @@ queue that never empties is a queue nobody opens.
 **A pickup task for a lab that plainly collected the sample.** The queue reads
 `orderStatus`. If the console has not moved the order on, Atlas cannot know.
 
-**"Report outstanding" on something collected minutes ago.** `collected_at` is
-`statusUpdatedAt`, which is when the status last changed. While an order sits
-at `SAMPLE_COLLECTED` that is the collection time; it stops meaning that the
-moment the status moves on, which is also the moment the row leaves the view.
+**"Report outstanding" on something collected minutes ago.** Correct, and not
+yet late: the row shows *Due in 2 days* until the clock runs out. The table
+shows the **appointment** rather than a collection time, because most rows in
+this queue were never collected; `collected_at` is still `statusUpdatedAt` for
+anything that wants it, and `clock_from` is what the deadline is measured from.
 
 ## First deploy
 
