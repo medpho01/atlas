@@ -50,7 +50,8 @@ while true; do
         -c "SELECT CASE WHEN failed IS NOT NULL THEN 'orders NOT synced: ' || failed
                         WHEN inserted > 0 THEN inserted || ' new orders'
                         ELSE '' END
-              FROM atlas.sync_orders_live();" 2>&1)
+              FROM atlas.sync_orders_live();" \
+        -c "SELECT COALESCE('lab history NOT refreshed: ' || atlas.refresh_lab_history(), '');" 2>&1)
   status=$?
   if [ $status -ne 0 ]; then
     log "FAILED: $out"

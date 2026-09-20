@@ -64,6 +64,13 @@ WHERE appointment_date = (now() AT TIME ZONE 'Asia/Kolkata')::date;
 \timing off
 
 \echo ''
+\echo '== 3b · if anything above is slow, this says where =================='
+\echo '   Paste the plan into the next conversation rather than guessing.'
+\timing off
+EXPLAIN (ANALYZE, BUFFERS, SUMMARY)
+SELECT kind, count(*) FROM analytics.v_order_task GROUP BY 1;
+
+\echo ''
 \echo '== 4 · is the live order sync working? ==============================='
 \echo '   failed non-null means the queues are reading last night data.'
 SELECT * FROM atlas.sync_orders_live();
