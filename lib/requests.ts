@@ -225,6 +225,21 @@ export const STAGE_ORDER = [
   'UNREACHABLE', 'WRONG_NUMBER', 'DENIED', 'CANCELLED', 'NON_SERVICEABLE',
 ] as const;
 
+/**
+ * The stages a request moves through while somebody is still working it.
+ *
+ * This is the page's whole job — open, quote it, get the price accepted, see
+ * it become an order — so these four are listed in that order and apart from
+ * the rest. A flat row that mixed them with Unreachable and Cancelled made a
+ * pipeline look like a set of unrelated labels.
+ */
+export const PIPELINE_STAGES = ['OPEN', 'CONSENTED', 'QUOTED', 'QUOTATION_ACCEPTED', 'ORDERED'] as const;
+
+/** Stages where nobody is working the request any more. */
+export const CLOSED_STAGES = [
+  'DISCHARGED', 'UNREACHABLE', 'WRONG_NUMBER', 'DENIED', 'CANCELLED', 'NON_SERVICEABLE',
+] as const;
+
 export const STAGE_LABEL: Record<string, string> = {
   OPEN: 'Open',
   CONSENTED: 'Consented',

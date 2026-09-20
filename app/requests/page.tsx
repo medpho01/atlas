@@ -11,7 +11,8 @@ import {
   getUntrackedCount,
 } from '@/lib/requestQueries';
 import {
-  REQUEST_STATES, STATE_SHORT, STAGE_ORDER, STAGE_LABEL, SETTLED_STAGES,
+  REQUEST_STATES, STATE_SHORT, STAGE_LABEL, SETTLED_STAGES,
+  PIPELINE_STAGES, CLOSED_STAGES,
   type RequestState,
 } from '@/lib/requests';
 import { RequestsTable } from './RequestsTable';
@@ -71,17 +72,25 @@ export default async function RequestsPage({
     ? (searchParams.state as RequestState) : undefined;
   // Picking a settled stage implies wanting to see settled requests. Without
   // this, filtering to "Ordered" returns zero rows and reads as broken.
+  // Both are lists: a person owns several stores and works several stages at
+  // once, and a filter that only holds one value makes them run the page
+  // twice and add the numbers up themselves.
+  const csv = (v: string | undefined) =>
+    (v ?? '').split(',').map((x) => x.trim()).filter(Boolean);
+  const stages = csv(searchParams.status);
+  const stores = csv(searchParams.store).map(Number).filter(Number.isInteger);
+
   // Asking about appointments is asking about orders, and an order means the
   // request converted — which the open queue hides. Filtering to "appointment
   // today" and getting nothing would read as broken rather than as filtered.
   const openOnly = searchParams.all !== '1'
     && !searchParams.oappt
     && !searchParams.orderStatus
-    && !(searchParams.status && SETTLED_STAGES.has(searchParams.status));
+    && !stages.some((st) => SETTLED_STAGES.has(st));
   const f = {
     state,
-    status: searchParams.status,
-    store: searchParams.store,
+    status: stages,
+    store: stores,
     city: searchParams.city,
     q: searchParams.q,
     sort: (searchParams.sort as 'newest' | 'oldest' | 'value' | 'value_asc' | 'soonest' | 'demand') ?? 'newest',
@@ -111,6 +120,17 @@ export default async function RequestsPage({
     getRequestFreshness(),
     getUntrackedCount(f),
   ]);
+
+  /**
+   * The same link with one value toggled in or out of a comma-separated list.
+   * Clicking a chip that is already on turns it off, which is what a chip
+   * that looks pressed should do.
+   */
+  const toggle = (k: string, v: string) => {
+    const current = csv(searchParams[k]);
+    const next = current.includes(v) ? current.filter((x) => x !== v) : [...current, v];
+    return keep(k, next.length ? next.join(',') : undefined);
+  };
 
   /** Same link, with several keys dropped at once. */
   const drop = (...keys: string[]) => {
@@ -286,13 +306,13 @@ export default async function RequestsPage({
         </FilterRow>
 
         <FilterRow label="Store">
-          <ChipButton href={keep('store')} active={!searchParams.store}>All</ChipButton>
+          <ChipButton href={keep('store')} active={stores.length === 0}>All</ChipButton>
           {/* Only stores with something in the current view. With forty-odd
               tracked stores most are zero, and the handful with actual work is
               what the row is for. What is hidden is counted at the end. */}
           {facets.stores.filter((st) => st.n > 0).map((st) => (
-            <ChipButton key={st.store_id} href={keep('store', String(st.store_id))}
-                        active={searchParams.store === String(st.store_id)}>
+            <ChipButton key={st.store_id} href={toggle('store', String(st.store_id))}
+                        active={stores.includes(st.store_id)}>
               {st.name} <span className="text-ink-400">{st.n}</span>
             </ChipButton>
           ))}
@@ -311,11 +331,29 @@ export default async function RequestsPage({
           })()}
         </FilterRow>
 
-        <FilterRow label="Request status">
-          <ChipButton href={keep('status')} active={!searchParams.status}>All</ChipButton>
-          {STAGE_ORDER.filter((st) => (facets.stages.find((x) => x.status === st)?.n ?? 0) > 0)
+        {/* The page's job, in the order it happens: open, quoted, accepted,
+            ordered. Listed apart from the stages where nobody is working the
+            request any more, because mixing them made a pipeline read as a
+            set of unrelated labels. */}
+        <FilterRow label="Pipeline">
+          <ChipButton href={keep('status')} active={stages.length === 0}>All</ChipButton>
+          {PIPELINE_STAGES.map((st, i) => {
+            const n = facets.stages.find((x) => x.status === st)?.n ?? 0;
+            return (
+              <span key={st} className="inline-flex items-center gap-1.5">
+                {i > 0 && <span className="text-ink-300 text-[11px]">→</span>}
+                <ChipButton href={toggle('status', st)} active={stages.includes(st)}>
+                  {STAGE_LABEL[st]} <span className="text-ink-400">{n}</span>
+                </ChipButton>
+              </span>
+            );
+          })}
+        </FilterRow>
+
+        <FilterRow label="Closed">
+          {CLOSED_STAGES.filter((st) => (facets.stages.find((x) => x.status === st)?.n ?? 0) > 0)
             .map((st) => (
-              <ChipButton key={st} href={keep('status', st)} active={searchParams.status === st}>
+              <ChipButton key={st} href={toggle('status', st)} active={stages.includes(st)}>
                 {STAGE_LABEL[st]}{' '}
                 <span className="text-ink-400">
                   {facets.stages.find((x) => x.status === st)?.n ?? 0}

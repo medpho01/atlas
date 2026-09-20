@@ -11,8 +11,10 @@ const SETTLED = ['ORDERED', 'DISCHARGED', 'CANCELLED', 'DENIED', 'WRONG_NUMBER']
 
 export type RequestFilters = {
   state?: string;
-  status?: string;
-  store?: string;
+  /** One or more console stages. A person works several at once. */
+  status?: string[];
+  /** One or more stores. Somebody owns a handful of accounts, not one. */
+  store?: number[];
   city?: string;
   pincode?: string;
   q?: string;
@@ -52,8 +54,8 @@ function build(f: RequestFilters) {
     where.push(`NOT is_converted AND status <> ALL($${params.push(SETTLED)})`);
   }
   if (f.state)   add('state = ?', f.state);
-  if (f.status)  add('status = ?', f.status);
-  if (f.store)   add('store_id = ?', Number(f.store));
+  if (f.status?.length) add('status = ANY(?)', f.status);
+  if (f.store?.length)  add('store_id = ANY(?)', f.store);
   if (f.city)    add('lower(city) = lower(?)', f.city);
   if (f.pincode) add('pincode = ?', f.pincode);
   // Rolling windows, not calendar ones.
