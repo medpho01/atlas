@@ -207,6 +207,7 @@ export async function getRequests(f: RequestFilters = {}) {
   params.push(limit, f.offset ?? 0);
   const rows = await query<RequestRow>(`
     SELECT q.*, ord.*, w.waiting_days, w.last_touched_at,
+           w.requester_name, w.requester_mobile,
            -- Both stored naive UTC. Converted once, here, so the row and the
            -- clipboard agree on what day it was.
            (q.created_at   AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata')::date::text AS created_date,
@@ -217,7 +218,11 @@ export async function getRequests(f: RequestFilters = {}) {
     -- did anything to it.
     LEFT JOIN LATERAL (
       SELECT EXTRACT(day FROM (now() - r."updatedAt"))::int AS waiting_days,
-             (r."updatedAt" AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata')::text AS last_touched_at
+             (r."updatedAt" AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata')::text AS last_touched_at,
+             -- Who to call. A queue row you cannot act on without opening it
+             -- is a row that gets opened every time.
+             NULLIF(btrim(r.name), '')   AS requester_name,
+             NULLIF(btrim(r.mobile), '') AS requester_mobile
       FROM src_local."Request" r WHERE r.id = q.request_id
     ) w ON true
     -- A lateral, not two joins. Joining "Order" and "Lab" directly puts their

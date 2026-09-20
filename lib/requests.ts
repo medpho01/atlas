@@ -135,6 +135,9 @@ export type RequestRow = {
   /** Days since anybody touched the request, and when that was. */
   waiting_days: number | null;
   last_touched_at: string | null;
+  /** Who asked, and the number to ring. */
+  requester_name: string | null;
+  requester_mobile: string | null;
   order_appointment: string | null;
   order_lab_id: number | null;
   order_lab_name: string | null;

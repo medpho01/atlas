@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Copy, Check, ChevronRight } from 'lucide-react';
+import { Copy, Check, ChevronRight, Phone } from 'lucide-react';
 import {
   STATE_SHORT, STATE_TONE, STATE_OWNER, TONE_CHIP, STAGE_TONE, stageLabel,
   quoteBlock, type RequestRow,
@@ -123,11 +123,14 @@ export function RequestsTable({
     // a scroll container it simply drew over the card's edge — the rounded
     // corner clipped the last column and there was no way to reach it.
     <div className="overflow-x-auto">
-    <table className="w-full text-sm tabular-nums min-w-[1660px]">
+    <table className="w-full text-sm tabular-nums min-w-[1810px]">
       <thead>
         <tr className="text-[11px] uppercase tracking-wide text-ink-400 border-b border-ink-200">
           <th className="text-left font-medium px-5 py-2">Request</th>
           <th className="text-left font-medium px-2 py-2">Store</th>
+          {/* Who asked. Every row here ends in somebody being rung, and
+              opening the request to find the number is the slowest part. */}
+          <th className="text-left font-medium px-2 py-2 min-w-[150px]">Requester</th>
           <th className="text-left font-medium px-2 py-2 w-[120px]">Request status</th>
           <th className="text-left font-medium px-2 py-2">Location</th>
           <th className="text-left font-medium px-2 py-2 min-w-[220px]">Requested items</th>
@@ -170,6 +173,19 @@ export function RequestsTable({
                 </td>
                 <td className="px-2 py-2.5 text-ink-700 text-xs">
                   {r.store_name ?? <span className="text-ink-400">—</span>}
+                </td>
+                <td className="px-2 py-2.5 text-xs" onClick={(e) => e.stopPropagation()}>
+                  <span className="block text-ink-800 truncate max-w-[150px]">
+                    {r.requester_name ?? <span className="text-ink-400">no name</span>}
+                  </span>
+                  {r.requester_mobile ? (
+                    <a href={`tel:${r.requester_mobile.replace(/[^\d+]/g, '')}`}
+                       className="inline-flex items-center gap-1 text-[11px] text-brand-700 dark:text-brand-400 num hover:underline">
+                      <Phone className="w-2.5 h-2.5" />{r.requester_mobile}
+                    </a>
+                  ) : (
+                    <span className="block text-[11px] text-ink-400">no number</span>
+                  )}
                 </td>
                 {/* The console's stage, beside Atlas's verdict. A request can
                     be Quoted here and a supply gap there — that pairing is the

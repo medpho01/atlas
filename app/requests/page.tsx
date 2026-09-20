@@ -16,6 +16,7 @@ import {
   type RequestState,
 } from '@/lib/requests';
 import { RequestsTable } from './RequestsTable';
+import { FilterPanel } from './FilterPanel';
 import { DateRange } from './DateRange';
 import { RequestFunnel } from './RequestFunnel';
 import { SearchBar } from './SearchBar';
@@ -128,6 +129,17 @@ export default async function RequestsPage({
     getUntrackedCount(f),
   ]);
 
+  // How many of the filters behind the disclosure are on. The panel opens
+  // itself when any of them are, because a filter you cannot see is one you
+  // will forget you set.
+  const moreActive = [
+    state, searchParams.appt, searchParams.eta, searchParams.orderStatus,
+    searchParams.oappt, searchParams.createdFrom, searchParams.createdTo,
+    searchParams.apptFrom, searchParams.apptTo, searchParams.etaFrom, searchParams.etaTo,
+    stages.some((st) => (CLOSED_STAGES as readonly string[]).includes(st)) ? '1' : undefined,
+    openOnly ? undefined : '1',
+  ].filter(Boolean).length;
+
   /**
    * The same link with one value toggled in or out of a comma-separated list.
    * Clicking a chip that is already on turns it off, which is what a chip
@@ -223,183 +235,186 @@ export default async function RequestsPage({
           the store asked for, the earliest date we offered, and the booked
           appointment on the order — and they are not interchangeable, so each
           is its own labelled row with its own range. */}
-      <div className="mb-4 rounded-lg border border-ink-200 bg-surface divide-y divide-ink-100">
-        <FilterRow label="Created">
-          {([
-            ['today', 'Today'], ['week', 'Last 7 days'], ['month', 'Last 30 days'], ['all', 'All time'],
-          ] as const).map(([k, label]) => (
-            <ChipButton key={k} href={keep('window', k)}
-                        active={(searchParams.window ?? (searchParams.q || stages.length ? 'all' : 'week')) === k}>
-              {label}
-            </ChipButton>
-          ))}
-          <Divider />
-          <DateRange fromName="createdFrom" toName="createdTo" params={searchParams} />
-        </FilterRow>
-
-        <FilterRow label="Serviceability">
-          <ChipButton href={keep('state')} active={!state}>All</ChipButton>
-          {REQUEST_STATES.map((st) => (
-            <ChipButton key={st} href={keep('state', st)} active={state === st}>
-              {STATE_SHORT[st]}
-            </ChipButton>
-          ))}
-          <Divider />
-          {/* "Settled" was jargon for five console statuses that mean nobody
-              is waiting on us. Name them instead. */}
-          <ChipButton href={keep('all', openOnly ? '1' : undefined)} active={!openOnly}>
-            Include ordered &amp; closed
-          </ChipButton>
-        </FilterRow>
-
-        <FilterRow label="Preferred appointment">
-          <ChipButton href={keep('appt')} active={!searchParams.appt}>Any</ChipButton>
-          {([
-            ['overdue', 'Date passed'], ['today', 'Today'], ['tomorrow', 'Tomorrow'],
-            ['soon', 'Within 3 days'], ['none', 'No date'],
-          ] as const).map(([k, label]) => (
-            <ChipButton key={k} href={keep('appt', searchParams.appt === k ? undefined : k)}
-                        active={searchParams.appt === k}>
-              {label}
-            </ChipButton>
-          ))}
-          <Divider />
-          <DateRange fromName="apptFrom" toName="apptTo" params={searchParams} />
-        </FilterRow>
-
-        <FilterRow label="Earliest available date">
-          <ChipButton href={keep('eta')} active={!searchParams.eta}>Any</ChipButton>
-          {([
-            ['overdue', 'Date passed'], ['today', 'Today'], ['tomorrow', 'Tomorrow'],
-            ['soon', 'Within 3 days'], ['none', 'No date'],
-          ] as const).map(([k, label]) => (
-            <ChipButton key={k} href={keep('eta', searchParams.eta === k ? undefined : k)}
-                        active={searchParams.eta === k}>
-              {label}
-            </ChipButton>
-          ))}
-          <Divider />
-          <DateRange fromName="etaFrom" toName="etaTo" params={searchParams} />
-        </FilterRow>
-
-        <FilterRow label="Order status">
-          <ChipButton href={drop('oappt', 'orderStatus')}
-                      active={!searchParams.oappt && !searchParams.orderStatus}>
-            All
-          </ChipButton>
-          <ChipButton href={keep('oappt', 'any')} active={searchParams.oappt === 'any'}>
-            Converted to order
-          </ChipButton>
-          <Divider />
-          {ORDER_STATUS_FILTERS.map(([k, label]) => (
-            <ChipButton key={k} href={keep('orderStatus', searchParams.orderStatus === k ? undefined : k)}
-                        active={searchParams.orderStatus === k}>
-              {label}
-            </ChipButton>
-          ))}
-        </FilterRow>
-
-        <FilterRow label="Order appointment">
-          <ChipButton href={keep('oappt')} active={!searchParams.oappt}>Any</ChipButton>
-          {([
-            ['today', 'Today'], ['tomorrow', 'Tomorrow'],
-            ['week', 'Next 7 days'], ['past', 'Date passed'],
-          ] as const).map(([k, label]) => (
-            <ChipButton key={k} href={keep('oappt', searchParams.oappt === k ? undefined : k)}
-                        active={searchParams.oappt === k}>
-              {label}
-            </ChipButton>
-          ))}
-        </FilterRow>
-
-        <FilterRow label="Store">
-          <ChipButton href={keep('store')} active={stores.length === 0}>All</ChipButton>
-          {/* Only stores with something in the current view. With forty-odd
-              tracked stores most are zero, and the handful with actual work is
-              what the row is for. What is hidden is counted at the end. */}
-          {facets.stores.filter((st) => st.n > 0).map((st) => (
-            <ChipButton key={st.store_id} href={toggle('store', String(st.store_id))}
-                        active={stores.includes(st.store_id)}>
-              {st.name} <span className="text-ink-400">{st.n}</span>
-            </ChipButton>
-          ))}
-          {(() => {
-            const quiet = facets.stores.filter((st) => st.n === 0).length;
-            const bits = [
-              quiet > 0 ? `${quiet} with none` : null,
-              untracked > 0 ? `${untracked.toLocaleString('en-IN')} hidden` : null,
-            ].filter(Boolean);
-            return (
-              <Link href="/settings/stores"
-                    className="text-[11px] text-brand-600 hover:underline ml-1 whitespace-nowrap">
-                {bits.length ? `${bits.join(' · ')} · edit stores →` : 'edit stores →'}
-              </Link>
-            );
-          })()}
-        </FilterRow>
-
-        {/* The page's job, in the order it happens: open, quoted, accepted,
-            ordered. Listed apart from the stages where nobody is working the
-            request any more, because mixing them made a pipeline read as a
-            set of unrelated labels. */}
-        <FilterRow label="Pipeline">
-          <ChipButton href={keep('status')} active={stages.length === 0}>All</ChipButton>
-          {PIPELINE_STAGES.map((st, i) => {
-            const n = facets.stages.find((x) => x.status === st)?.n ?? 0;
-            return (
-              <span key={st} className="inline-flex items-center gap-1.5">
-                {i > 0 && <span className="text-ink-300 text-[11px]">→</span>}
-                <ChipButton href={toggle('status', st)} active={stages.includes(st)}>
-                  {STAGE_LABEL[st]} <span className="text-ink-400">{n}</span>
-                </ChipButton>
-              </span>
-            );
-          })}
-        </FilterRow>
-
-        <FilterRow label="Closed">
-          {CLOSED_STAGES.filter((st) => (facets.stages.find((x) => x.status === st)?.n ?? 0) > 0)
-            .map((st) => (
-              <ChipButton key={st} href={toggle('status', st)} active={stages.includes(st)}>
-                {STAGE_LABEL[st]}{' '}
-                <span className="text-ink-400">
-                  {facets.stages.find((x) => x.status === st)?.n ?? 0}
-                </span>
-              </ChipButton>
-            ))}
-        </FilterRow>
-
-        <FilterRow label="Sort by">
-          {([
-            ['newest', 'Newest first'],
-            ['oldest', 'Oldest first'],
-            ['value', 'Highest quote'],
-            ['value_asc', 'Lowest quote'],
-            ['soonest', 'Earliest date'],
-            ['demand', 'Highest pincode demand'],
-            ['waiting', 'Waiting longest'],
-          ] as const).map(([k, label]) => (
-            <ChipButton key={k} href={keep('sort', k)} active={(searchParams.sort ?? 'newest') === k}>
-              {label}
-            </ChipButton>
-          ))}
-          <Divider />
-          <ChipButton href={keep('priced', searchParams.priced === '1' ? undefined : '1')}
-                      active={searchParams.priced === '1'}>
-            Priced only
-          </ChipButton>
-          <ChipButton href={keep('haslab', searchParams.haslab === '1' ? undefined : '1')}
-                      active={searchParams.haslab === '1'}>
-            Covering lab only
-          </ChipButton>
-          {/* Atlas worked out the answer and the console has not been told.
-              The highest-value pile on the page, and it had no filter. */}
-          <ChipButton href={keep('unquoted', searchParams.unquoted === '1' ? undefined : '1')}
-                      active={searchParams.unquoted === '1'}>
-            Priced, not yet quoted
-          </ChipButton>
-        </FilterRow>
-      </div>
+      {/* Four rows stay out — when it arrived, where it is in the pipeline,
+          whose account it is, and what order to read it in. The rest answer
+          narrower questions and sit behind the disclosure. */}
+      <FilterPanel
+        activeCount={moreActive}
+        primary={
+          <>
+                    <FilterRow label="Created">
+                      {([
+                        ['today', 'Today'], ['week', 'Last 7 days'], ['month', 'Last 30 days'], ['all', 'All time'],
+                      ] as const).map(([k, label]) => (
+                        <ChipButton key={k} href={keep('window', k)}
+                                    active={(searchParams.window ?? (searchParams.q || stages.length ? 'all' : 'week')) === k}>
+                          {label}
+                        </ChipButton>
+                      ))}
+                      <Divider />
+                      <DateRange fromName="createdFrom" toName="createdTo" params={searchParams} />
+                    </FilterRow>
+                    {/* The page's job, in the order it happens: open, quoted, accepted,
+                        ordered. Listed apart from the stages where nobody is working the
+                        request any more, because mixing them made a pipeline read as a
+                        set of unrelated labels. */}
+                    <FilterRow label="Pipeline">
+                      <ChipButton href={keep('status')} active={stages.length === 0}>All</ChipButton>
+                      {PIPELINE_STAGES.map((st, i) => {
+                        const n = facets.stages.find((x) => x.status === st)?.n ?? 0;
+                        return (
+                          <span key={st} className="inline-flex items-center gap-1.5">
+                            {i > 0 && <span className="text-ink-300 text-[11px]">→</span>}
+                            <ChipButton href={toggle('status', st)} active={stages.includes(st)}>
+                              {STAGE_LABEL[st]} <span className="text-ink-400">{n}</span>
+                            </ChipButton>
+                          </span>
+                        );
+                      })}
+                    </FilterRow>
+                    <FilterRow label="Store">
+                      <ChipButton href={keep('store')} active={stores.length === 0}>All</ChipButton>
+                      {/* Only stores with something in the current view. With forty-odd
+                          tracked stores most are zero, and the handful with actual work is
+                          what the row is for. What is hidden is counted at the end. */}
+                      {facets.stores.filter((st) => st.n > 0).map((st) => (
+                        <ChipButton key={st.store_id} href={toggle('store', String(st.store_id))}
+                                    active={stores.includes(st.store_id)}>
+                          {st.name} <span className="text-ink-400">{st.n}</span>
+                        </ChipButton>
+                      ))}
+                      {(() => {
+                        const quiet = facets.stores.filter((st) => st.n === 0).length;
+                        const bits = [
+                          quiet > 0 ? `${quiet} with none` : null,
+                          untracked > 0 ? `${untracked.toLocaleString('en-IN')} hidden` : null,
+                        ].filter(Boolean);
+                        return (
+                          <Link href="/settings/stores"
+                                className="text-[11px] text-brand-600 hover:underline ml-1 whitespace-nowrap">
+                            {bits.length ? `${bits.join(' · ')} · edit stores →` : 'edit stores →'}
+                          </Link>
+                        );
+                      })()}
+                    </FilterRow>
+                    <FilterRow label="Sort by">
+                      {([
+                        ['newest', 'Newest first'],
+                        ['oldest', 'Oldest first'],
+                        ['value', 'Highest quote'],
+                        ['value_asc', 'Lowest quote'],
+                        ['soonest', 'Earliest date'],
+                        ['demand', 'Highest pincode demand'],
+                        ['waiting', 'Waiting longest'],
+                      ] as const).map(([k, label]) => (
+                        <ChipButton key={k} href={keep('sort', k)} active={(searchParams.sort ?? 'newest') === k}>
+                          {label}
+                        </ChipButton>
+                      ))}
+                      <Divider />
+                      <ChipButton href={keep('priced', searchParams.priced === '1' ? undefined : '1')}
+                                  active={searchParams.priced === '1'}>
+                        Priced only
+                      </ChipButton>
+                      <ChipButton href={keep('haslab', searchParams.haslab === '1' ? undefined : '1')}
+                                  active={searchParams.haslab === '1'}>
+                        Covering lab only
+                      </ChipButton>
+                      {/* Atlas worked out the answer and the console has not been told.
+                          The highest-value pile on the page, and it had no filter. */}
+                      <ChipButton href={keep('unquoted', searchParams.unquoted === '1' ? undefined : '1')}
+                                  active={searchParams.unquoted === '1'}>
+                        Priced, not yet quoted
+                      </ChipButton>
+                    </FilterRow>
+          </>
+        }
+        more={
+          <>
+                    <FilterRow label="Serviceability">
+                      <ChipButton href={keep('state')} active={!state}>All</ChipButton>
+                      {REQUEST_STATES.map((st) => (
+                        <ChipButton key={st} href={keep('state', st)} active={state === st}>
+                          {STATE_SHORT[st]}
+                        </ChipButton>
+                      ))}
+                      <Divider />
+                      {/* "Settled" was jargon for five console statuses that mean nobody
+                          is waiting on us. Name them instead. */}
+                      <ChipButton href={keep('all', openOnly ? '1' : undefined)} active={!openOnly}>
+                        Include ordered &amp; closed
+                      </ChipButton>
+                    </FilterRow>
+                    <FilterRow label="Closed">
+                      {CLOSED_STAGES.filter((st) => (facets.stages.find((x) => x.status === st)?.n ?? 0) > 0)
+                        .map((st) => (
+                          <ChipButton key={st} href={toggle('status', st)} active={stages.includes(st)}>
+                            {STAGE_LABEL[st]}{' '}
+                            <span className="text-ink-400">
+                              {facets.stages.find((x) => x.status === st)?.n ?? 0}
+                            </span>
+                          </ChipButton>
+                        ))}
+                    </FilterRow>
+                    <FilterRow label="Preferred appointment">
+                      <ChipButton href={keep('appt')} active={!searchParams.appt}>Any</ChipButton>
+                      {([
+                        ['overdue', 'Date passed'], ['today', 'Today'], ['tomorrow', 'Tomorrow'],
+                        ['soon', 'Within 3 days'], ['none', 'No date'],
+                      ] as const).map(([k, label]) => (
+                        <ChipButton key={k} href={keep('appt', searchParams.appt === k ? undefined : k)}
+                                    active={searchParams.appt === k}>
+                          {label}
+                        </ChipButton>
+                      ))}
+                      <Divider />
+                      <DateRange fromName="apptFrom" toName="apptTo" params={searchParams} />
+                    </FilterRow>
+                    <FilterRow label="Earliest available date">
+                      <ChipButton href={keep('eta')} active={!searchParams.eta}>Any</ChipButton>
+                      {([
+                        ['overdue', 'Date passed'], ['today', 'Today'], ['tomorrow', 'Tomorrow'],
+                        ['soon', 'Within 3 days'], ['none', 'No date'],
+                      ] as const).map(([k, label]) => (
+                        <ChipButton key={k} href={keep('eta', searchParams.eta === k ? undefined : k)}
+                                    active={searchParams.eta === k}>
+                          {label}
+                        </ChipButton>
+                      ))}
+                      <Divider />
+                      <DateRange fromName="etaFrom" toName="etaTo" params={searchParams} />
+                    </FilterRow>
+                    <FilterRow label="Order status">
+                      <ChipButton href={drop('oappt', 'orderStatus')}
+                                  active={!searchParams.oappt && !searchParams.orderStatus}>
+                        All
+                      </ChipButton>
+                      <ChipButton href={keep('oappt', 'any')} active={searchParams.oappt === 'any'}>
+                        Converted to order
+                      </ChipButton>
+                      <Divider />
+                      {ORDER_STATUS_FILTERS.map(([k, label]) => (
+                        <ChipButton key={k} href={keep('orderStatus', searchParams.orderStatus === k ? undefined : k)}
+                                    active={searchParams.orderStatus === k}>
+                          {label}
+                        </ChipButton>
+                      ))}
+                    </FilterRow>
+                    <FilterRow label="Order appointment">
+                      <ChipButton href={keep('oappt')} active={!searchParams.oappt}>Any</ChipButton>
+                      {([
+                        ['today', 'Today'], ['tomorrow', 'Tomorrow'],
+                        ['week', 'Next 7 days'], ['past', 'Date passed'],
+                      ] as const).map(([k, label]) => (
+                        <ChipButton key={k} href={keep('oappt', searchParams.oappt === k ? undefined : k)}
+                                    active={searchParams.oappt === k}>
+                          {label}
+                        </ChipButton>
+                      ))}
+                    </FilterRow>
+          </>
+        }
+      />
 
       <Card>
         <CardHeader

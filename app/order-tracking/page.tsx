@@ -47,7 +47,7 @@ const QUEUE = {
 export default async function OrderTrackingPage({
   searchParams,
 }: {
-  searchParams: { tab?: string; urgent?: string; mine?: string; day?: string };
+  searchParams: { tab?: string; urgent?: string; mine?: string; day?: string; within?: string };
 }) {
   const gate = await requireView('orderTracking', '/order-tracking');
   if (gate.blocked) return <RoleBlocked area="Order tracking" detail="network, operations and admin" />;
@@ -62,13 +62,23 @@ export default async function OrderTrackingPage({
   const tab: TaskKind = (TASK_KINDS as readonly string[]).includes(searchParams.tab ?? '')
     ? (searchParams.tab as TaskKind) : 'needs_lab';
   const urgent = searchParams.urgent === '1';
+  // How far ahead the allocation queue looks. Some of this job is done days in
+  // advance off a list of everything coming up, and some of it is today's
+  // stragglers; one "urgent or not" switch only served the second.
+  const HORIZONS = [
+    { key: '0', label: 'Today', days: 0 },
+    { key: '3', label: 'Next 3 days', days: 3 },
+    { key: '7', label: 'Next 7 days', days: 7 },
+  ] as const;
+  const horizon = HORIZONS.find((h) => h.key === searchParams.within)?.days;
   const mine = searchParams.mine === '1';
   const canAssign = canManage(gate.user, 'orderTracking');
 
   const [counts, rows, people, dayRows, shape] = await Promise.all([
     getQueueCounts(),
     isDay ? Promise.resolve([]) : getTasks(tab, {
-      urgent: urgent && tab !== 'confirm_pickup',
+      withinDays: tab === 'needs_lab' ? horizon : undefined,
+      urgent: urgent && tab === 'chase_report',
       late: urgent && tab === 'chase_report',
       assignee: mine ? gate.user.id : undefined,
     }),
@@ -82,6 +92,7 @@ export default async function OrderTrackingPage({
     const merged: Record<string, string | undefined> = {
       tab: isDay ? 'day' : tab === 'needs_lab' ? undefined : tab,
       urgent: urgent ? '1' : undefined,
+      within: searchParams.within,
       mine: mine ? '1' : undefined,
       day: day === today ? undefined : day,
       ...patch,
@@ -220,17 +231,31 @@ export default async function OrderTrackingPage({
               <span className="text-[12px] font-semibold text-danger-500">{here.urgent(count.urgent)}</span>
             )}
             <span className="text-[12px] text-ink-500">{count.unassigned} unassigned</span>
-            <span className="text-[12px] text-ink-500">{rows.length} shown</span>
+            <span className="text-[12px] text-ink-500">
+              {rows.length} shown
+              {tab === 'needs_lab' && horizon != null && ` · deadline within ${horizon === 0 ? 'today' : `${horizon} days`}`}
+            </span>
           </div>
         </div>
 
         <div className="flex flex-wrap items-center gap-1.5">
-          {tab !== 'confirm_pickup' && (
+          {tab === 'needs_lab' && (
+            <>
+              <ChipButton href={link({ within: undefined })} active={horizon == null}>
+                Everything ahead
+              </ChipButton>
+              {HORIZONS.map((h) => (
+                <ChipButton key={h.key} href={link({ within: h.key })} active={horizon === h.days}>
+                  {h.label}
+                </ChipButton>
+              ))}
+              <span className="w-px h-4 bg-ink-200 mx-1" />
+            </>
+          )}
+          {tab === 'chase_report' && (
             <>
               <ChipButton href={link({ urgent: undefined })} active={!urgent}>All</ChipButton>
-              <ChipButton href={link({ urgent: '1' })} active={urgent}>
-                {tab === 'chase_report' ? 'Late only' : 'Due today or tomorrow'}
-              </ChipButton>
+              <ChipButton href={link({ urgent: '1' })} active={urgent}>Late only</ChipButton>
               <span className="w-px h-4 bg-ink-200 mx-1" />
             </>
           )}

@@ -179,7 +179,7 @@ export function TaskTable({
       )}
 
       <div className="-mx-5 overflow-x-auto">
-        <table className="w-full text-sm min-w-[1180px]">
+        <table className="w-full text-sm min-w-[1400px]">
           <thead>
             <tr className="text-[11px] uppercase tracking-wide text-ink-400 border-b border-ink-200">
               {canAssign && (
@@ -196,10 +196,12 @@ export function TaskTable({
                 {kind === 'chase_report' ? 'Late by' : kind === 'confirm_pickup' ? 'Time' : 'Deadline'}
               </th>
               <th className="text-left font-medium px-2 py-2 w-[124px]">Order</th>
+              <th className="text-left font-medium px-2 py-2 min-w-[146px]">Requester</th>
               {kind === 'needs_lab' ? (
                 <>
                   <th className="text-left font-medium px-2 py-2 w-[150px]">Appointment</th>
                   <th className="text-left font-medium px-2 py-2">Where</th>
+                  <th className="text-left font-medium px-2 py-2 w-[176px]">Lab</th>
                   <th className="text-left font-medium px-2 py-2 w-[130px]">Labs in range</th>
                   <th className="text-right font-medium px-2 py-2 w-[88px]">Quote</th>
                 </>
@@ -250,6 +252,19 @@ export function TaskTable({
                   )}
                 </td>
 
+                <td className="px-2 py-2.5 text-xs">
+                  <span className="block text-ink-800 truncate max-w-[146px]">
+                    {r.requester_name ?? <span className="text-ink-400">no name</span>}
+                  </span>
+                  {r.requester_mobile ? (
+                    <a href={`tel:${r.requester_mobile.replace(/[^\d+]/g, '')}`}
+                       className="inline-flex items-center gap-1 text-[11px] text-brand-700 dark:text-brand-400 num hover:underline">
+                      <Phone className="w-2.5 h-2.5" />{r.requester_mobile}
+                    </a>
+                  ) : (
+                    <span className="block text-[11px] text-ink-400">no number</span>
+                  )}
+                </td>
                 {kind === 'needs_lab' ? (
                   <>
                     <td className="px-2 py-2.5 whitespace-nowrap text-ink-700">
@@ -267,6 +282,12 @@ export function TaskTable({
                       ) : (
                         <span className="text-[12px] text-ink-400">no request behind it</span>
                       )}
+                    </td>
+                    <td className="px-2 py-2.5">
+                      <span className="inline-flex items-center gap-1 text-[12px] font-semibold text-danger-500">
+                        <AlertTriangle className="w-3 h-3" /> LabStack Networks
+                      </span>
+                      <span className="block text-[11px] text-ink-400">the placeholder, not a real lab</span>
                     </td>
                     <td className="px-2 py-2.5">
                       {r.labs_in_range == null ? (

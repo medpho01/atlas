@@ -74,6 +74,14 @@ export type TaskRow = {
 };
 
 export type TaskFilters = {
+  /**
+   * How far ahead to look, in days from today.
+   *
+   * Allocation is not one job. Some of it is done days in advance, in a batch,
+   * off a list of everything coming up; some of it is today's stragglers. A
+   * single "urgent or not" switch served the second and hid the first.
+   */
+  withinDays?: number;
   /** Allocation: only the ones whose deadline is today or tomorrow. */
   urgent?: boolean;
   /** Report: only the ones already past 48 hours. */
@@ -115,6 +123,10 @@ export async function getTasks(kind: TaskKind, f: TaskFilters = {}): Promise<Tas
   const where: string[] = ['t.kind = $1'];
 
   if (f.urgent) where.push('(t.overdue OR t.days_left <= 1)');
+  if (f.withinDays != null) {
+    params.push(f.withinDays);
+    where.push(`(t.overdue OR t.days_left <= $${params.length})`);
+  }
   if (f.late) where.push('t.overdue');
   if (f.assignee === 'none') where.push('t.assignee_id IS NULL');
   else if (typeof f.assignee === 'number') {
