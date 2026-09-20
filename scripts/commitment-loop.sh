@@ -26,7 +26,7 @@ REQUEST_HOURS="${REQUEST_SYNC_HOURS:-48}"
 PGHOST="${PGHOST:-atlas-db}"
 
 log() { echo "[sync $(date -Iseconds)] $*"; }
-log "Poller started — commitments every ${INTERVAL_MIN} min, requests every $(( INTERVAL_MIN * REQUEST_EVERY )) min, against ${PGHOST}"
+log "Poller started — commitments and live orders every ${INTERVAL_MIN} min, requests every $(( INTERVAL_MIN * REQUEST_EVERY )) min, against ${PGHOST}"
 
 cycle=0
 while true; do
@@ -46,7 +46,11 @@ while true; do
         -c "SELECT CASE WHEN pkg_links + test_links + items = 0 THEN ''
                         ELSE pkg_links || ' pkg links, ' || test_links ||
                              ' test links, ' || items || ' items' END
-              FROM atlas.topup_request_items();" 2>&1)
+              FROM atlas.topup_request_items();" \
+        -c "SELECT CASE WHEN failed IS NOT NULL THEN 'orders NOT synced: ' || failed
+                        WHEN inserted > 0 THEN inserted || ' new orders'
+                        ELSE '' END
+              FROM atlas.sync_orders_live();" 2>&1)
   status=$?
   if [ $status -ne 0 ]; then
     log "FAILED: $out"

@@ -47,6 +47,7 @@ export const NAV: NavGroup[] = [
     noun: 'demand',
     items: [
       { href: '/requests', label: 'Requests', feature: 'requests', alsoActiveOn: ['/request'] },
+      { href: '/order-tracking', label: 'Order tracking', feature: 'orderTracking' },
     ],
   },
   {

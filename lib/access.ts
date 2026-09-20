@@ -52,7 +52,8 @@ export type Feature =
   | 'pricing'           // Growth › Packages & Pricing (rates and quotes)
   | 'providerPipeline'  // Growth › Provider onboarding
   | 'requests'          // Fulfilment › Requests (ops: quote and date)
-  | 'commitments'       // Fulfilment › Network bucket (open promises)
+  | 'commitments'       // open promises — gates quoting actions on requests
+  | 'orderTracking'     // Fulfilment › Order tracking (the three order queues)
   | 'admin';            // users & roles
 
 export type Capability = 'none' | 'view' | 'manage';
@@ -73,6 +74,8 @@ const REQUIRES: Partial<Record<Feature, Feature>> = {
   // actionable if you can open the lab you're being told to negotiate with.
   requests: 'pricing',
   commitments: 'directory',
+  // Chasing an order means opening the lab you are chasing.
+  orderTracking: 'directory',
 };
 
 const MATRIX: Record<Feature, Record<Role, Capability>> = {
@@ -87,6 +90,9 @@ const MATRIX: Record<Feature, Record<Role, Capability>> = {
   // the one screen where they act rather than read.
   requests:         { admin: 'manage', network_lead: 'manage', network: 'manage', accounts: 'view',   operations: 'manage', editor: 'view',   viewer: 'none' },
   commitments:      { admin: 'manage', network_lead: 'manage', network: 'manage', accounts: 'view',   operations: 'view',   editor: 'view',   viewer: 'none' },
+  // Network works the queues; only a lead hands the work out, which is the
+  // difference between 'manage' and 'view' on this one.
+  orderTracking:    { admin: 'manage', network_lead: 'manage', network: 'view',   accounts: 'none',   operations: 'view',   editor: 'view',   viewer: 'none' },
   admin:            { admin: 'manage', network_lead: 'none', network: 'none',   accounts: 'none',   operations: 'none',   editor: 'none',   viewer: 'none' },
 };
 
@@ -142,7 +148,8 @@ export const FEATURE_LABEL: Record<Feature, string> = {
   accountHealth: 'Account health',
   catalogue: 'Catalogue',
   requests: 'Requests',
-  commitments: 'Network bucket',
+  commitments: 'Open promises',
+  orderTracking: 'Order tracking',
   pricing: 'Packages & Pricing',
   providerPipeline: 'Provider onboarding',
   admin: 'Users & roles',
