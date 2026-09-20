@@ -12,8 +12,15 @@ import {
 const inr = (v: string | null) =>
   v == null ? null : '₹' + Math.round(Number(v)).toLocaleString('en-IN');
 
+/** "Sat, 20 Sep" — the weekday earns its place on a date somebody has to keep. */
 const day = (d: string | null) =>
-  d ? new Date(d).toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' }) : null;
+  d ? new Date(d).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' }) : null;
+
+/** "20 Sep" — for dates that are a fact rather than an appointment. */
+const shortDay = (d: string | null) =>
+  d ? new Date(d).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) : null;
+
+const Blank = () => <span className="text-ink-300">—</span>;
 
 /**
  * The appointment clock, already in IST as text. Reading it through Date would
@@ -100,7 +107,7 @@ export function RequestsTable({
     // a scroll container it simply drew over the card's edge — the rounded
     // corner clipped the last column and there was no way to reach it.
     <div className="overflow-x-auto">
-    <table className="w-full text-sm tabular-nums min-w-[1400px]">
+    <table className="w-full text-sm tabular-nums min-w-[1560px]">
       <thead>
         <tr className="text-[11px] uppercase tracking-wide text-ink-400 border-b border-ink-200">
           <th className="text-left font-medium px-5 py-2">Request</th>
@@ -111,7 +118,12 @@ export function RequestsTable({
           <th className="text-left font-medium px-2 py-2 w-[130px]">Serviceability</th>
           <th className="text-left font-medium px-2 py-2 min-w-[200px]">Covering labs</th>
           <th className="text-right font-medium px-2 py-2">Quote</th>
-          <th className="text-left font-medium px-2 py-2 w-[110px]">Earliest available</th>
+          {/* The three dates, side by side, because the only useful thing to
+              do with them is compare them: how long it has waited, the date
+              asked for, and the date we can do. */}
+          <th className="text-left font-medium px-2 py-2 w-[86px]">Created</th>
+          <th className="text-left font-medium px-2 py-2 w-[104px]">Requested</th>
+          <th className="text-left font-medium px-2 py-2 w-[104px]">Earliest available</th>
           <th className="text-left font-medium px-2 py-2 min-w-[150px]">Order</th>
           {/* Pinned, because it is the action. Scrolling sideways to reach
               the Copy button would make the one thing this page exists for
@@ -136,9 +148,6 @@ export function RequestsTable({
                 <td className="px-5 py-2.5 font-medium text-ink-900 whitespace-nowrap">
                   <ChevronRight className="inline w-3.5 h-3.5 mr-1 text-ink-400" />
                   #{r.request_id}
-                  <span className="block text-[10px] text-ink-400 font-normal ml-4.5">
-                    {new Date(r.created_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}
-                  </span>
                 </td>
                 <td className="px-2 py-2.5 text-ink-700 text-xs">
                   {r.store_name ?? <span className="text-ink-400">—</span>}
@@ -230,6 +239,12 @@ export function RequestsTable({
                   {r.quote_price && r.markup_pct && (
                     <span className="block text-[10px] text-ink-400">+{Number(r.markup_pct)}%</span>
                   )}
+                </td>
+                <td className="px-2 py-2.5 whitespace-nowrap text-ink-600">
+                  {shortDay(r.created_date ?? r.created_at) ?? <Blank />}
+                </td>
+                <td className="px-2 py-2.5 whitespace-nowrap text-ink-700">
+                  {day(r.requested_date) ?? <Blank />}
                 </td>
                 <td className="px-2 py-2.5 whitespace-nowrap text-ink-700">
                   {day(r.committed_date ?? r.promised_date)
