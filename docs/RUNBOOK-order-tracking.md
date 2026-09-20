@@ -1,13 +1,28 @@
 # Runbook — order tracking
 
 `/order-tracking`. Three queues an order passes through after it leaves the
-request queue, each with its own deadline:
+request queue, plus a day view.
+
+**Only orders that came from a request appear anywhere on this page.** A
+store's own direct order has no quote to honour and nobody on this team owns
+it. `analytics.v_request_order` is the ledger — it inner-joins Request, which
+also cuts the base the queues derive from by twelve times.
+
+The three queues, each with its own deadline:
 
 | Tab | Due | Applies to | Closes when |
 |---|---|---|---|
 | **Needs a lab** | day before the appointment | any order still on the placeholder lab | `labId` is no longer the placeholder |
 | **Pickup today** | the day itself | today's appointments at labs under the threshold | status reaches `SAMPLE_COLLECTED` or beyond |
 | **Report outstanding** | pickup + 48 hours | the same cohort, sample taken | status reaches `REPORT_DELIVERED` |
+
+## Orders by day
+
+The fourth tab is not a queue. It lists every request-born order with an
+appointment on one date, **whatever state it is in** — cancelled and delivered
+included, which no queue shows. Unallocated orders sort to the top and say
+"LabStack Networks — no real lab" in red rather than printing the placeholder's
+name as though it were an allocation.
 
 ## Derived, not filed
 
@@ -79,6 +94,22 @@ given and can add notes to anything.
 
 Assignment needs the team to exist as users. If the assign picker is empty,
 nobody has an active `network`, `network_lead` or `admin` account yet.
+
+## When it is slow
+
+Run the speed check before anything else:
+
+```bash
+docker exec -i atlas-db psql -U atlas -d atlas -f - < sql/reports/speed-check.sql
+```
+
+Section 1 is the usual answer. `src_local.*` tables are created with
+`CREATE TABLE ... (LIKE src.X)`, which copies no indexes, so a table showing
+`0` means every join against it is a sequential scan and every page that
+touches it is slow. Apply `sql/init/22_src_local_indexes.sql`.
+
+Section 4 tells you whether the live order sync is working; a non-null
+`failed` means the queues are reading last night's data.
 
 ## When a queue looks wrong
 

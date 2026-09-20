@@ -201,3 +201,95 @@ export async function getOrderTimeline(orderId: number) {
     WHERE o.id = $1
   `, [orderId]);
 }
+
+
+/* -------------------------------------------------------------------------- */
+/* The day view: every request-born order on one date                          */
+/* -------------------------------------------------------------------------- */
+
+export type OrderRow = {
+  order_id: number;
+  appointment_at: string;
+  appointment_date: string;
+  order_status: string | null;
+  order_type: string | null;
+  lab_id: number | null;
+  lab_name: string | null;
+  lab_city: string | null;
+  lab_phone: string | null;
+  lab_email: string | null;
+  on_placeholder: boolean;
+  lab_orders_all_time: number;
+  lab_delivered: number;
+  lab_failed: number;
+  store_name: string | null;
+  request_id: number;
+  request_pincode: string | null;
+  request_city: string | null;
+  requester_name: string | null;
+  requester_mobile: string | null;
+  request_status: string | null;
+  quoted_price: string | null;
+  promised_date: string | null;
+};
+
+/** Today in IST, because the day is the team's day, not the server's. */
+export function istDay(offsetDays = 0): string {
+  const d = new Date(Date.now() + 5.5 * 3600 * 1000 + offsetDays * 86400_000);
+  return d.toISOString().slice(0, 10);
+}
+
+export function shiftDay(day: string, n: number): string {
+  const d = new Date(`${day}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().slice(0, 10);
+}
+
+/**
+ * Everything a request turned into on one day, whatever state it is in.
+ *
+ * The queues answer "what needs doing"; this answers "what is happening", and
+ * the two are not the same list — a cancelled order and one already delivered
+ * belong here and in no queue. Unallocated first, because an order still on
+ * the placeholder lab on the day itself is the one worth seeing first.
+ */
+export async function getOrdersOnDate(day: string): Promise<OrderRow[]> {
+  return query<OrderRow>(`
+    SELECT v.order_id,
+           v.appointment_at::text   AS appointment_at,
+           v.appointment_date::text AS appointment_date,
+           v.order_status, v.order_type,
+           v.lab_id, v.lab_name, v.lab_city, v.lab_phone, v.lab_email,
+           v.on_placeholder,
+           v.lab_orders_all_time, v.lab_delivered, v.lab_failed,
+           v.store_name,
+           v.request_id, v.request_pincode, v.request_city,
+           v.requester_name, v.requester_mobile, v.request_status,
+           v.quoted_price::text     AS quoted_price,
+           v.promised_date::text    AS promised_date
+    FROM analytics.v_request_order v
+    WHERE v.appointment_date = $1::date
+    ORDER BY v.on_placeholder DESC, v.appointment_at, v.order_id
+    LIMIT 500
+  `, [day]);
+}
+
+export type DayShape = {
+  orders: number; unallocated: number; new_labs: number;
+  collected: number; delivered: number; cancelled: number;
+};
+
+/** The one line above the day's table. */
+export async function getDayShape(day: string) {
+  return queryOne<DayShape>(`
+    SELECT count(*)::int AS orders,
+           count(*) FILTER (WHERE on_placeholder)::int AS unallocated,
+           count(*) FILTER (WHERE NOT on_placeholder AND lab_orders_all_time <
+             COALESCE(atlas.request_setting('followup_max_lifetime_orders')::int, 5))::int AS new_labs,
+           count(*) FILTER (WHERE order_status IN ('SAMPLE_COLLECTED','SAMPLE_DELIVERED','SAMPLE_PROCESSED'))::int AS collected,
+           count(*) FILTER (WHERE order_status = 'REPORT_DELIVERED')::int AS delivered,
+           count(*) FILTER (WHERE order_status IN ('CANCELED','PATIENT_MISSED'))::int AS cancelled
+    FROM analytics.v_request_order
+    WHERE appointment_date = $1::date
+  `, [day]);
+}
