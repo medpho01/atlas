@@ -101,7 +101,6 @@ export default async function RequestsPage({
     apptFrom: searchParams.apptFrom,       apptTo: searchParams.apptTo,
     etaFrom: searchParams.etaFrom,         etaTo: searchParams.etaTo,
     orderStatus: searchParams.orderStatus,
-    mismatch: searchParams.mismatch as 'console_no' | 'console_yes' | undefined,
     openOnly,
     limit: 150,
   };
@@ -219,22 +218,10 @@ export default async function RequestsPage({
             </ChipButton>
           ))}
           <Divider />
+          {/* "Settled" was jargon for five console statuses that mean nobody
+              is waiting on us. Name them instead. */}
           <ChipButton href={keep('all', openOnly ? '1' : undefined)} active={!openOnly}>
-            Include settled
-          </ChipButton>
-        </FilterRow>
-
-        {/* The console records its own serviceability verdict per request.
-            Where the two differ, one of them is wrong in a way that costs
-            money — a request turned away that we could serve, or one accepted
-            that we have no supply for. */}
-        <FilterRow label="Serviceability mismatch">
-          <ChipButton href={keep('mismatch')} active={!searchParams.mismatch}>None</ChipButton>
-          <ChipButton href={keep('mismatch', 'console_no')} active={searchParams.mismatch === 'console_no'}>
-            Console: not serviceable · Atlas: serviceable
-          </ChipButton>
-          <ChipButton href={keep('mismatch', 'console_yes')} active={searchParams.mismatch === 'console_yes'}>
-            Console: serviceable · Atlas: not serviceable
+            Include ordered &amp; closed
           </ChipButton>
         </FilterRow>
 

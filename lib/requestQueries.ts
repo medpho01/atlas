@@ -37,8 +37,6 @@ export type RequestFilters = {
   etaFrom?: string;     etaTo?: string;
   /** Order status on the converted order, e.g. REPORT_DELIVERED. */
   orderStatus?: string;
-  /** Serviceability mismatch between the console and Atlas. */
-  mismatch?: 'console_no' | 'console_yes';
   /** Include stores switched off in settings. Off by default. */
   includeUntracked?: boolean;
   limit?: number;
@@ -124,12 +122,6 @@ function build(f: RequestFilters) {
     add(`EXISTS (SELECT 1 FROM src_local."Order" o
                   WHERE o.id = order_id AND o."orderStatus"::text = ?)`, f.orderStatus);
   }
-
-  // The console records its own serviceability verdict per request. Where it
-  // differs from Atlas's, one of the two is losing money: a request turned
-  // away that we could serve, or one accepted that we cannot.
-  if (f.mismatch === 'console_no')  where.push(`NOT src_flag AND state = 'SERVICEABLE'`);
-  if (f.mismatch === 'console_yes') where.push(`src_flag AND state <> 'SERVICEABLE'`);
 
   if (f.priced) where.push('quote_price IS NOT NULL');
   if (f.hasLab) where.push('covering_labs > 0');

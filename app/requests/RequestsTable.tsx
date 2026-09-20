@@ -87,7 +87,8 @@ export function RequestsTable({
           </p>
         )}
         <p className="mt-2 text-[11px] text-ink-400">
-          Settled requests are hidden by default. Use “Include settled” to show them.
+          Ordered, discharged, cancelled, denied and wrong-number requests are hidden by
+          default. Use “Include ordered &amp; closed” to show them.
         </p>
       </div>
     );
@@ -180,14 +181,13 @@ export function RequestsTable({
                   <span className={`inline-block rounded border px-1.5 py-0.5 text-[11px] ${TONE_CHIP[tone]}`}>
                     {STATE_SHORT[r.state] ?? r.state}
                   </span>
-                  {/* One sub-label at most. Stacking "convert in console" over
-                      "console disagrees" doubled every serviceable row's
-                      height for a note that repeats on thousands of rows. */}
-                  {!r.src_flag && r.state === 'SERVICEABLE' ? (
-                    <span className="block text-[10px] text-warn-600 mt-0.5">Console: not serviceable</span>
-                  ) : owner === 'console' ? (
+                  {/* One verdict per row. The console's own isServiceable
+                      column is not the same measure — it is false on 3,326
+                      requests that became orders — so showing both invited a
+                      comparison neither field can win. */}
+                  {owner === 'console' && (
                     <span className="block text-[10px] text-ink-400 mt-0.5">Convert in console</span>
-                  ) : null}
+                  )}
                 </td>
                 {/* Who can serve it and what they lack — the negotiation, in the row. */}
                 <td className="px-2 py-2.5 text-xs">

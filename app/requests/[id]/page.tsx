@@ -329,12 +329,6 @@ export default async function RequestDetail({ params }: { params: { id: string }
                 <div className="flex justify-between"><span className="text-ink-500">Markup</span>
                   <b className="text-ink-900">+{Number(r.markup_pct)}%</b></div>
               )}
-              {!r.src_flag && r.state === 'SERVICEABLE' && (
-                <p className="text-warn-600 pt-1 border-t border-ink-100">
-                  The console has this flagged not serviceable. Atlas finds a covering lab that
-                  offers everything asked for.
-                </p>
-              )}
             </CardBody>
           </Card>
 

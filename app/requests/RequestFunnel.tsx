@@ -1,4 +1,8 @@
 import Link from 'next/link';
+import { Inbox, IndianRupee, PackageCheck, MapPinOff, Clock, FileQuestion } from 'lucide-react';
+import { KpiTile } from '@/components/KpiTile';
+import { StickyMetrics } from '@/components/ui/StickyMetrics';
+import { InfoTip } from '@/components/ui/InfoTip';
 
 export type Funnel = {
   received: number; answerable: number; priced: number;
@@ -9,7 +13,8 @@ export type Funnel = {
 const n = (v: number) => v.toLocaleString('en-IN');
 
 /**
- * Headline counts for the selected arrival window.
+ * Headline counts for the selected arrival window, in the same tiles every
+ * other page uses.
  *
  * Counts only. The stage-by-stage chart that used to sit under these was a
  * report rather than a queue, and it stood between the filters and the rows
@@ -22,55 +27,82 @@ export function RequestFunnel({
   windowLabel: string;
   hrefFor: (key: string, value?: string) => string;
 }) {
-  const conv     = funnel.received  ? Math.round((funnel.ordered / funnel.received) * 100) : 0;
+  const conv     = funnel.received   ? Math.round((funnel.ordered / funnel.received) * 100) : 0;
   const answered = funnel.answerable ? Math.round((funnel.priced / funnel.answerable) * 100) : 0;
 
-  const stats: {
-    label: string; value: string; sub?: string; tone?: string; href?: string;
-  }[] = [
-    { label: 'Requests received', value: n(funnel.received), sub: windowLabel },
-    { label: 'Priced or serviceable', value: `${answered}%`, sub: `${n(funnel.priced)} of ${n(funnel.answerable)} identified`,
-      tone: answered >= 80 ? 'text-success-600' : 'text-warn-600' },
-    { label: 'Converted to orders', value: `${conv}%`, sub: `${n(funnel.ordered)} orders`,
-      tone: conv >= 50 ? 'text-success-600' : 'text-ink-900' },
-    { label: 'Supply gap', value: n(funnel.supply_gap), sub: 'no lab carries the request',
-      tone: funnel.supply_gap ? 'text-warn-600' : undefined,
-      href: hrefFor('state', 'SUPPLY_GAP_KNOWN') },
-    { label: 'Awaiting supply', value: n(funnel.awaiting), sub: 'ordered, lab not assigned',
-      tone: funnel.awaiting ? 'text-warn-600' : undefined },
-    { label: 'Unidentified items', value: n(funnel.no_ask), sub: `${n(funnel.no_pincode)} without a pincode`,
-      tone: funnel.no_ask ? 'text-danger-500' : undefined,
-      href: hrefFor('state', 'NO_ITEMS') },
-  ];
-
-  if (!funnel.received) {
-    return (
-      <div className="mb-4 rounded-lg border border-ink-200 bg-surface px-4 py-6 text-center">
-        <p className="text-sm text-ink-500">No requests in this window.</p>
-      </div>
-    );
-  }
-
   return (
-    <div className="mb-4 rounded-lg border border-ink-200 bg-surface
-                    grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6
-                    divide-x divide-y lg:divide-y-0 divide-ink-100">
-      {stats.map((s) => {
-        const body = (
-          <>
-            <div className={`text-xl font-semibold num ${s.tone ?? 'text-ink-900'}`}>{s.value}</div>
-            <div className="text-[11px] font-medium text-ink-700 mt-1">{s.label}</div>
-            {s.sub && <div className="text-[11px] text-ink-400 mt-0.5 leading-snug">{s.sub}</div>}
-          </>
-        );
-        return s.href ? (
-          <Link key={s.label} href={s.href} className="px-4 py-3 hover:bg-ink-100/40 transition-colors">
-            {body}
-          </Link>
-        ) : (
-          <div key={s.label} className="px-4 py-3">{body}</div>
-        );
-      })}
-    </div>
+    <StickyMetrics title="Requests" className="mb-5">
+      <div className="kpi-row grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+        <KpiTile
+          label="Requests received"
+          value={n(funnel.received)}
+          sub={windowLabel}
+          icon={<Inbox className="w-4 h-4" />}
+          info={<InfoTip title="Requests received"
+                shows="Every request that arrived in the selected window, before any other filter."
+                computed="Count of requests by creation date."
+                drives="Change the Created filter to widen or narrow the window." />}
+        />
+        <KpiTile
+          label="Priced or serviceable"
+          value={`${answered}%`}
+          sub={`${n(funnel.priced)} of ${n(funnel.answerable)} identified`}
+          tone={answered >= 80 ? 'good' : 'warn'}
+          icon={<IndianRupee className="w-4 h-4" />}
+          info={<InfoTip title="Priced or serviceable"
+                shows="Of the requests whose items Atlas could identify, the share it could answer — either a covering lab exists or a price could be computed."
+                computed="Serviceable requests plus those with a quote, over requests with identifiable items and a pincode."
+                drives="A low share means pricing inputs are missing, not that supply is short." />}
+        />
+        <KpiTile
+          label="Converted to orders"
+          value={`${conv}%`}
+          sub={`${n(funnel.ordered)} orders`}
+          tone={conv >= 50 ? 'good' : 'default'}
+          icon={<PackageCheck className="w-4 h-4" />}
+          info={<InfoTip title="Converted to orders"
+                shows="The share of requests in this window that became an order in the console."
+                computed="Requests with a converted order id, over requests received."
+                drives="Filter Order status to see where the orders themselves ended up." />}
+        />
+        <Link href={hrefFor('state', 'SUPPLY_GAP_KNOWN')} className="block">
+        <KpiTile
+          label="Supply gap"
+          value={n(funnel.supply_gap)}
+          sub="no lab carries the request"
+          tone={funnel.supply_gap ? 'warn' : 'default'}
+          icon={<MapPinOff className="w-4 h-4" />}
+          info={<InfoTip title="Supply gap"
+                shows="Requests where no lab in the network covers the pincode with everything asked for."
+                computed="Requests in a SUPPLY_GAP state."
+                drives="Each one is a lab to onboard. Click the tile to filter to them." />}
+        />
+        </Link>
+        <KpiTile
+          label="Awaiting supply"
+          value={n(funnel.awaiting)}
+          sub="ordered, lab not assigned"
+          tone={funnel.awaiting ? 'warn' : 'default'}
+          icon={<Clock className="w-4 h-4" />}
+          info={<InfoTip title="Awaiting supply"
+                shows="Orders booked against the placeholder lab, with a date already given to the store."
+                computed="Open commitments on requests in this window."
+                drives="These have a clock on them. Securing a lab is the only thing that closes them." />}
+        />
+        <Link href={hrefFor('state', 'NO_ITEMS')} className="block">
+        <KpiTile
+          label="Unidentified items"
+          value={n(funnel.no_ask)}
+          sub={`${n(funnel.no_pincode)} without a pincode`}
+          tone={funnel.no_ask ? 'bad' : 'default'}
+          icon={<FileQuestion className="w-4 h-4" />}
+          info={<InfoTip title="Unidentified items"
+                shows="Requests where nothing asked for could be matched to the catalogue, so Atlas cannot price or place them."
+                computed="Requests in the NO_ITEMS state; the sub-count is requests with no pincode."
+                drives="A data problem, not a supply one — the catalogue mapping is what fixes it." />}
+        />
+        </Link>
+      </div>
+    </StickyMetrics>
   );
 }
