@@ -21,18 +21,24 @@ export type RequestFilters = {
   sort?: 'newest' | 'oldest' | 'value' | 'value_asc' | 'soonest' | 'demand';
   /** Only rows Atlas could price. */
   priced?: boolean;
-  /** Only rows where the console and Atlas disagree on serviceability. */
-  disputed?: boolean;
   /** Only rows with a lab already covering the pincode. */
   hasLab?: boolean;
   /** Created-date window: today | week | month | all. */
   window?: 'today' | 'week' | 'month' | 'all';
   /** Preferred appointment: today | tomorrow | soon (<=3d) | overdue | none. */
   appt?: 'today' | 'tomorrow' | 'soon' | 'overdue' | 'none';
-  /** The date we promised: today | tomorrow | soon (<=3d) | overdue | none. */
+  /** Earliest available date: today | tomorrow | soon (<=3d) | overdue | none. */
   eta?: 'today' | 'tomorrow' | 'soon' | 'overdue' | 'none';
   /** The appointment on the resulting order: today | tomorrow | week | past | any. */
   oappt?: 'today' | 'tomorrow' | 'week' | 'past' | 'any';
+  /** Explicit date ranges, ISO yyyy-mm-dd. Applied on top of the chips. */
+  createdFrom?: string; createdTo?: string;
+  apptFrom?: string;    apptTo?: string;
+  etaFrom?: string;     etaTo?: string;
+  /** Order status on the converted order, e.g. REPORT_DELIVERED. */
+  orderStatus?: string;
+  /** Serviceability mismatch between the console and Atlas. */
+  mismatch?: 'console_no' | 'console_yes';
   /** Include stores switched off in settings. Off by default. */
   includeUntracked?: boolean;
   limit?: number;
@@ -104,11 +110,29 @@ function build(f: RequestFilters) {
   if (f.includeUntracked !== true) {
     where.push('(store_id IS NULL OR atlas.store_is_tracked(store_id))');
   }
+  // Explicit ranges. Both ends optional, so "everything since 1 Sept" is one
+  // input rather than a chip that does not exist.
+  const addDate = (col: string, from?: string, to?: string) => {
+    if (from) add(`${col} >= ?::date`, from);
+    if (to)   add(`${col} < ?::date + 1`, to);
+  };
+  addDate('created_at', f.createdFrom, f.createdTo);
+  addDate('preferred_at', f.apptFrom, f.apptTo);
+  addDate(eta, f.etaFrom, f.etaTo);
+
+  if (f.orderStatus) {
+    add(`EXISTS (SELECT 1 FROM src_local."Order" o
+                  WHERE o.id = order_id AND o."orderStatus"::text = ?)`, f.orderStatus);
+  }
+
+  // The console records its own serviceability verdict per request. Where it
+  // differs from Atlas's, one of the two is losing money: a request turned
+  // away that we could serve, or one accepted that we cannot.
+  if (f.mismatch === 'console_no')  where.push(`NOT src_flag AND state = 'SERVICEABLE'`);
+  if (f.mismatch === 'console_yes') where.push(`src_flag AND state <> 'SERVICEABLE'`);
+
   if (f.priced) where.push('quote_price IS NOT NULL');
   if (f.hasLab) where.push('covering_labs > 0');
-  // The console flag disagreeing with Atlas is worth filtering on directly:
-  // these are requests someone may have already turned away.
-  if (f.disputed) where.push("NOT src_flag AND state = 'SERVICEABLE'");
   if (f.q) {
     // "#28785" and "28785" are the same search. Ops copy ids straight out of
     // the console, hash and all.

@@ -72,14 +72,14 @@ export function RequestsTable({
   if (!rows.length) {
     return (
       <div className="px-5 py-10 text-sm text-ink-500 text-center">
-        <p>Nothing matches these filters.</p>
+        <p>No requests match these filters.</p>
         {/* The arrival window is applied even when it is not in the URL, so a
             filter that looks like it returned nothing may just be intersecting
             an empty window. Say so, and offer the way out — this read as
             "the filters are broken" otherwise. */}
         {windowLabel && widenHref && (
           <p className="mt-2 text-ink-600">
-            The <b>Arrived</b> filter is set to <b>{windowLabel}</b> and applies on top of
+            The <b>Created</b> filter is set to <b>{windowLabel}</b> and applies on top of
             everything else.{' '}
             <Link href={widenHref} className="text-brand-600 hover:underline">
               Search all time instead →
@@ -87,7 +87,7 @@ export function RequestsTable({
           </p>
         )}
         <p className="mt-2 text-[11px] text-ink-400">
-          Settled requests are hidden by default — use “Include settled” to see them.
+          Settled requests are hidden by default. Use “Include settled” to show them.
         </p>
       </div>
     );
@@ -104,19 +104,19 @@ export function RequestsTable({
         <tr className="text-[11px] uppercase tracking-wide text-ink-400 border-b border-ink-200">
           <th className="text-left font-medium px-5 py-2">Request</th>
           <th className="text-left font-medium px-2 py-2">Store</th>
-          <th className="text-left font-medium px-2 py-2 w-[110px]">Stage</th>
-          <th className="text-left font-medium px-2 py-2">Where</th>
-          <th className="text-left font-medium px-2 py-2 min-w-[220px]">Asked for</th>
-          <th className="text-left font-medium px-2 py-2 w-[120px]">State</th>
-          <th className="text-left font-medium px-2 py-2 min-w-[200px]">Labs / what&apos;s missing</th>
+          <th className="text-left font-medium px-2 py-2 w-[120px]">Request status</th>
+          <th className="text-left font-medium px-2 py-2">Location</th>
+          <th className="text-left font-medium px-2 py-2 min-w-[220px]">Requested items</th>
+          <th className="text-left font-medium px-2 py-2 w-[130px]">Serviceability</th>
+          <th className="text-left font-medium px-2 py-2 min-w-[200px]">Covering labs</th>
           <th className="text-right font-medium px-2 py-2">Quote</th>
-          <th className="text-left font-medium px-2 py-2">ETA</th>
+          <th className="text-left font-medium px-2 py-2 w-[110px]">Earliest available</th>
           <th className="text-left font-medium px-2 py-2 min-w-[150px]">Order</th>
           {/* Pinned, because it is the action. Scrolling sideways to reach
               the Copy button would make the one thing this page exists for
               the hardest thing on it. */}
           <th className="text-left font-medium px-5 py-2 w-20 sticky right-0 bg-surface
-                         border-l border-ink-150">Console</th>
+                         border-l border-ink-150">Actions</th>
         </tr>
       </thead>
       <tbody>
@@ -161,7 +161,7 @@ export function RequestsTable({
                 {/* The ask, spelled out. "1 item" told nobody anything. */}
                 <td className="px-2 py-2.5 text-xs">
                   {items.length === 0 ? (
-                    <span className="text-ink-400">nothing identifiable</span>
+                    <span className="text-ink-400">Not identified</span>
                   ) : (
                     <>
                       <span className="text-ink-800">{items.slice(0, 2).join(', ')}</span>
@@ -184,9 +184,9 @@ export function RequestsTable({
                       "console disagrees" doubled every serviceable row's
                       height for a note that repeats on thousands of rows. */}
                   {!r.src_flag && r.state === 'SERVICEABLE' ? (
-                    <span className="block text-[10px] text-warn-600 mt-0.5">console disagrees</span>
+                    <span className="block text-[10px] text-warn-600 mt-0.5">Console: not serviceable</span>
                   ) : owner === 'console' ? (
-                    <span className="block text-[10px] text-ink-400 mt-0.5">convert in console</span>
+                    <span className="block text-[10px] text-ink-400 mt-0.5">Convert in console</span>
                   ) : null}
                 </td>
                 {/* Who can serve it and what they lack — the negotiation, in the row. */}
@@ -198,14 +198,14 @@ export function RequestsTable({
                       <span className="text-ink-700">{covering.slice(0, 2).join(', ')}</span>
                       {r.missing_items && (
                         <span className="block text-[10px] text-warn-600">
-                          missing: {r.missing_items.length > 60
+                          Missing: {r.missing_items.length > 60
                             ? r.missing_items.slice(0, 60) + '…'
                             : r.missing_items}
                         </span>
                       )}
                     </>
                   ) : (
-                    <span className="text-danger-500">no lab covers this pincode</span>
+                    <span className="text-danger-500">No covering lab</span>
                   )}
                   {covering.length > 2 && (
                     <span className="text-[10px] text-ink-400"> +{r.covering_labs - 2} more</span>
@@ -221,12 +221,12 @@ export function RequestsTable({
                 </td>
                 <td className="px-2 py-2.5 whitespace-nowrap text-ink-700">
                   {day(r.committed_date ?? r.promised_date)
-                    ?? <span className="text-[11px] text-danger-500">escalate</span>}
+                    ?? <span className="text-[11px] text-danger-500">Not available</span>}
                   {/* What was actually promised, where it differs from what
                       Atlas would offer today. A commitment is a date somebody
                       has already been given. */}
                   {r.committed_date && r.committed_date !== r.promised_date && (
-                    <span className="block text-[10px] text-ink-400">promised</span>
+                    <span className="block text-[10px] text-ink-400">Committed</span>
                   )}
                 </td>
                 {/* Converted, and what happened next. Until now the queue could
@@ -246,7 +246,7 @@ export function RequestsTable({
                         </span>
                       )}
                       <span className="block text-[10px] text-ink-500 truncate max-w-[150px]">
-                        {r.order_lab_name ?? <span className="text-danger-500">no lab</span>}
+                        {r.order_lab_name ?? <span className="text-danger-500">No lab assigned</span>}
                       </span>
                     </>
                   ) : (

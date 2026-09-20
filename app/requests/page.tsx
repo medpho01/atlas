@@ -15,11 +15,45 @@ import {
   type RequestState,
 } from '@/lib/requests';
 import { RequestsTable } from './RequestsTable';
+import { DateRange } from './DateRange';
 import { RequestFunnel } from './RequestFunnel';
 import { SearchBar } from './SearchBar';
 import { RefreshRequests } from './RefreshRequests';
 
 export const dynamic = 'force-dynamic';
+
+/** One labelled line of filters. */
+function FilterRow({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="flex flex-wrap items-center gap-1.5 px-4 py-2.5">
+      <span className="w-[150px] shrink-0 text-[11px] uppercase tracking-wide text-ink-400">
+        {label}
+      </span>
+      {children}
+    </div>
+  );
+}
+
+const Divider = () => <span className="w-px h-4 bg-ink-200 mx-1.5" />;
+
+const SORT_LABEL = {
+  newest: 'newest first', oldest: 'oldest first',
+  value: 'highest quote', value_asc: 'lowest quote',
+  soonest: 'earliest date', demand: 'highest pincode demand',
+} as const;
+
+/**
+ * Order statuses worth filtering on. The source carries a dozen; these are the
+ * ones with volume behind them, in the order an order moves through them.
+ */
+const ORDER_STATUS_FILTERS = [
+  ['ORDER_SCHEDULED', 'Scheduled'],
+  ['SAMPLE_COLLECTED', 'Sample collected'],
+  ['SAMPLE_PROCESSED', 'Sample processed'],
+  ['REPORT_DELIVERED', 'Report delivered'],
+  ['RESCHEDULED', 'Rescheduled'],
+  ['CANCELED', 'Cancelled'],
+] as const;
 
 const WINDOW_LABEL = {
   today: 'today', week: 'last 7 days', month: 'last 30 days', all: 'all time',
@@ -42,6 +76,7 @@ export default async function RequestsPage({
   // today" and getting nothing would read as broken rather than as filtered.
   const openOnly = searchParams.all !== '1'
     && !searchParams.oappt
+    && !searchParams.orderStatus
     && !(searchParams.status && SETTLED_STAGES.has(searchParams.status));
   const f = {
     state,
@@ -51,7 +86,6 @@ export default async function RequestsPage({
     q: searchParams.q,
     sort: (searchParams.sort as 'newest' | 'oldest' | 'value' | 'value_asc' | 'soonest' | 'demand') ?? 'newest',
     priced: searchParams.priced === '1',
-    disputed: searchParams.disputed === '1',
     hasLab: searchParams.haslab === '1',
     // Default to the last 7 days, because an all-time queue is a year of
     // history and tells nobody what to do this morning — except when
@@ -63,6 +97,11 @@ export default async function RequestsPage({
     appt: searchParams.appt as 'today' | 'tomorrow' | 'soon' | 'overdue' | 'none' | undefined,
     eta: searchParams.eta as 'today' | 'tomorrow' | 'soon' | 'overdue' | 'none' | undefined,
     oappt: searchParams.oappt as 'today' | 'tomorrow' | 'week' | 'past' | 'any' | undefined,
+    createdFrom: searchParams.createdFrom, createdTo: searchParams.createdTo,
+    apptFrom: searchParams.apptFrom,       apptTo: searchParams.apptTo,
+    etaFrom: searchParams.etaFrom,         etaTo: searchParams.etaTo,
+    orderStatus: searchParams.orderStatus,
+    mismatch: searchParams.mismatch as 'console_no' | 'console_yes' | undefined,
     openOnly,
     limit: 150,
   };
@@ -73,6 +112,16 @@ export default async function RequestsPage({
     getRequestFreshness(),
     getUntrackedCount(f),
   ]);
+
+  /** Same link, with several keys dropped at once. */
+  const drop = (...keys: string[]) => {
+    const p = new URLSearchParams();
+    for (const [key, val] of Object.entries(searchParams)) {
+      if (val && !keys.includes(key)) p.set(key, val);
+    }
+    const q = p.toString();
+    return `/requests${q ? `?${q}` : ''}`;
+  };
 
   const keep = (k: string, v?: string) => {
     const p = new URLSearchParams();
@@ -85,7 +134,7 @@ export default async function RequestsPage({
     <div className="px-6 lg:px-8 py-6 max-w-[1700px] mx-auto">
       <PageHeader
         title="Requests"
-        subtitle="One open queue. Each row carries its own answer — price, date, and why."
+        subtitle="Serviceability, price, earliest available date and order status for every request."
         actions={
           <InfoTip
             title="Requests"
@@ -123,60 +172,10 @@ export default async function RequestsPage({
         )}
       </div>
 
-      <div className="flex flex-wrap items-center gap-1.5 my-4">
-        <span className="text-[11px] uppercase tracking-wide text-ink-400 mr-1">Arrived</span>
-        {([
-          ['today', 'Today'], ['week', 'Last 7 days'], ['month', 'Last 30 days'], ['all', 'All time'],
-        ] as const).map(([k, label]) => (
-          <ChipButton key={k} href={keep('window', k)} active={(searchParams.window ?? (searchParams.q ? 'all' : 'week')) === k}>
-            {label}
-          </ChipButton>
-        ))}
-        <span className="w-px h-4 bg-ink-200 mx-2" />
-        <span className="text-[11px] uppercase tracking-wide text-ink-400 mr-1">Wanted</span>
-        {([
-          ['overdue', 'Date passed'], ['today', 'Today'], ['tomorrow', 'Tomorrow'],
-          ['soon', 'Within 3 days'], ['none', 'No date given'],
-        ] as const).map(([k, label]) => (
-          <ChipButton key={k} href={keep('appt', searchParams.appt === k ? undefined : k)}
-                      active={searchParams.appt === k}>
-            {label}
-          </ChipButton>
-        ))}
-      </div>
-
-      {/* Three different dates hang off a request and they are not
-          interchangeable: what the customer wanted (above), what we promised
-          back, and when the order is actually booked. Filtering on the wrong
-          one is how a queue lies, so each gets its own labelled row. */}
-      <div className="flex flex-wrap items-center gap-1.5 mb-4">
-        <span className="text-[11px] uppercase tracking-wide text-ink-400 mr-1">ETA we gave</span>
-        {([
-          ['overdue', 'Date passed'], ['today', 'Today'], ['tomorrow', 'Tomorrow'],
-          ['soon', 'Within 3 days'], ['none', 'No date'],
-        ] as const).map(([k, label]) => (
-          <ChipButton key={k} href={keep('eta', searchParams.eta === k ? undefined : k)}
-                      active={searchParams.eta === k}>
-            {label}
-          </ChipButton>
-        ))}
-        <span className="w-px h-4 bg-ink-200 mx-2" />
-        <span className="text-[11px] uppercase tracking-wide text-ink-400 mr-1">Appointment</span>
-        {([
-          ['any', 'Has an order'], ['today', 'Today'], ['tomorrow', 'Tomorrow'],
-          ['week', 'Next 7 days'], ['past', 'Already past'],
-        ] as const).map(([k, label]) => (
-          <ChipButton key={k} href={keep('oappt', searchParams.oappt === k ? undefined : k)}
-                      active={searchParams.oappt === k}>
-            {label}
-          </ChipButton>
-        ))}
-      </div>
-
       {/* A stale snapshot looks exactly like a quiet day. Say which it is. */}
       {funnel.received === 0 && (fresh?.age_hours ?? 0) > 36 && (
-        <div className="mb-4 rounded-lg border border-warn-100 bg-warn-50 px-4 py-3 text-sm text-ink-700">
-          <span className="font-medium text-warn-600">Nothing here may mean stale data.</span>{' '}
+        <div className="mt-4 mb-4 rounded-lg border border-warn-100 bg-warn-50 px-4 py-3 text-sm text-ink-700">
+          <span className="font-medium text-warn-600">No rows here may mean stale data.</span>{' '}
           The newest request Atlas holds arrived{' '}
           <b>{Math.round((fresh!.age_hours ?? 0) / 24)} days ago</b>
           {fresh?.newest && ` (${new Date(fresh.newest).toLocaleDateString('en-IN',
@@ -186,106 +185,187 @@ export default async function RequestsPage({
         </div>
       )}
 
+      <div className="mt-4" />
       <RequestFunnel
         funnel={funnel}
         windowLabel={WINDOW_LABEL[(searchParams.window ?? (searchParams.q ? 'all' : 'week')) as keyof typeof WINDOW_LABEL]}
         hrefFor={(k, v) => keep(k, v)}
       />
 
-      <div className="flex flex-wrap items-center gap-1.5 mb-3">
-        <span className="text-[11px] uppercase tracking-wide text-ink-400 mr-1">State</span>
-        <ChipButton href={keep('state')} active={!state}>All</ChipButton>
-        {REQUEST_STATES.map((s) => (
-          <ChipButton key={s} href={keep('state', s)} active={state === s}>
-            {STATE_SHORT[s]}
-          </ChipButton>
-        ))}
-        <span className="w-px h-4 bg-ink-200 mx-2" />
-        <ChipButton href={keep('all', openOnly ? '1' : undefined)} active={!openOnly}>
-          Include settled
-        </ChipButton>
-      </div>
+      {/* One filter surface, above the rows it filters.
+          Four different dates hang off a request — created, the appointment
+          the store asked for, the earliest date we offered, and the booked
+          appointment on the order — and they are not interchangeable, so each
+          is its own labelled row with its own range. */}
+      <div className="mb-4 rounded-lg border border-ink-200 bg-surface divide-y divide-ink-100">
+        <FilterRow label="Created">
+          {([
+            ['today', 'Today'], ['week', 'Last 7 days'], ['month', 'Last 30 days'], ['all', 'All time'],
+          ] as const).map(([k, label]) => (
+            <ChipButton key={k} href={keep('window', k)}
+                        active={(searchParams.window ?? (searchParams.q ? 'all' : 'week')) === k}>
+              {label}
+            </ChipButton>
+          ))}
+          <Divider />
+          <DateRange fromName="createdFrom" toName="createdTo" params={searchParams} />
+        </FilterRow>
 
-      <div className="flex flex-wrap items-center gap-1.5 mb-4">
-        <span className="text-[11px] uppercase tracking-wide text-ink-400 mr-1">Store</span>
-        <ChipButton href={keep('store')} active={!searchParams.store}>All</ChipButton>
-        {/* Only stores with something in the current view.
-            Zeros were kept visible when six stores were listed, on the grounds
-            that "Star Health 0" is worth knowing. With forty-odd tracked
-            stores most of them are zero, and the handful with actual work is
-            what the row is for. The count of what is hidden sits at the end. */}
-        {facets.stores.filter((s) => s.n > 0).map((s) => (
-          <ChipButton key={s.store_id} href={keep('store', String(s.store_id))}
-                      active={searchParams.store === String(s.store_id)}>
-            {s.name}{' '}
-            <span className={s.n === 0 ? 'text-ink-300' : 'text-ink-400'}>{s.n}</span>
+        <FilterRow label="Serviceability">
+          <ChipButton href={keep('state')} active={!state}>All</ChipButton>
+          {REQUEST_STATES.map((st) => (
+            <ChipButton key={st} href={keep('state', st)} active={state === st}>
+              {STATE_SHORT[st]}
+            </ChipButton>
+          ))}
+          <Divider />
+          <ChipButton href={keep('all', openOnly ? '1' : undefined)} active={!openOnly}>
+            Include settled
           </ChipButton>
-        ))}
-        {/* Untracked stores are hidden, never silently: the count is the
-            prompt to go and reconsider the list. */}
-        {(() => {
-          const quiet = facets.stores.filter((s) => s.n === 0).length;
-          const bits = [
-            quiet > 0 ? `${quiet} with none` : null,
-            untracked > 0 ? `${untracked.toLocaleString('en-IN')} hidden` : null,
-          ].filter(Boolean);
-          return (
-            <Link href="/settings/stores"
-                  className="text-[11px] text-brand-600 hover:underline ml-1 whitespace-nowrap">
-              {bits.length ? `${bits.join(' · ')} · edit stores →` : 'edit stores →'}
-            </Link>
-          );
-        })()}
-      </div>
+        </FilterRow>
 
-      <div className="flex flex-wrap items-center gap-1.5 mb-2">
-        <span className="text-[11px] uppercase tracking-wide text-ink-400 mr-1">Stage</span>
-        <ChipButton href={keep('status')} active={!searchParams.status}>All</ChipButton>
-        {STAGE_ORDER.filter((st) => (facets.stages.find((x) => x.status === st)?.n ?? 0) > 0)
-          .map((st) => (
-          <ChipButton key={st} href={keep('status', st)} active={searchParams.status === st}>
-            {STAGE_LABEL[st]}{' '}
-            <span className="text-ink-400">
-              {facets.stages.find((x) => x.status === st)?.n ?? 0}
-            </span>
+        {/* The console records its own serviceability verdict per request.
+            Where the two differ, one of them is wrong in a way that costs
+            money — a request turned away that we could serve, or one accepted
+            that we have no supply for. */}
+        <FilterRow label="Serviceability mismatch">
+          <ChipButton href={keep('mismatch')} active={!searchParams.mismatch}>None</ChipButton>
+          <ChipButton href={keep('mismatch', 'console_no')} active={searchParams.mismatch === 'console_no'}>
+            Console: not serviceable · Atlas: serviceable
           </ChipButton>
-        ))}
-      </div>
+          <ChipButton href={keep('mismatch', 'console_yes')} active={searchParams.mismatch === 'console_yes'}>
+            Console: serviceable · Atlas: not serviceable
+          </ChipButton>
+        </FilterRow>
 
-      <div className="flex flex-wrap items-center gap-1.5 mb-4">
-        <span className="text-[11px] uppercase tracking-wide text-ink-400 mr-1">Sort</span>
-        {([
-          ['newest', 'Newest first'],
-          ['oldest', 'Oldest first'],
-          ['value', 'Largest quote'],
-          ['value_asc', 'Smallest quote'],
-          ['soonest', 'Date soonest'],
-          ['demand', 'Busiest pincode'],
-        ] as const).map(([k, label]) => (
-          <ChipButton key={k} href={keep('sort', k)} active={(searchParams.sort ?? 'newest') === k}>
-            {label}
+        <FilterRow label="Preferred appointment">
+          <ChipButton href={keep('appt')} active={!searchParams.appt}>Any</ChipButton>
+          {([
+            ['overdue', 'Date passed'], ['today', 'Today'], ['tomorrow', 'Tomorrow'],
+            ['soon', 'Within 3 days'], ['none', 'No date'],
+          ] as const).map(([k, label]) => (
+            <ChipButton key={k} href={keep('appt', searchParams.appt === k ? undefined : k)}
+                        active={searchParams.appt === k}>
+              {label}
+            </ChipButton>
+          ))}
+          <Divider />
+          <DateRange fromName="apptFrom" toName="apptTo" params={searchParams} />
+        </FilterRow>
+
+        <FilterRow label="Earliest available date">
+          <ChipButton href={keep('eta')} active={!searchParams.eta}>Any</ChipButton>
+          {([
+            ['overdue', 'Date passed'], ['today', 'Today'], ['tomorrow', 'Tomorrow'],
+            ['soon', 'Within 3 days'], ['none', 'No date'],
+          ] as const).map(([k, label]) => (
+            <ChipButton key={k} href={keep('eta', searchParams.eta === k ? undefined : k)}
+                        active={searchParams.eta === k}>
+              {label}
+            </ChipButton>
+          ))}
+          <Divider />
+          <DateRange fromName="etaFrom" toName="etaTo" params={searchParams} />
+        </FilterRow>
+
+        <FilterRow label="Order status">
+          <ChipButton href={drop('oappt', 'orderStatus')}
+                      active={!searchParams.oappt && !searchParams.orderStatus}>
+            All
           </ChipButton>
-        ))}
-        <span className="w-px h-4 bg-ink-200 mx-2" />
-        <span className="text-[11px] uppercase tracking-wide text-ink-400 mr-1">Only</span>
-        <ChipButton href={keep('priced', searchParams.priced === '1' ? undefined : '1')}
-                    active={searchParams.priced === '1'}>
-          Priced
-        </ChipButton>
-        <ChipButton href={keep('haslab', searchParams.haslab === '1' ? undefined : '1')}
-                    active={searchParams.haslab === '1'}>
-          Has a covering lab
-        </ChipButton>
-        <ChipButton href={keep('disputed', searchParams.disputed === '1' ? undefined : '1')}
-                    active={searchParams.disputed === '1'}>
-          Console disagrees
-        </ChipButton>
+          <ChipButton href={keep('oappt', 'any')} active={searchParams.oappt === 'any'}>
+            Converted to order
+          </ChipButton>
+          <Divider />
+          {ORDER_STATUS_FILTERS.map(([k, label]) => (
+            <ChipButton key={k} href={keep('orderStatus', searchParams.orderStatus === k ? undefined : k)}
+                        active={searchParams.orderStatus === k}>
+              {label}
+            </ChipButton>
+          ))}
+        </FilterRow>
+
+        <FilterRow label="Order appointment">
+          <ChipButton href={keep('oappt')} active={!searchParams.oappt}>Any</ChipButton>
+          {([
+            ['today', 'Today'], ['tomorrow', 'Tomorrow'],
+            ['week', 'Next 7 days'], ['past', 'Date passed'],
+          ] as const).map(([k, label]) => (
+            <ChipButton key={k} href={keep('oappt', searchParams.oappt === k ? undefined : k)}
+                        active={searchParams.oappt === k}>
+              {label}
+            </ChipButton>
+          ))}
+        </FilterRow>
+
+        <FilterRow label="Store">
+          <ChipButton href={keep('store')} active={!searchParams.store}>All</ChipButton>
+          {/* Only stores with something in the current view. With forty-odd
+              tracked stores most are zero, and the handful with actual work is
+              what the row is for. What is hidden is counted at the end. */}
+          {facets.stores.filter((st) => st.n > 0).map((st) => (
+            <ChipButton key={st.store_id} href={keep('store', String(st.store_id))}
+                        active={searchParams.store === String(st.store_id)}>
+              {st.name} <span className="text-ink-400">{st.n}</span>
+            </ChipButton>
+          ))}
+          {(() => {
+            const quiet = facets.stores.filter((st) => st.n === 0).length;
+            const bits = [
+              quiet > 0 ? `${quiet} with none` : null,
+              untracked > 0 ? `${untracked.toLocaleString('en-IN')} hidden` : null,
+            ].filter(Boolean);
+            return (
+              <Link href="/settings/stores"
+                    className="text-[11px] text-brand-600 hover:underline ml-1 whitespace-nowrap">
+                {bits.length ? `${bits.join(' · ')} · edit stores →` : 'edit stores →'}
+              </Link>
+            );
+          })()}
+        </FilterRow>
+
+        <FilterRow label="Request status">
+          <ChipButton href={keep('status')} active={!searchParams.status}>All</ChipButton>
+          {STAGE_ORDER.filter((st) => (facets.stages.find((x) => x.status === st)?.n ?? 0) > 0)
+            .map((st) => (
+              <ChipButton key={st} href={keep('status', st)} active={searchParams.status === st}>
+                {STAGE_LABEL[st]}{' '}
+                <span className="text-ink-400">
+                  {facets.stages.find((x) => x.status === st)?.n ?? 0}
+                </span>
+              </ChipButton>
+            ))}
+        </FilterRow>
+
+        <FilterRow label="Sort by">
+          {([
+            ['newest', 'Newest first'],
+            ['oldest', 'Oldest first'],
+            ['value', 'Highest quote'],
+            ['value_asc', 'Lowest quote'],
+            ['soonest', 'Earliest date'],
+            ['demand', 'Highest pincode demand'],
+          ] as const).map(([k, label]) => (
+            <ChipButton key={k} href={keep('sort', k)} active={(searchParams.sort ?? 'newest') === k}>
+              {label}
+            </ChipButton>
+          ))}
+          <Divider />
+          <ChipButton href={keep('priced', searchParams.priced === '1' ? undefined : '1')}
+                      active={searchParams.priced === '1'}>
+            Priced only
+          </ChipButton>
+          <ChipButton href={keep('haslab', searchParams.haslab === '1' ? undefined : '1')}
+                      active={searchParams.haslab === '1'}>
+            Covering lab only
+          </ChipButton>
+        </FilterRow>
       </div>
 
       <Card>
         <CardHeader
           title={`${rows.length.toLocaleString('en-IN')} shown${total > rows.length ? ` of ${total.toLocaleString('en-IN')}` : ''}`}
-          subtitle="Newest first by default — with no assignment, sort order is the prioritisation."
+          subtitle={`Sorted by ${SORT_LABEL[(searchParams.sort ?? 'newest') as keyof typeof SORT_LABEL]}.`}
           icon={<Inbox className="w-4 h-4" strokeWidth={2.25} />}
         />
         <CardBody className="pt-0">

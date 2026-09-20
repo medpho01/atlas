@@ -18,9 +18,9 @@ export type RequestState = (typeof REQUEST_STATES)[number];
 export const STATE_LABEL: Record<RequestState, string> = {
   SERVICEABLE: 'Serviceable',
   PACKAGE_GAP: 'Package gap',
-  SUPPLY_GAP_KNOWN: 'Supply gap — candidate',
-  SUPPLY_GAP_UNKNOWN: 'Supply gap — none',
-  NO_ITEMS: 'Nothing identifiable',
+  SUPPLY_GAP_KNOWN: 'Supply gap — lab identified',
+  SUPPLY_GAP_UNKNOWN: 'Supply gap — no lab in range',
+  NO_ITEMS: 'Unidentified items',
   NO_PINCODE: 'No pincode',
 };
 
@@ -28,8 +28,8 @@ export const STATE_SHORT: Record<RequestState, string> = {
   SERVICEABLE: 'Serviceable',
   PACKAGE_GAP: 'Package gap',
   SUPPLY_GAP_KNOWN: 'Supply gap',
-  SUPPLY_GAP_UNKNOWN: 'No supply',
-  NO_ITEMS: 'Unknown ask',
+  SUPPLY_GAP_UNKNOWN: 'No lab in range',
+  NO_ITEMS: 'Unidentified items',
   NO_PINCODE: 'No pincode',
 };
 
