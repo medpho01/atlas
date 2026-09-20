@@ -57,12 +57,16 @@ export default async function OrderTrackingPage({
   // How far ahead the allocation queue looks. Some of this job is done days in
   // advance off a list of everything coming up, and some of it is today's
   // stragglers; one "urgent or not" switch only served the second.
+  // Each chip means what it says, on the appointment date. "Tomorrow" is
+  // tomorrow's appointments, not everything whose deadline has arrived by
+  // tomorrow — which is what it used to be, and why the page looked like it
+  // was ignoring the filter.
   const HORIZONS = [
-    { key: '1', label: 'Tomorrow', days: 1 },
-    { key: '3', label: 'Next 3 days', days: 3 },
-    { key: '7', label: 'Next 7 days', days: 7 },
+    { key: '1', label: 'Tomorrow', exact: 1 },
+    { key: '3', label: 'Next 3 days', within: 3 },
+    { key: '7', label: 'Next 7 days', within: 7 },
   ] as const;
-  const horizon = HORIZONS.find((h) => h.key === searchParams.within)?.days;
+  const horizon = HORIZONS.find((h) => h.key === searchParams.within);
   const mine = searchParams.mine === '1';
   const canAssign = canManage(gate.user, 'orderTracking');
   // filter(Boolean) before Number, not after: ''.split(',') is [''], and
@@ -75,7 +79,8 @@ export default async function OrderTrackingPage({
   const [counts, rows, people, storeFacet] = await Promise.all([
     getQueueCounts(),
     getTasks(tab, {
-      withinDays: tab === 'needs_lab' ? horizon : undefined,
+      apptInDays: tab === 'needs_lab' ? (horizon as { exact?: number } | undefined)?.exact : undefined,
+      apptWithinDays: tab === 'needs_lab' ? (horizon as { within?: number } | undefined)?.within : undefined,
       urgent: urgent && tab === 'chase_report',
       late: urgent && tab === 'chase_report',
       stores,
@@ -162,8 +167,8 @@ export default async function OrderTrackingPage({
             <span className="text-[12px] text-ink-500">{count.unassigned} unassigned</span>
             <span className="text-[12px] text-ink-500">
               {rows.length} shown
-              {tab === 'needs_lab' && horizon != null
-                && ` · deadline within ${horizon === 1 ? 'tomorrow' : `${horizon} days`}`}
+              {tab === 'needs_lab' && horizon
+                && ` · ${horizon.key === '1' ? 'appointments tomorrow' : `appointments in the next ${horizon.key} days`}`}
             </span>
           </div>
         </div>
@@ -175,7 +180,7 @@ export default async function OrderTrackingPage({
                 Everything ahead
               </ChipButton>
               {HORIZONS.map((h) => (
-                <ChipButton key={h.key} href={link({ within: h.key })} active={horizon === h.days}>
+                <ChipButton key={h.key} href={link({ within: h.key })} active={horizon?.key === h.key}>
                   {h.label}
                 </ChipButton>
               ))}

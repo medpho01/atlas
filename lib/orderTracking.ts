@@ -75,13 +75,17 @@ export type TaskRow = {
 
 export type TaskFilters = {
   /**
-   * How far ahead to look, in days from today.
+   * Which appointments to look at, counted in days from today.
    *
-   * Allocation is not one job. Some of it is done days in advance, in a batch,
-   * off a list of everything coming up; some of it is today's stragglers. A
-   * single "urgent or not" switch served the second and hid the first.
+   * On the APPOINTMENT, not on the deadline. The deadline is already a day
+   * before the appointment, so a cumulative "deadline within N days" put
+   * yesterday's overdue rows and the day-after-tomorrow's appointments into a
+   * chip labelled Tomorrow — which is not what the word means, and made the
+   * page look like it was ignoring the filter.
    */
-  withinDays?: number;
+  apptInDays?: number;
+  /** Appointments from today out to N days, inclusive. */
+  apptWithinDays?: number;
   /** Allocation: only the ones whose deadline is today or tomorrow. */
   urgent?: boolean;
   /** One or more stores. A person owns a handful of accounts, not one. */
@@ -125,9 +129,14 @@ export async function getTasks(kind: TaskKind, f: TaskFilters = {}): Promise<Tas
   const where: string[] = ['t.kind = $1'];
 
   if (f.urgent) where.push('(t.overdue OR t.days_left <= 1)');
-  if (f.withinDays != null) {
-    params.push(f.withinDays);
-    where.push(`(t.overdue OR t.days_left <= $${params.length})`);
+  if (f.apptInDays != null) {
+    params.push(f.apptInDays);
+    where.push(`t.appointment_date::date = atlas.ist_today() + $${params.length}::int`);
+  }
+  if (f.apptWithinDays != null) {
+    params.push(f.apptWithinDays);
+    where.push(
+      `t.appointment_date::date BETWEEN atlas.ist_today() AND atlas.ist_today() + $${params.length}::int`);
   }
   if (f.late) where.push('t.overdue');
   if (f.stores?.length) {
