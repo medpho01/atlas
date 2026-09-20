@@ -1,7 +1,7 @@
 # Runbook — order tracking
 
 `/order-tracking`. Three queues an order passes through after it leaves the
-request queue, plus a day view.
+request queue.
 
 **Only orders that came from a request appear anywhere on this page.** A
 store's own direct order has no quote to honour and nobody on this team owns
@@ -13,16 +13,8 @@ The three queues, each with its own deadline:
 | Tab | Due | Applies to | Closes when |
 |---|---|---|---|
 | **Needs a lab** | day before the appointment | any order still on the placeholder lab | `labId` is no longer the placeholder |
-| **Pickup today** | the day itself | today's appointments at labs under the threshold | status reaches `SAMPLE_COLLECTED` or beyond |
+| **Pickup today** | the day itself | today's appointments at a lab under the threshold **or** with no lab at all | status reaches `SAMPLE_COLLECTED` or beyond |
 | **Report outstanding** | pickup + 48 hours | the same cohort, sample taken | status reaches `REPORT_DELIVERED` |
-
-## Orders by day
-
-The fourth tab is not a queue. It lists every request-born order with an
-appointment on one date, **whatever state it is in** — cancelled and delivered
-included, which no queue shows. Unallocated orders sort to the top and say
-"LabStack Networks — no real lab" in red rather than printing the placeholder's
-name as though it were an allocation.
 
 ## Derived, not filed
 
@@ -60,7 +52,10 @@ UPDATE atlas.request_settings SET value = '8'
  WHERE key = 'followup_max_lifetime_orders';
 ```
 
-*Needs a lab* is deliberately **not** filtered by it — there is no lab yet.
+*Needs a lab* is deliberately **not** filtered by it — there is no lab yet. Nor
+is the no-lab half of *Pickup today*: today's pickup list has to be the whole
+day or it is not a pickup list, so an unallocated appointment appears in both
+queues. They are two different questions about the same order.
 
 ## Seeing today
 

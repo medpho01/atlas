@@ -179,7 +179,7 @@ export function TaskTable({
       )}
 
       <div className="-mx-5 overflow-x-auto">
-        <table className="w-full text-sm min-w-[1400px]">
+        <table className="w-full text-sm min-w-[1530px]">
           <thead>
             <tr className="text-[11px] uppercase tracking-wide text-ink-400 border-b border-ink-200">
               {canAssign && (
@@ -196,6 +196,7 @@ export function TaskTable({
                 {kind === 'chase_report' ? 'Late by' : kind === 'confirm_pickup' ? 'Time' : 'Deadline'}
               </th>
               <th className="text-left font-medium px-2 py-2 w-[124px]">Order</th>
+              <th className="text-left font-medium px-2 py-2 w-[130px]">Store</th>
               <th className="text-left font-medium px-2 py-2 min-w-[146px]">Requester</th>
               {kind === 'needs_lab' ? (
                 <>
@@ -242,14 +243,17 @@ export function TaskTable({
                           className="num font-medium text-ink-900 hover:text-brand-600">
                     #{r.order_id}
                   </button>
-                  {r.request_id ? (
+                  {r.request_id && (
                     <Link href={`/requests/${r.request_id}`}
                           className="block text-[11px] text-brand-700 dark:text-brand-400 hover:underline">
                       request #{r.request_id}
                     </Link>
-                  ) : (
-                    <span className="block text-[11px] text-ink-400">{r.store_name ?? 'direct'}</span>
                   )}
+                </td>
+                <td className="px-2 py-2.5 text-xs text-ink-700">
+                  <span className="block truncate max-w-[130px]">
+                    {r.store_name ?? <span className="text-ink-400">—</span>}
+                  </span>
                 </td>
 
                 <td className="px-2 py-2.5 text-xs">

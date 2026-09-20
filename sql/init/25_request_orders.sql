@@ -100,13 +100,18 @@ tasks AS (
 
   UNION ALL
 
+  -- Everything happening today that somebody should be watching, which is
+  -- two kinds of row: an appointment at a lab with barely any history, and an
+  -- appointment that still has no lab at all. The second was excluded on the
+  -- grounds that it belongs in the allocation queue — it does, and it also
+  -- belongs here, because today's pickup list has to be the whole day or it
+  -- is not a pickup list.
   SELECT 'confirm_pickup'::text, b.*,
          b.appointment_date AS due_date,
-         false              AS overdue
+         b.on_placeholder   AS overdue
   FROM base b
-  WHERE NOT b.on_placeholder
-    AND b.appointment_date = atlas.ist_today()
-    AND b.lab_orders_all_time < b.max_lifetime
+  WHERE b.appointment_date = atlas.ist_today()
+    AND (b.on_placeholder OR b.lab_orders_all_time < b.max_lifetime)
     AND b.order_status NOT IN ('SAMPLE_COLLECTED', 'SAMPLE_DELIVERED',
                                'SAMPLE_PROCESSED', 'REPORT_DELIVERED')
 

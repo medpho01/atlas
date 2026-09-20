@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { AlertTriangle, CalendarClock, FileClock, CalendarDays } from 'lucide-react';
+import { AlertTriangle, CalendarClock, FileClock } from 'lucide-react';
 import { requireView } from '@/lib/guard';
 import { canManage } from '@/lib/access';
 import { RoleBlocked } from '@/components/RoleBlocked';
@@ -8,11 +8,10 @@ import { PageHeader } from '@/components/ui/PageHeader';
 import { ChipButton } from '@/components/ui/Toggle';
 import { InfoTip } from '@/components/ui/InfoTip';
 import {
-  getQueueCounts, getTasks, getAssignableUsers, getOrdersOnDate, getDayShape,
-  istDay, shiftDay, TASK_BLURB, TASK_KINDS, type TaskKind,
+  getQueueCounts, getTasks, getAssignableUsers, getQueueStores,
+  TASK_BLURB, TASK_KINDS, type TaskKind,
 } from '@/lib/orderTracking';
 import { TaskTable } from './TaskTable';
-import { DayTable } from './DayTable';
 
 export const dynamic = 'force-dynamic';
 
@@ -47,17 +46,10 @@ const QUEUE = {
 export default async function OrderTrackingPage({
   searchParams,
 }: {
-  searchParams: { tab?: string; urgent?: string; mine?: string; day?: string; within?: string };
+  searchParams: { tab?: string; urgent?: string; mine?: string; within?: string; store?: string };
 }) {
   const gate = await requireView('orderTracking', '/order-tracking');
   if (gate.blocked) return <RoleBlocked area="Order tracking" detail="network, operations and admin" />;
-
-  // A fourth tab that is not a queue: everything happening on one day,
-  // whatever state it is in. The queues say what needs doing; this says what
-  // is happening, and they are not the same list.
-  const isDay = searchParams.tab === 'day';
-  const today = istDay();
-  const day = /^\d{4}-\d{2}-\d{2}$/.test(searchParams.day ?? '') ? searchParams.day! : today;
 
   const tab: TaskKind = (TASK_KINDS as readonly string[]).includes(searchParams.tab ?? '')
     ? (searchParams.tab as TaskKind) : 'needs_lab';
@@ -66,35 +58,41 @@ export default async function OrderTrackingPage({
   // advance off a list of everything coming up, and some of it is today's
   // stragglers; one "urgent or not" switch only served the second.
   const HORIZONS = [
-    { key: '0', label: 'Today', days: 0 },
+    { key: '1', label: 'Tomorrow', days: 1 },
     { key: '3', label: 'Next 3 days', days: 3 },
     { key: '7', label: 'Next 7 days', days: 7 },
   ] as const;
   const horizon = HORIZONS.find((h) => h.key === searchParams.within)?.days;
   const mine = searchParams.mine === '1';
   const canAssign = canManage(gate.user, 'orderTracking');
+  // filter(Boolean) before Number, not after: ''.split(',') is [''], and
+  // Number('') is 0, which Number.isInteger happily accepts — so an absent
+  // filter became "store 0" and the queue came back empty.
+  const stores = (searchParams.store ?? '')
+    .split(',').map((x) => x.trim()).filter(Boolean)
+    .map(Number).filter(Number.isInteger);
 
-  const [counts, rows, people, dayRows, shape] = await Promise.all([
+  const [counts, rows, people, storeFacet] = await Promise.all([
     getQueueCounts(),
-    isDay ? Promise.resolve([]) : getTasks(tab, {
+    getTasks(tab, {
       withinDays: tab === 'needs_lab' ? horizon : undefined,
       urgent: urgent && tab === 'chase_report',
       late: urgent && tab === 'chase_report',
+      stores,
       assignee: mine ? gate.user.id : undefined,
     }),
     getAssignableUsers(),
-    isDay ? getOrdersOnDate(day) : Promise.resolve([]),
-    isDay ? getDayShape(day) : Promise.resolve(null),
+    getQueueStores(tab),
   ]);
 
   const link = (patch: Record<string, string | undefined>) => {
     const p = new URLSearchParams();
     const merged: Record<string, string | undefined> = {
-      tab: isDay ? 'day' : tab === 'needs_lab' ? undefined : tab,
+      tab: tab === 'needs_lab' ? undefined : tab,
       urgent: urgent ? '1' : undefined,
       within: searchParams.within,
       mine: mine ? '1' : undefined,
-      day: day === today ? undefined : day,
+      store: stores.length ? stores.join(',') : undefined,
       ...patch,
     };
     for (const [k, v] of Object.entries(merged)) if (v) p.set(k, v);
@@ -152,77 +150,8 @@ export default async function OrderTrackingPage({
           );
         })}
 
-        {/* Not a queue: the day's orders, whatever state they are in. Set
-            apart from the three so nobody reads it as a fourth thing to
-            work through. */}
-        <span className="w-px self-center h-5 bg-ink-200 mx-2" />
-        <Link
-          href={link({ tab: 'day', urgent: undefined, mine: undefined })}
-          className={`flex items-center gap-2 px-4 py-2.5 -mb-px border-b-[3px] transition-colors
-                      ${isDay ? 'border-ink-700 text-ink-900' : 'border-transparent text-ink-500 hover:text-ink-800'}`}
-        >
-          <CalendarDays className="w-3.5 h-3.5" />
-          <span className={`text-sm ${isDay ? 'font-bold' : 'font-medium'}`}>Orders by day</span>
-        </Link>
       </div>
 
-      {isDay ? (
-        <>
-          <div className="flex flex-wrap items-start justify-between gap-4 mt-4 mb-4">
-            <div className="max-w-3xl">
-              <p className="text-[13px] text-ink-700">
-                Every request that became an order with an appointment on this day, whatever state
-                it is in. The lab is the column that matters: anything still on LabStack Networks
-                has nobody behind it.
-              </p>
-              {shape && (
-                <div className="flex flex-wrap gap-4 mt-2">
-                  <span className="text-[12px] text-ink-500">{shape.orders} orders</span>
-                  {shape.unallocated > 0 && (
-                    <span className="text-[12px] font-semibold text-danger-500">
-                      {shape.unallocated} with no real lab
-                    </span>
-                  )}
-                  {shape.new_labs > 0 && (
-                    <span className="text-[12px] font-semibold text-warn-600">
-                      {shape.new_labs} at a lab with under 5 orders
-                    </span>
-                  )}
-                  <span className="text-[12px] text-ink-500">{shape.collected} collected</span>
-                  <span className="text-[12px] text-ink-500">{shape.delivered} delivered</span>
-                  {shape.cancelled > 0 && (
-                    <span className="text-[12px] text-ink-500">{shape.cancelled} cancelled</span>
-                  )}
-                </div>
-              )}
-            </div>
-
-            <div className="flex flex-wrap items-center gap-1.5">
-              <ChipButton href={link({ day: shiftDay(day, -1) })} active={false}>&larr; Previous</ChipButton>
-              <ChipButton href={link({ day: undefined })} active={day === today}>Today</ChipButton>
-              <ChipButton href={link({ day: shiftDay(day, 1) })} active={false}>Next &rarr;</ChipButton>
-              <span className="w-px h-4 bg-ink-200 mx-1" />
-              <form className="inline-flex items-center gap-1.5">
-                <input type="hidden" name="tab" value="day" />
-                <label htmlFor="day" className="sr-only">Appointment date</label>
-                <input id="day" type="date" name="day" defaultValue={day}
-                       className="h-[26px] px-2 rounded-md border border-ink-200 bg-surface text-xs text-ink-800
-                                  focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-500" />
-                <button type="submit"
-                        className="h-[26px] px-2.5 rounded-md border border-ink-200 text-xs font-medium
-                                   text-ink-700 hover:bg-ink-100 transition">Go</button>
-              </form>
-            </div>
-          </div>
-
-          <Card>
-            <CardBody className="pt-4">
-              <DayTable rows={dayRows} day={day} />
-            </CardBody>
-          </Card>
-        </>
-      ) : (
-        <>
       <div className="flex flex-wrap items-start justify-between gap-4 mt-4 mb-4">
         <div className="max-w-3xl">
           <p className="text-[13px] text-ink-700">{TASK_BLURB[tab]}</p>
@@ -233,7 +162,8 @@ export default async function OrderTrackingPage({
             <span className="text-[12px] text-ink-500">{count.unassigned} unassigned</span>
             <span className="text-[12px] text-ink-500">
               {rows.length} shown
-              {tab === 'needs_lab' && horizon != null && ` · deadline within ${horizon === 0 ? 'today' : `${horizon} days`}`}
+              {tab === 'needs_lab' && horizon != null
+                && ` · deadline within ${horizon === 1 ? 'tomorrow' : `${horizon} days`}`}
             </span>
           </div>
         </div>
@@ -264,6 +194,27 @@ export default async function OrderTrackingPage({
         </div>
       </div>
 
+      {/* Whose account it is. Only the stores with work in this queue, because
+          a row of forty chips where thirty-nine read zero is a row nobody
+          reads. Several at once: a person owns a handful of accounts. */}
+      {storeFacet.length > 1 && (
+        <div className="flex flex-wrap items-center gap-1.5 mb-4">
+          <span className="text-[11px] uppercase tracking-wide text-ink-400 mr-1">Store</span>
+          <ChipButton href={link({ store: undefined })} active={stores.length === 0}>All</ChipButton>
+          {storeFacet.map((st) => {
+            const on = stores.includes(st.store_id);
+            const next = on ? stores.filter((x) => x !== st.store_id) : [...stores, st.store_id];
+            return (
+              <ChipButton key={st.store_id}
+                          href={link({ store: next.length ? next.join(',') : undefined })}
+                          active={on}>
+                {st.name} <span className="text-ink-400">{st.n}</span>
+              </ChipButton>
+            );
+          })}
+        </div>
+      )}
+
       <Card>
         <CardBody className="pt-4">
           <TaskTable
@@ -275,8 +226,6 @@ export default async function OrderTrackingPage({
           />
         </CardBody>
       </Card>
-        </>
-      )}
 
       {!canAssign && (
         <p className="text-[11px] text-ink-400 mt-3">
