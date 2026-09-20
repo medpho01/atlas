@@ -132,6 +132,9 @@ export type RequestRow = {
   /** Creation and the appointment the store asked for, as IST dates. */
   created_date: string | null;
   requested_date: string | null;
+  /** Days since anybody touched the request, and when that was. */
+  waiting_days: number | null;
+  last_touched_at: string | null;
   order_appointment: string | null;
   order_lab_id: number | null;
   order_lab_name: string | null;

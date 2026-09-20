@@ -23,6 +23,22 @@ const shortDay = (d: string | null) =>
 const Blank = () => <span className="text-ink-300">—</span>;
 
 /**
+ * Days since anybody touched the request.
+ *
+ * Coloured rather than merely printed, because the number's whole job is to
+ * be noticed: a fortnight-old quote nobody has chased looks identical to a
+ * fresh one in every other column.
+ */
+function Waiting({ days }: { days: number | null }) {
+  if (days == null) return <Blank />;
+  if (days === 0) return <span className="text-ink-500">Today</span>;
+  const tone = days >= 14 ? 'text-danger-500 font-semibold'
+             : days >= 3 ? 'text-warn-600 font-medium'
+             : 'text-ink-700';
+  return <span className={tone}>{days} day{days === 1 ? '' : 's'}</span>;
+}
+
+/**
  * The appointment clock, already in IST as text. Reading it through Date would
  * shift it again by whatever timezone the browser is in.
  */
@@ -107,7 +123,7 @@ export function RequestsTable({
     // a scroll container it simply drew over the card's edge — the rounded
     // corner clipped the last column and there was no way to reach it.
     <div className="overflow-x-auto">
-    <table className="w-full text-sm tabular-nums min-w-[1560px]">
+    <table className="w-full text-sm tabular-nums min-w-[1660px]">
       <thead>
         <tr className="text-[11px] uppercase tracking-wide text-ink-400 border-b border-ink-200">
           <th className="text-left font-medium px-5 py-2">Request</th>
@@ -121,6 +137,9 @@ export function RequestsTable({
           {/* The three dates, side by side, because the only useful thing to
               do with them is compare them: how long it has waited, the date
               asked for, and the date we can do. */}
+          {/* How long it has sat where it is. Without this, "Quoted 197" does
+              not distinguish a quote sent this morning from one sent in March. */}
+          <th className="text-left font-medium px-2 py-2 w-[96px]">Waiting</th>
           <th className="text-left font-medium px-2 py-2 w-[86px]">Created</th>
           <th className="text-left font-medium px-2 py-2 w-[104px]">Requested</th>
           <th className="text-left font-medium px-2 py-2 w-[104px]">Earliest available</th>
@@ -239,6 +258,9 @@ export function RequestsTable({
                   {r.quote_price && r.markup_pct && (
                     <span className="block text-[10px] text-ink-400">+{Number(r.markup_pct)}%</span>
                   )}
+                </td>
+                <td className="px-2 py-2.5 whitespace-nowrap">
+                  <Waiting days={r.waiting_days} />
                 </td>
                 <td className="px-2 py-2.5 whitespace-nowrap text-ink-600">
                   {shortDay(r.created_date ?? r.created_at) ?? <Blank />}

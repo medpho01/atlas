@@ -41,6 +41,7 @@ const SORT_LABEL = {
   newest: 'newest first', oldest: 'oldest first',
   value: 'highest quote', value_asc: 'lowest quote',
   soonest: 'earliest date', demand: 'highest pincode demand',
+  waiting: 'waiting longest',
 } as const;
 
 /**
@@ -95,14 +96,20 @@ export default async function RequestsPage({
     q: searchParams.q,
     sort: (searchParams.sort as 'newest' | 'oldest' | 'value' | 'value_asc' | 'soonest' | 'demand') ?? 'newest',
     priced: searchParams.priced === '1',
+    unquoted: searchParams.unquoted === '1',
     hasLab: searchParams.haslab === '1',
     // Default to the last 7 days, because an all-time queue is a year of
-    // history and tells nobody what to do this morning — except when
-    // searching, where the whole point is to find one specific thing whose age
-    // you do not know. A search scoped to a week returns nothing and reads as
-    // "not found" rather than "not in this window".
+    // history and tells nobody what to do this morning.
+    //
+    // Two exceptions, both cases where the window would silently win an
+    // argument it was never asked to join. A search is for one specific thing
+    // whose age nobody knows, and scoped to a week it reads as "not found"
+    // rather than "not in this window". And a pipeline stage is a question
+    // about what is STUCK: every request sitting at Quoted has by definition
+    // been sitting a while, so defaulting to the last week hides exactly the
+    // rows that were asked for.
     window: (searchParams.window as 'today' | 'week' | 'month' | 'all')
-            ?? (searchParams.q ? 'all' : 'week'),
+            ?? (searchParams.q || stages.length ? 'all' : 'week'),
     appt: searchParams.appt as 'today' | 'tomorrow' | 'soon' | 'overdue' | 'none' | undefined,
     eta: searchParams.eta as 'today' | 'tomorrow' | 'soon' | 'overdue' | 'none' | undefined,
     oappt: searchParams.oappt as 'today' | 'tomorrow' | 'week' | 'past' | 'any' | undefined,
@@ -207,7 +214,7 @@ export default async function RequestsPage({
       <div className="mt-4" />
       <RequestFunnel
         funnel={funnel}
-        windowLabel={WINDOW_LABEL[(searchParams.window ?? (searchParams.q ? 'all' : 'week')) as keyof typeof WINDOW_LABEL]}
+        windowLabel={WINDOW_LABEL[(searchParams.window ?? (searchParams.q || stages.length ? 'all' : 'week')) as keyof typeof WINDOW_LABEL]}
         hrefFor={(k, v) => keep(k, v)}
       />
 
@@ -222,7 +229,7 @@ export default async function RequestsPage({
             ['today', 'Today'], ['week', 'Last 7 days'], ['month', 'Last 30 days'], ['all', 'All time'],
           ] as const).map(([k, label]) => (
             <ChipButton key={k} href={keep('window', k)}
-                        active={(searchParams.window ?? (searchParams.q ? 'all' : 'week')) === k}>
+                        active={(searchParams.window ?? (searchParams.q || stages.length ? 'all' : 'week')) === k}>
               {label}
             </ChipButton>
           ))}
@@ -370,6 +377,7 @@ export default async function RequestsPage({
             ['value_asc', 'Lowest quote'],
             ['soonest', 'Earliest date'],
             ['demand', 'Highest pincode demand'],
+            ['waiting', 'Waiting longest'],
           ] as const).map(([k, label]) => (
             <ChipButton key={k} href={keep('sort', k)} active={(searchParams.sort ?? 'newest') === k}>
               {label}
@@ -384,6 +392,12 @@ export default async function RequestsPage({
                       active={searchParams.haslab === '1'}>
             Covering lab only
           </ChipButton>
+          {/* Atlas worked out the answer and the console has not been told.
+              The highest-value pile on the page, and it had no filter. */}
+          <ChipButton href={keep('unquoted', searchParams.unquoted === '1' ? undefined : '1')}
+                      active={searchParams.unquoted === '1'}>
+            Priced, not yet quoted
+          </ChipButton>
         </FilterRow>
       </div>
 
@@ -397,7 +411,7 @@ export default async function RequestsPage({
           <div className="-mx-5">
             <RequestsTable
               rows={rows}
-              windowLabel={WINDOW_LABEL[(searchParams.window ?? (searchParams.q ? 'all' : 'week')) as keyof typeof WINDOW_LABEL]}
+              windowLabel={WINDOW_LABEL[(searchParams.window ?? (searchParams.q || stages.length ? 'all' : 'week')) as keyof typeof WINDOW_LABEL]}
               widenHref={keep('window', 'all')}
             />
           </div>

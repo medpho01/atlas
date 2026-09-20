@@ -20,9 +20,11 @@ export type RequestFilters = {
   q?: string;
   /** false shows everything including settled history. */
   openOnly?: boolean;
-  sort?: 'newest' | 'oldest' | 'value' | 'value_asc' | 'soonest' | 'demand';
+  sort?: 'newest' | 'oldest' | 'value' | 'value_asc' | 'soonest' | 'demand' | 'waiting';
   /** Only rows Atlas could price. */
   priced?: boolean;
+  /** Priced by Atlas and still sitting before the quote — the actionable pile. */
+  unquoted?: boolean;
   /** Only rows with a lab already covering the pincode. */
   hasLab?: boolean;
   /** Created-date window: today | week | month | all. */
@@ -126,6 +128,13 @@ function build(f: RequestFilters) {
   }
 
   if (f.priced) where.push('quote_price IS NOT NULL');
+  // Atlas worked out a price and a date, and the console has not been told.
+  // The single biggest actionable bucket on the page, and it had no filter:
+  // you had to read down the Quote column looking for a number beside an
+  // Open row.
+  if (f.unquoted) {
+    where.push(`quote_price IS NOT NULL AND status IN ('OPEN', 'CONSENTED')`);
+  }
   if (f.hasLab) where.push('covering_labs > 0');
   if (f.q) {
     // "#28785" and "28785" are the same search. Ops copy ids straight out of
@@ -173,6 +182,9 @@ export async function getRequests(f: RequestFilters = {}) {
     // Demand: pincodes we keep failing in, so repeated failures surface as a
     // block rather than scattered through a year of rows.
     : f.sort === 'demand'    ? 'dm.n DESC NULLS LAST, created_at DESC'
+    // The one number a pipeline needs. "Quoted 197" does not distinguish a
+    // quote sent this morning from one sent in March.
+    : f.sort === 'waiting'   ? 'w.waiting_days DESC NULLS LAST, created_at'
     : 'created_at DESC';
 
   // The demand count, joined once rather than asked per row.
@@ -194,12 +206,20 @@ export async function getRequests(f: RequestFilters = {}) {
   const limit = Math.min(f.limit ?? 100, 500);
   params.push(limit, f.offset ?? 0);
   const rows = await query<RequestRow>(`
-    SELECT q.*, ord.*,
+    SELECT q.*, ord.*, w.waiting_days, w.last_touched_at,
            -- Both stored naive UTC. Converted once, here, so the row and the
            -- clipboard agree on what day it was.
            (q.created_at   AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata')::date::text AS created_date,
            (q.preferred_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata')::date::text AS requested_date
     FROM analytics.v_request_quote q
+    -- How long this has sat where it is. The console stamps updatedAt on any
+    -- change, so for a request parked in a stage it is the last time anybody
+    -- did anything to it.
+    LEFT JOIN LATERAL (
+      SELECT EXTRACT(day FROM (now() - r."updatedAt"))::int AS waiting_days,
+             (r."updatedAt" AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata')::text AS last_touched_at
+      FROM src_local."Request" r WHERE r.id = q.request_id
+    ) w ON true
     -- A lateral, not two joins. Joining "Order" and "Lab" directly puts their
     -- own city, status and createdAt into scope, and the filter clause — which
     -- is written in bare column names so the same one works for the count and
