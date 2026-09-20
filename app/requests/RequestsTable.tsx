@@ -159,23 +159,35 @@ export function RequestsTable({
                     {r.nearest_km && <> · lab {r.nearest_km} km</>}
                   </span>
                 </td>
-                {/* The ask, spelled out. "1 item" told nobody anything. */}
+                {/* The package, where the request is a package. Listing its
+                    component tests said less in more words — "LS SF Onboarding
+                    Package" is the thing the store ordered and the thing a lab
+                    quotes against. Individual tests only show when there is no
+                    package to name. */}
                 <td className="px-2 py-2.5 text-xs">
-                  {items.length === 0 ? (
-                    <span className="text-ink-400">Not identified</span>
-                  ) : (
-                    <>
-                      <span className="text-ink-800">{items.slice(0, 2).join(', ')}</span>
-                      {items.length > 2 && (
-                        <span className="text-ink-400"> +{items.length - 2} more</span>
-                      )}
-                      {(r.unnamed ?? 0) > 0 && (
-                        <span className="block text-[10px] text-warn-600">
-                          {r.unnamed} not in catalogue
-                        </span>
-                      )}
-                    </>
-                  )}
+                  {(() => {
+                    const packages = r.packages ?? [];
+                    const shown = packages.length > 0 ? packages : items;
+                    if (shown.length === 0) return <span className="text-ink-400">Not identified</span>;
+                    return (
+                      <>
+                        <span className="text-ink-800">{shown.slice(0, 2).join(', ')}</span>
+                        {shown.length > 2 && (
+                          <span className="text-ink-400"> +{shown.length - 2} more</span>
+                        )}
+                        {packages.length > 0 && (r.tests?.length ?? 0) > 0 && (
+                          <span className="block text-[10px] text-ink-400">
+                            + {r.tests!.length} individual test{r.tests!.length === 1 ? '' : 's'}
+                          </span>
+                        )}
+                        {(r.unnamed ?? 0) > 0 && (
+                          <span className="block text-[10px] text-warn-600">
+                            {r.unnamed} not in catalogue
+                          </span>
+                        )}
+                      </>
+                    );
+                  })()}
                 </td>
                 <td className="px-2 py-2.5 whitespace-nowrap">
                   <span className={`inline-block rounded border px-1.5 py-0.5 text-[11px] ${TONE_CHIP[tone]}`}>

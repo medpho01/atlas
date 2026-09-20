@@ -192,7 +192,11 @@ export async function getRequests(f: RequestFilters = {}) {
   const limit = Math.min(f.limit ?? 100, 500);
   params.push(limit, f.offset ?? 0);
   const rows = await query<RequestRow>(`
-    SELECT q.*, ord.*
+    SELECT q.*, ord.*,
+           -- Both stored naive UTC. Converted once, here, so the row and the
+           -- clipboard agree on what day it was.
+           (q.created_at   AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata')::date::text AS created_date,
+           (q.preferred_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata')::date::text AS requested_date
     FROM analytics.v_request_quote q
     -- A lateral, not two joins. Joining "Order" and "Lab" directly puts their
     -- own city, status and createdAt into scope, and the filter clause — which

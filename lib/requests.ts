@@ -129,6 +129,9 @@ export type RequestRow = {
   // The order a request became, where it became one. Joined on the row rather
   // than looked up per render: "did this convert, who is serving it, and when"
   // is one question, and three columns of it in three places is three answers.
+  /** Creation and the appointment the store asked for, as IST dates. */
+  created_date: string | null;
+  requested_date: string | null;
   order_appointment: string | null;
   order_lab_id: number | null;
   order_lab_name: string | null;
@@ -166,11 +169,22 @@ export function quoteBlock(r: {
   request_id: number;
   quote_price: string | null;
   promised_date: string | null;
+  committed_date?: string | null;
+  created_date?: string | null;
+  requested_date?: string | null;
   state: RequestState;
 }): string {
-  const price = r.quote_price ? `INR ${Math.round(Number(r.quote_price))}` : '—';
-  const date = r.promised_date ?? '—';
-  return `Request #${r.request_id}\nQuoted price: ${price}\nEarliest date: ${date}`;
+  const price = r.quote_price ? `INR ${Math.round(Number(r.quote_price))}` : '-';
+  // Three dates, because whoever reads this in the console is deciding whether
+  // the answer is acceptable, and that is a comparison: how long they have
+  // been waiting, the date they asked for, and the date we can do.
+  return [
+    `Request #${r.request_id}`,
+    `Created: ${r.created_date ?? '-'}`,
+    `Requested date: ${r.requested_date ?? '-'}`,
+    `Earliest available date: ${r.committed_date ?? r.promised_date ?? '-'}`,
+    `Quoted price: ${price}`,
+  ].join('\n');
 }
 
 /**
