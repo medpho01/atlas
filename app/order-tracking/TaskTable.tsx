@@ -205,7 +205,7 @@ export function TaskTable({
               </th>
               <th className="text-left font-medium px-2 py-2 w-[124px]">Order</th>
               <th className="text-left font-medium px-2 py-2 w-[130px]">Store</th>
-              <th className="text-left font-medium px-2 py-2 min-w-[146px]">Requester</th>
+              <th className="text-left font-medium px-2 py-2 min-w-[146px]">User</th>
               {kind === 'needs_lab' ? (
                 <>
                   <th className="text-left font-medium px-2 py-2 w-[150px]">Appointment</th>

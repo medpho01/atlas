@@ -130,7 +130,7 @@ export function RequestsTable({
           <th className="text-left font-medium px-2 py-2">Store</th>
           {/* Who asked. Every row here ends in somebody being rung, and
               opening the request to find the number is the slowest part. */}
-          <th className="text-left font-medium px-2 py-2 min-w-[150px]">Requester</th>
+          <th className="text-left font-medium px-2 py-2 min-w-[150px]">User</th>
           <th className="text-left font-medium px-2 py-2 w-[120px]">Request status</th>
           <th className="text-left font-medium px-2 py-2">Location</th>
           <th className="text-left font-medium px-2 py-2 min-w-[220px]">Requested items</th>
