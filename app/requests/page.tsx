@@ -98,7 +98,21 @@ export default async function RequestsPage({
   // twice and add the numbers up themselves.
   const csv = (v: string | undefined) =>
     (v ?? '').split(',').map((x) => x.trim()).filter(Boolean);
-  const queue = QUEUES.find((qu) => qu.key === searchParams.queue);
+  // The page opens on the first queue, not on a list of everything. Landing on
+  // "All requests" meant every morning started by reading a week of history to
+  // find the eleven rows that needed a price — the queue is the job, so it is
+  // the front door, and "All requests" is the deliberate detour rather than
+  // the default. It has to say so in the URL (`queue=all`), because an absent
+  // `queue` now means the default rather than "no queue".
+  //
+  // A search is the exception. It is for one specific thing whose stage nobody
+  // knows, and scoping it to "needs a quote" would report it missing.
+  // An old link that names its own stage or serviceability is asking for the
+  // full surface — sending it to a queue would silently overwrite the filter
+  // it was built around.
+  const queueKey = searchParams.queue
+    ?? (searchParams.q || searchParams.status || searchParams.state ? 'all' : QUEUES[0].key);
+  const queue = QUEUES.find((qu) => qu.key === queueKey);
   // A queue owns the stage filter outright. Letting a leftover `status` from a
   // previous click survive into a queue is how you end up on "Ready to order"
   // looking at an empty table and a stage chip you did not know was on.
@@ -181,28 +195,19 @@ export default async function RequestsPage({
     return keep(k, next.length ? next.join(',') : undefined);
   };
 
-  /** Same link, with several keys dropped at once. */
-  const drop = (...keys: string[]) => {
-    const p = new URLSearchParams();
-    for (const [key, val] of Object.entries(searchParams)) {
-      if (val && !keys.includes(key)) p.set(key, val);
-    }
-    const q = p.toString();
-    return `/requests${q ? `?${q}` : ''}`;
-  };
-
-  // What the rows are actually ordered by, which inside a queue is not what
-  // `sort` says — the queue supplies a default. The chips and the caption read
-  // this, not the URL, or the table says "newest first" while showing oldest.
-  const effectiveSort = f.sort ?? 'newest';
-  const activeWindow = f.window ?? 'week';
-
   /** Every search param except the named one, for a client component to carry. */
   const carry = (without: string) => {
     const out: Record<string, string> = {};
     for (const [k, v] of Object.entries(searchParams)) if (v && k !== without) out[k] = v;
     return out;
   };
+
+  // What the rows are actually ordered by and windowed to, which inside a queue
+  // is not what the URL says — the queue supplies both defaults. The chips and
+  // the caption read these, or the page claims "newest first" while showing
+  // the oldest.
+  const effectiveSort = f.sort ?? 'newest';
+  const activeWindow = f.window ?? 'week';
 
   const keep = (k: string, v?: string) => {
     const p = new URLSearchParams();
@@ -276,7 +281,7 @@ export default async function RequestsPage({
           );
         })}
         <Link
-          href={drop('queue', 'status', 'sort', 'window')}
+          href={keep('queue', 'all')}
           className={`flex items-center gap-2 px-4 py-2.5 -mb-px border-b-[3px] transition-colors
                       ${!queue ? 'border-ink-400 text-ink-900 font-bold' : 'border-transparent text-ink-500 hover:text-ink-800'}`}
         >
