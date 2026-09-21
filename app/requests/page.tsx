@@ -75,6 +75,7 @@ const QUEUES = [
     statuses: ['OPEN', 'CONSENTED'],
     sort: 'waiting',
     action: 'Price it and give the store an earliest available date.',
+    empty: 'Every request that came in has been priced. New ones land here as stores raise them.',
     tone: 'bg-danger-500',
     bar: 'border-danger-500',
   },
@@ -84,6 +85,7 @@ const QUEUES = [
     statuses: ['QUOTED'],
     sort: 'waiting',
     action: 'Quoted and gone quiet. Chase the store for a yes or a no — longest wait first.',
+    empty: 'No quote is sitting unanswered — every store has come back to us.',
     tone: 'bg-warn-500',
     bar: 'border-warn-500',
   },
@@ -93,6 +95,7 @@ const QUEUES = [
     statuses: ['QUOTATION_ACCEPTED'],
     sort: 'waiting',
     action: 'The store said yes. Convert it in the console before the date we promised moves.',
+    empty: 'Nothing is waiting to be converted. Accepted quotes land here the moment a store says yes.',
     tone: 'bg-success-600',
     bar: 'border-success-600',
   },
@@ -223,6 +226,11 @@ export default async function RequestsPage({
     const q = p.toString();
     return `/requests${q ? `?${q}` : ''}`;
   };
+
+  // What the rows are actually ordered by, which inside a queue is not what
+  // `sort` says — the queue supplies a default. The chips and the caption read
+  // this, not the URL, or the table says "newest first" while showing oldest.
+  const effectiveSort = f.sort ?? 'newest';
 
   const keep = (k: string, v?: string) => {
     const p = new URLSearchParams();
@@ -363,7 +371,9 @@ export default async function RequestsPage({
                         ordered. Listed apart from the stages where nobody is working the
                         request any more, because mixing them made a pipeline read as a
                         set of unrelated labels. */}
-                    <FilterRow label="Pipeline">
+                    {/* Not inside a queue: the tabs above ARE the stage filter, so
+                        these chips would look clickable and change nothing. */}
+                    {!queue && <FilterRow label="Pipeline">
                       <ChipButton href={keep('status')} active={stages.length === 0}>All</ChipButton>
                       {PIPELINE_STAGES.map((st, i) => {
                         const n = facets.stages.find((x) => x.status === st)?.n ?? 0;
@@ -376,7 +386,7 @@ export default async function RequestsPage({
                           </span>
                         );
                       })}
-                    </FilterRow>
+                    </FilterRow>}
                     <FilterRow label="Store">
                       <ChipButton href={keep('store')} active={stores.length === 0}>All</ChipButton>
                       {/* Only stores with something in the current view. With forty-odd
@@ -412,7 +422,7 @@ export default async function RequestsPage({
                         ['demand', 'Highest pincode demand'],
                         ['waiting', 'Waiting longest'],
                       ] as const).map(([k, label]) => (
-                        <ChipButton key={k} href={keep('sort', k)} active={(searchParams.sort ?? 'newest') === k}>
+                        <ChipButton key={k} href={keep('sort', k)} active={effectiveSort === k}>
                           {label}
                         </ChipButton>
                       ))}
@@ -524,7 +534,7 @@ export default async function RequestsPage({
       <Card>
         <CardHeader
           title={`${rows.length.toLocaleString('en-IN')} shown${total > rows.length ? ` of ${total.toLocaleString('en-IN')}` : ''}`}
-          subtitle={`Sorted by ${SORT_LABEL[(searchParams.sort ?? 'newest') as keyof typeof SORT_LABEL]}.`}
+          subtitle={`Sorted by ${SORT_LABEL[effectiveSort as keyof typeof SORT_LABEL]}.`}
           icon={<Inbox className="w-4 h-4" strokeWidth={2.25} />}
         />
         <CardBody className="pt-0">
@@ -533,6 +543,7 @@ export default async function RequestsPage({
               rows={rows}
               windowLabel={WINDOW_LABEL[(searchParams.window ?? (searchParams.q || stages.length ? 'all' : 'week')) as keyof typeof WINDOW_LABEL]}
               widenHref={keep('window', 'all')}
+              emptyQueue={queue ? queue.empty : undefined}
             />
           </div>
         </CardBody>

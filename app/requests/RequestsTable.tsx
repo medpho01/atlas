@@ -82,15 +82,29 @@ function CopyQuote({ row }: { row: RequestRow }) {
 }
 
 export function RequestsTable({
-  rows, windowLabel, widenHref,
+  rows, windowLabel, widenHref, emptyQueue,
 }: {
   rows: RequestRow[];
   /** The active arrival window, so an empty result can name what hid the rows. */
   windowLabel?: string;
   /** One click to the same filters over all time. */
   widenHref?: string;
+  /** Inside a queue, what an empty one means — which is good news, not a filter problem. */
+  emptyQueue?: string;
 }) {
   const router = useRouter();
+
+  // An empty queue is a finished queue. The generic empty state explains which
+  // filters might be hiding rows, which inside a queue is both wrong — the
+  // window is already off — and the opposite of what happened.
+  if (!rows.length && emptyQueue) {
+    return (
+      <div className="px-5 py-12 text-center">
+        <p className="text-sm font-semibold text-ink-900">Nothing here.</p>
+        <p className="mt-1 text-sm text-ink-500">{emptyQueue}</p>
+      </div>
+    );
+  }
 
   if (!rows.length) {
     return (
