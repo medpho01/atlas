@@ -219,9 +219,13 @@ export async function getRequests(f: RequestFilters = {}) {
 
   const limit = Math.min(f.limit ?? 100, 500);
   params.push(limit, f.offset ?? 0);
-  const rows = await query<RequestRow>(`
+  const rows = await query<RequestRow & { total_rows: number }>(`
     SELECT q.*, ord.*, w.waiting_days, w.last_touched_at,
            w.requester_name, w.requester_mobile,
+           -- The count the header shows, taken from the same scan instead of
+           -- a second query over the same filter. countRequests was a whole
+           -- extra pass to print one number.
+           count(*) OVER ()::int AS total_rows,
            -- Both stored naive UTC. Converted once, here, so the row and the
            -- clipboard agree on what day it was.
            (q.created_at   AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata')::date::text AS created_date,
@@ -269,7 +273,7 @@ export async function getRequests(f: RequestFilters = {}) {
     r.promised_date  = asDay(r.promised_date);
     r.committed_date = asDay(r.committed_date);
   }
-  return rows;
+  return { rows: rows as RequestRow[], total: rows[0]?.total_rows ?? 0 };
 }
 
 /** A date column as YYYY-MM-DD, whichever of the two shapes pg handed back. */
@@ -635,56 +639,53 @@ export async function getPincodeDemand(limit = 50) {
  */
 export async function getFacets(f: RequestFilters = {}) {
   const forStores = build({ ...f, store: undefined });
-  const forCities = build({ ...f, city: undefined });
   // Stage counts ignore both the stage filter and the settled exclusion —
   // otherwise every settled stage would permanently read zero, which is the
-  // opposite of informative.
+  // opposite of informative. They are what the queue tabs count.
   const forStages = build({ ...f, status: undefined, openOnly: false });
-  // The chip list is chosen by all-time volume so it stays put as filters
-  // change — a row of chips that empties out reads as a broken page. The
-  // count on each chip is the filtered one, including zero, so it is a
-  // truthful preview of what clicking it returns.
-  const [stores, cities, stages] = await Promise.all([
-    query<{ store_id: number; name: string; n: number }>(`
-      WITH top AS (
-        -- Every tracked store that has ever sent a request, not a fixed top
-        -- few: the settings page is what keeps this list short, so the filter
-        -- row should show exactly what is being tracked.
-        SELECT store_id, COUNT(*) AS all_time
-        FROM analytics.mv_request_state
-        WHERE store_id IS NOT NULL AND atlas.store_is_tracked(store_id)
-        GROUP BY 1 ORDER BY 2 DESC
-      ),
-      filtered AS (
-        SELECT store_id, COUNT(*)::int AS n
-        FROM analytics.v_request_quote ${forStores.clause}
-        GROUP BY 1
-      )
-      SELECT t.store_id,
-             COALESCE(st."storeName", 'Store ' || t.store_id) AS name,
-             COALESCE(f.n, 0) AS n
-      FROM top t
-      LEFT JOIN filtered f ON f.store_id = t.store_id
-      LEFT JOIN src_local."Store" st ON st.id = t.store_id
-      ORDER BY COALESCE(f.n, 0) DESC, t.all_time DESC`, forStores.params),
-    query<{ city: string; n: number }>(`
-      WITH top AS (
-        SELECT city, COUNT(*) AS all_time
-        FROM analytics.mv_request_state
-        WHERE NULLIF(TRIM(city),'') IS NOT NULL GROUP BY 1 ORDER BY 2 DESC LIMIT 30
-      ),
-      filtered AS (
-        SELECT city, COUNT(*)::int AS n
-        FROM analytics.v_request_quote ${forCities.clause}
-        GROUP BY 1
-      )
-      SELECT t.city, COALESCE(f.n, 0) AS n
-      FROM top t LEFT JOIN filtered f ON lower(f.city) = lower(t.city)
-      ORDER BY COALESCE(f.n, 0) DESC, t.all_time DESC`, forCities.params),
-    query<{ status: string; n: number }>(`
+  // Both clauses number their placeholders from $1, so the second one's have
+  // to be shifted past the first one's before they can share a parameter list.
+  // The replace runs left to right over $<digits> and never revisits what it
+  // has written, so it cannot collide with itself.
+  const shift = (clause: string, by: number) =>
+    clause.replace(/\$(\d+)/g, (_m, d) => `$${Number(d) + by}`);
+  const stageClause = shift(forStages.clause, forStores.params.length);
+
+  // Two aggregates, one round trip. They used to be three separate queries —
+  // stores, cities, stages — each its own full pass over the table, and the
+  // city list has not been rendered since the filter rows were cut.
+  const rows = await query<{ kind: string; k: string | null; name: string | null; n: number }>(`
+    WITH tracked AS (
+      SELECT store_id, COUNT(*) AS all_time
+      FROM analytics.mv_request_state
+      WHERE store_id IS NOT NULL AND atlas.store_is_tracked(store_id)
+      GROUP BY 1
+    ),
+    by_store AS (
+      SELECT store_id, COUNT(*)::int AS n
+      FROM analytics.v_request_quote ${forStores.clause}
+      GROUP BY 1
+    ),
+    by_stage AS (
       SELECT status, COUNT(*)::int AS n
-      FROM analytics.v_request_quote ${forStages.clause}
-      GROUP BY 1`, forStages.params),
-  ]);
-  return { stores, cities, stages };
+      FROM analytics.v_request_quote ${stageClause}
+      GROUP BY 1
+    )
+    SELECT 'store' AS kind, t.store_id::text AS k,
+           COALESCE(st."storeName", 'Store ' || t.store_id) AS name,
+           COALESCE(b.n, 0) AS n
+    FROM tracked t
+    LEFT JOIN by_store b ON b.store_id = t.store_id
+    LEFT JOIN src_local."Store" st ON st.id = t.store_id
+    UNION ALL
+    SELECT 'stage', status, NULL, n FROM by_stage
+  `, [...forStores.params, ...forStages.params]);
+
+  return {
+    stores: rows.filter((r) => r.kind === 'store')
+      .map((r) => ({ store_id: Number(r.k), name: r.name ?? '', n: r.n }))
+      .sort((a, b) => b.n - a.n || a.name.localeCompare(b.name)),
+    stages: rows.filter((r) => r.kind === 'stage')
+      .map((r) => ({ status: r.k ?? '', n: r.n })),
+  };
 }
