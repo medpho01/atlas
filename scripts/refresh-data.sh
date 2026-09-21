@@ -543,6 +543,9 @@ $PG -c "REFRESH MATERIALIZED VIEW analytics.mv_lab_pincode_home;
 REFRESH MATERIALIZED VIEW analytics.mv_lab_pincode_served;"  >>"$LOG" 2>&1 || log "  WARN: lab-pincode refresh failed"
 $PG -c "REFRESH MATERIALIZED VIEW analytics.mv_lab_offering;"      >>"$LOG" 2>&1 || log "  WARN: lab offering refresh failed"
 $PG -c "REFRESH MATERIALIZED VIEW analytics.mv_request_state;"     >>"$LOG" 2>&1 || log "  WARN: request state refresh failed"
+# Reads mv_request_state, so strictly after it. This is the one the requests
+# page actually reads; without it the page shows last night's catalogue.
+$PG -c "SELECT atlas.refresh_request_quote();"                      >>"$LOG" 2>&1 || log "  WARN: request quote refresh failed"
 $PG -c "SELECT atlas.sync_commitments();"                          >>"$LOG" 2>&1 || log "  WARN: commitment sync failed"
 
 # ---- Phase 5: capture this week's network snapshot -------------------------

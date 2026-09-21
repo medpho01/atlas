@@ -58,6 +58,52 @@ const ORDER_STATUS_FILTERS = [
   ['CANCELED', 'Cancelled'],
 ] as const;
 
+/**
+ * The three things the team actually does on this page, in the order a request
+ * moves through them.
+ *
+ * The page could already express all three — pick the stage, pick the stores,
+ * turn the window off — but that is four clicks and a piece of knowledge, and
+ * it started every morning from a list of last week's everything. Each queue
+ * is one stage of the pipeline, every store the person owns, no time window,
+ * and the action written on it.
+ */
+const QUEUES = [
+  {
+    key: 'open',
+    label: 'Needs a quote',
+    statuses: ['OPEN', 'CONSENTED'],
+    sort: 'waiting',
+    action: 'Price it and give the store an earliest available date.',
+    tone: 'bg-danger-500',
+    bar: 'border-danger-500',
+  },
+  {
+    key: 'quoted',
+    label: 'Awaiting acceptance',
+    statuses: ['QUOTED'],
+    sort: 'waiting',
+    action: 'Quoted and gone quiet. Chase the store for a yes or a no — longest wait first.',
+    tone: 'bg-warn-500',
+    bar: 'border-warn-500',
+  },
+  {
+    key: 'accepted',
+    label: 'Ready to order',
+    statuses: ['QUOTATION_ACCEPTED'],
+    sort: 'waiting',
+    action: 'The store said yes. Convert it in the console before the date we promised moves.',
+    tone: 'bg-success-600',
+    bar: 'border-success-600',
+  },
+] as const;
+
+/** What the funnel reads as when a queue has switched it off. */
+const EMPTY_FUNNEL = {
+  received: 0, answerable: 0, priced: 0, quoted: 0, ordered: 0, sourced: 0,
+  no_ask: 0, no_pincode: 0, supply_gap: 0, awaiting: 0,
+};
+
 const WINDOW_LABEL = {
   today: 'today', week: 'last 7 days', month: 'last 30 days', all: 'all time',
 } as const;
@@ -79,7 +125,11 @@ export default async function RequestsPage({
   // twice and add the numbers up themselves.
   const csv = (v: string | undefined) =>
     (v ?? '').split(',').map((x) => x.trim()).filter(Boolean);
-  const stages = csv(searchParams.status);
+  const queue = QUEUES.find((qu) => qu.key === searchParams.queue);
+  // A queue owns the stage filter outright. Letting a leftover `status` from a
+  // previous click survive into a queue is how you end up on "Ready to order"
+  // looking at an empty table and a stage chip you did not know was on.
+  const stages = queue ? [...queue.statuses] : csv(searchParams.status);
   const stores = csv(searchParams.store).map(Number).filter(Number.isInteger);
 
   // Asking about appointments is asking about orders, and an order means the
@@ -95,7 +145,10 @@ export default async function RequestsPage({
     store: stores,
     city: searchParams.city,
     q: searchParams.q,
-    sort: (searchParams.sort as 'newest' | 'oldest' | 'value' | 'value_asc' | 'soonest' | 'demand') ?? 'newest',
+    // In a queue, oldest-waiting first by default: the whole job is the thing
+    // that has been sitting longest, and newest-first buries it.
+    sort: (searchParams.sort as 'newest' | 'oldest' | 'value' | 'value_asc' | 'soonest' | 'demand' | 'waiting')
+          ?? (queue ? queue.sort : 'newest'),
     priced: searchParams.priced === '1',
     unquoted: searchParams.unquoted === '1',
     hasLab: searchParams.haslab === '1',
@@ -109,6 +162,9 @@ export default async function RequestsPage({
     // about what is STUCK: every request sitting at Quoted has by definition
     // been sitting a while, so defaulting to the last week hides exactly the
     // rows that were asked for.
+    // A queue is never windowed by default. Everything in it is waiting on us
+    // by definition, and a request quoted three weeks ago is the one that
+    // needs chasing, not the one to hide.
     window: (searchParams.window as 'today' | 'week' | 'month' | 'all')
             ?? (searchParams.q || stages.length ? 'all' : 'week'),
     appt: searchParams.appt as 'today' | 'tomorrow' | 'soon' | 'overdue' | 'none' | undefined,
@@ -122,12 +178,19 @@ export default async function RequestsPage({
     limit: 150,
   };
 
+  // The funnel is a shape-of-the-month chart, and inside a queue it is both a
+  // distraction and a whole extra pass over the table. A queue is a worklist.
   const [rows, total, facets, funnel, fresh, untracked] = await Promise.all([
     getRequests(f), countRequests(f), getFacets(f),
-    getRequestFunnel({ ...f, state: undefined }),
+    queue ? Promise.resolve(EMPTY_FUNNEL) : getRequestFunnel({ ...f, state: undefined }),
     getRequestFreshness(),
     getUntrackedCount(f),
   ]);
+
+  /** How many sit in each queue right now, for the stores in scope. */
+  const stageCount = new Map(facets.stages.map((x) => [x.status, x.n]));
+  const queueCount = (qu: (typeof QUEUES)[number]) =>
+    qu.statuses.reduce((n, st) => n + (stageCount.get(st) ?? 0), 0);
 
   // How many of the filters behind the disclosure are on. The panel opens
   // itself when any of them are, because a filter you cannot see is one you
@@ -210,8 +273,50 @@ export default async function RequestsPage({
         )}
       </div>
 
+      {/* The three jobs, as three doors. Anything else on this page is still
+          here — "All requests" is the old surface, unchanged. */}
+      <div className="flex flex-wrap gap-1 mt-5 border-b border-ink-200">
+        {QUEUES.map((qu) => {
+          const active = queue?.key === qu.key;
+          const n = queueCount(qu);
+          return (
+            <Link
+              key={qu.key}
+              href={keep('queue', qu.key)}
+              className={`flex items-center gap-2 px-4 py-2.5 -mb-px border-b-[3px] transition-colors
+                          ${active ? `${qu.bar} text-ink-900` : 'border-transparent text-ink-500 hover:text-ink-800'}`}
+            >
+              <span className={`w-1.5 h-1.5 rounded-full ${active ? qu.tone : 'bg-ink-300'}`} />
+              <span className={`text-sm ${active ? 'font-bold' : 'font-medium'}`}>{qu.label}</span>
+              <span className={`text-[11px] font-bold rounded-full px-2 py-0.5 tabular-nums
+                                ${active ? `${qu.tone} text-white` : 'bg-ink-100 text-ink-500'}`}>
+                {n.toLocaleString('en-IN')}
+              </span>
+            </Link>
+          );
+        })}
+        <Link
+          href={drop('queue', 'status', 'sort', 'window')}
+          className={`flex items-center gap-2 px-4 py-2.5 -mb-px border-b-[3px] transition-colors
+                      ${!queue ? 'border-ink-400 text-ink-900 font-bold' : 'border-transparent text-ink-500 hover:text-ink-800'}`}
+        >
+          <span className="text-sm">All requests</span>
+        </Link>
+      </div>
+
+      {queue && (
+        <p className="text-[13px] text-ink-700 mt-3">
+          {queue.action}
+          {stores.length > 0 && (
+            <span className="text-ink-400">
+              {' '}· {stores.length} store{stores.length === 1 ? '' : 's'} selected
+            </span>
+          )}
+        </p>
+      )}
+
       {/* A stale snapshot looks exactly like a quiet day. Say which it is. */}
-      {funnel.received === 0 && (fresh?.age_hours ?? 0) > 36 && (
+      {!queue && funnel.received === 0 && (fresh?.age_hours ?? 0) > 36 && (
         <div className="mt-4 mb-4 rounded-lg border border-warn-100 bg-warn-50 px-4 py-3 text-sm text-ink-700">
           <span className="font-medium text-warn-600">No rows here may mean stale data.</span>{' '}
           The newest request Atlas holds arrived{' '}
@@ -224,11 +329,11 @@ export default async function RequestsPage({
       )}
 
       <div className="mt-4" />
-      <RequestFunnel
+      {!queue && <RequestFunnel
         funnel={funnel}
         windowLabel={WINDOW_LABEL[(searchParams.window ?? (searchParams.q || stages.length ? 'all' : 'week')) as keyof typeof WINDOW_LABEL]}
         hrefFor={(k, v) => keep(k, v)}
-      />
+      />}
 
       {/* One filter surface, above the rows it filters.
           Four different dates hang off a request — created, the appointment

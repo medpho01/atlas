@@ -80,7 +80,8 @@ while true; do
       # new row appearing, and the queue keys off status. CONCURRENTLY so
       # nobody's page blocks for the duration.
       ref=$(psql -h "$PGHOST" -U atlas -d atlas -tA \
-            -c "REFRESH MATERIALIZED VIEW CONCURRENTLY analytics.mv_request_state;" 2>&1)
+            -c "REFRESH MATERIALIZED VIEW CONCURRENTLY analytics.mv_request_state;" \
+            -c "SELECT atlas.refresh_request_quote();" 2>&1)
       if [ $? -ne 0 ]; then
         log "request refresh FAILED: $ref"
       elif [ "${req%% requests*}" != "0" ]; then
