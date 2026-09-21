@@ -8,6 +8,7 @@ import {
   STATE_SHORT, STATE_TONE, STATE_OWNER, TONE_CHIP, STAGE_TONE, stageLabel,
   quoteBlock, type RequestRow,
 } from '@/lib/requests';
+import { startNav } from '@/components/ui/NavProgress';
 
 const inr = (v: string | null) =>
   v == null ? null : '₹' + Math.round(Number(v)).toLocaleString('en-IN');
@@ -178,7 +179,7 @@ export function RequestsTable({
           return (
               <tr
                 key={r.request_id}
-                onClick={() => router.push(`/requests/${r.request_id}`)}
+                onClick={() => { startNav(); router.push(`/requests/${r.request_id}`); }}
                 className="group border-b border-ink-100 last:border-0 cursor-pointer hover:bg-ink-100/40 align-top"
               >
                 <td className="px-5 py-2.5 font-medium text-ink-900 whitespace-nowrap">

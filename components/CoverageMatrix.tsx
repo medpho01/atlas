@@ -6,6 +6,7 @@ import { Grid3x3 } from 'lucide-react';
 import { Card, CardHeader, CardBody } from '@/components/ui/Card';
 import { InfoTip } from '@/components/ui/InfoTip';
 import { CAPABILITY_MATRIX, KIND_LABEL, MODALITY_LABEL, PROVIDER_KINDS, MODALITIES, type ProviderKind, type Modality } from '@/lib/coverage';
+import { startNav } from '@/components/ui/NavProgress';
 
 type Cell = {
   kind: ProviderKind;
@@ -32,6 +33,7 @@ export function CoverageMatrix({ cells, radiusKm }: Props) {
     const params = new URLSearchParams(searchParams.toString());
     params.set('radius', String(r));
     startTransition(() => {
+      startNav();
       router.push(`${pathname}?${params.toString()}`, { scroll: false });
     });
   };

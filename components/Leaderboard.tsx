@@ -9,6 +9,7 @@ import { SegmentedControl } from '@/components/ui/Toggle';
 import { HoverPopover } from '@/components/ui/HoverPopover';
 import { InfoTip } from '@/components/ui/InfoTip';
 import { LENS_OPTIONS } from '@/lib/coverage';
+import { startNav } from '@/components/ui/NavProgress';
 
 type Row = {
   city: string;
@@ -125,6 +126,7 @@ export function Leaderboard({ initialMode, initialLens, rows: initialRows, platf
               // which left the address bar already matching — so router.push()
               // was a no-op and the server-rendered map and gap tiles never
               // re-read the lens. The leaderboard updated, nothing else did.
+              startNav();
               startTransition(() => router.push(buildPushHref(mode, next)));
 
               // Client fetch purely so this card shows fresh rows immediately

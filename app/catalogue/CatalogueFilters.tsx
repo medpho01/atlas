@@ -3,6 +3,7 @@
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useTransition } from 'react';
 import { MultiSelect, type MultiSelectOption } from '@/components/ui/MultiSelect';
+import { startNav } from '@/components/ui/NavProgress';
 
 /**
  * Lab and account pickers for the catalogue.
@@ -35,6 +36,7 @@ export function CatalogueFilters({
     if (values.length) next.set(key, values.join(','));
     else next.delete(key);
     const qs = next.toString();
+    startNav();
     startTransition(() => router.push(qs ? `/catalogue?${qs}` : '/catalogue'));
   };
 

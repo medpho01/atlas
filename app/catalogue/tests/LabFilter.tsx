@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState, useTransition } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Check, Download, Loader2, Plug, Search, X } from 'lucide-react';
 import type { RateLab } from '@/lib/catalogueQueries';
+import { startNav } from '@/components/ui/NavProgress';
 
 const n = (v: number) => v.toLocaleString('en-IN');
 
@@ -69,6 +70,7 @@ export function LabFilter({ labs }: { labs: RateLab[] }) {
     if (clean.length) next.set('labs', clean.join(','));
     else next.delete('labs');
     const qs = next.toString();
+    startNav();
     startTransition(() => router.push(`/catalogue/tests${qs ? `?${qs}` : ''}`));
   };
 

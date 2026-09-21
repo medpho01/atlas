@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { Check, ChevronDown, Search } from 'lucide-react';
+import { startNav } from '@/components/ui/NavProgress';
 
 export type StoreOption = { store_id: number; name: string; n: number };
 
@@ -63,6 +64,8 @@ export function StorePicker({
 
   const apply = (ids: number[]) => {
     setOpen(false);
+    // router.push is not a click, so the shell's indicator would never see it.
+    startNav();
     const p = new URLSearchParams(carry);
     if (ids.length) p.set('store', ids.join(','));
     const q = p.toString();

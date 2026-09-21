@@ -1,6 +1,6 @@
 'use client';
 
-import { Suspense, useState } from 'react';
+import { useState } from 'react';
 import { usePathname } from 'next/navigation';
 import { Menu } from 'lucide-react';
 import type { Role } from '@/lib/access';
@@ -9,7 +9,7 @@ import { Sidebar } from './Sidebar';
 import { ThemeToggle } from './ThemeToggle';
 import { LensChip } from './LensChip';
 import { UserChip } from './UserChip';
-import { RouteProgress } from './ui/RouteProgress';
+import { NavProgress } from './ui/NavProgress';
 
 type User = { id: number; email: string; name: string; role: Role };
 
@@ -27,8 +27,6 @@ export function AppShell({ user, children }: { user: User; children: React.React
 
   return (
     <div className="flex min-h-screen">
-      {/* useSearchParams needs a boundary; the bar is not worth blocking on. */}
-      <Suspense fallback={null}><RouteProgress /></Suspense>
       <Sidebar role={user.role} mobileOpen={mobileOpen} onCloseMobile={() => setMobileOpen(false)} />
 
       <div className="flex-1 min-w-0 flex flex-col">
@@ -61,7 +59,11 @@ export function AppShell({ user, children }: { user: User; children: React.React
           </div>
         </header>
 
-        <main className="flex-1 animate-fade-in">{children}</main>
+        {/* Every wait on every screen, in one place: the first load is covered
+            by loading.tsx, and everything after it by this. */}
+        <main className="flex-1 animate-fade-in">
+          <NavProgress>{children}</NavProgress>
+        </main>
       </div>
     </div>
   );

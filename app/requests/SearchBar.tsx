@@ -3,6 +3,7 @@
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useState } from 'react';
 import { Search, X } from 'lucide-react';
+import { startNav } from '@/components/ui/NavProgress';
 
 /**
  * Find one request, or everything from a place.
@@ -28,6 +29,7 @@ export function SearchBar({ initial }: { initial?: string }) {
     } else {
       next.delete('q');
     }
+    startNav();
     router.push(`/requests?${next.toString()}`);
   };
 
