@@ -12,6 +12,7 @@ import {
   TASK_BLURB, TASK_KINDS, type TaskKind,
 } from '@/lib/orderTracking';
 import { TaskTable } from './TaskTable';
+import { StorePicker } from '@/components/ui/StorePicker';
 
 export const dynamic = 'force-dynamic';
 
@@ -90,6 +91,15 @@ export default async function OrderTrackingPage({
     getQueueStores(tab),
   ]);
 
+  /** Every search param except the named one, for a client component to carry. */
+  const carry = (without: string) => {
+    const out: Record<string, string> = {};
+    for (const [k, v] of Object.entries(searchParams)) {
+      if (v && k !== without) out[k] = v;
+    }
+    return out;
+  };
+
   const link = (patch: Record<string, string | undefined>) => {
     const p = new URLSearchParams();
     const merged: Record<string, string | undefined> = {
@@ -141,7 +151,11 @@ export default async function OrderTrackingPage({
           return (
             <Link
               key={k}
-              href={link({ tab: k === 'needs_lab' ? undefined : k, urgent: undefined })}
+              // The horizon and the late filter belong to one queue each, so they
+              // do not follow you to another — a stale `within` in the URL of a
+              // queue that ignores it is a filter you cannot see. The store
+              // selection does follow: that is whose work it is.
+              href={link({ tab: k === 'needs_lab' ? undefined : k, urgent: undefined, within: undefined })}
               className={`flex items-center gap-2 px-4 py-2.5 -mb-px border-b-[3px] transition-colors
                           ${active ? `${q.bar} text-ink-900` : 'border-transparent text-ink-500 hover:text-ink-800'}`}
             >
@@ -157,25 +171,32 @@ export default async function OrderTrackingPage({
 
       </div>
 
-      <div className="flex flex-wrap items-start justify-between gap-4 mt-4 mb-4">
-        <div className="max-w-3xl">
-          <p className="text-[13px] text-ink-700">{TASK_BLURB[tab]}</p>
-          <div className="flex flex-wrap gap-4 mt-2">
-            {count.urgent > 0 && (
-              <span className="text-[12px] font-semibold text-danger-500">{here.urgent(count.urgent)}</span>
-            )}
-            <span className="text-[12px] text-ink-500">{count.unassigned} unassigned</span>
-            <span className="text-[12px] text-ink-500">
-              {rows.length} shown
-              {tab === 'needs_lab' && horizon
-                && ` · ${horizon.key === '1' ? 'appointments tomorrow' : `appointments in the next ${horizon.key} days`}`}
-            </span>
-          </div>
+      <div className="mt-4 mb-4 max-w-3xl">
+        <p className="text-[13px] text-ink-700">{TASK_BLURB[tab]}</p>
+        <div className="flex flex-wrap gap-4 mt-2">
+          {count.urgent > 0 && (
+            <span className="text-[12px] font-semibold text-danger-500">{here.urgent(count.urgent)}</span>
+          )}
+          <span className="text-[12px] text-ink-500">{count.unassigned} unassigned</span>
+          <span className="text-[12px] text-ink-500">
+            {rows.length} shown
+            {tab === 'needs_lab' && horizon
+              && ` · ${horizon.key === '1' ? 'appointments tomorrow' : `appointments in the next ${horizon.key} days`}`}
+          </span>
         </div>
+      </div>
 
-        <div className="flex flex-wrap items-center gap-1.5">
-          {tab === 'needs_lab' && (
-            <>
+      {/* The same filter bar as Requests, in the same order and the same
+          words. Two pages the same person works all day should not need to be
+          learned twice — and the store filter in particular was a row of chips
+          here, one navigation per store, long after Requests stopped doing
+          that. */}
+      <div className="mb-4 flex flex-wrap items-center gap-x-4 gap-y-2 rounded-lg
+                      border border-ink-200 bg-surface px-4 py-2.5">
+        {tab === 'needs_lab' && (
+          <>
+            <div className="flex items-center gap-1.5">
+              <span className="text-[11px] uppercase tracking-wide text-ink-400 mr-0.5">Appointment</span>
               <ChipButton href={link({ within: undefined })} active={horizon == null}>
                 Everything ahead
               </ChipButton>
@@ -184,41 +205,42 @@ export default async function OrderTrackingPage({
                   {h.label}
                 </ChipButton>
               ))}
-              <span className="w-px h-4 bg-ink-200 mx-1" />
-            </>
-          )}
-          {tab === 'chase_report' && (
-            <>
+            </div>
+            <span className="w-px h-5 bg-ink-200" />
+          </>
+        )}
+
+        {tab === 'chase_report' && (
+          <>
+            <div className="flex items-center gap-1.5">
+              <span className="text-[11px] uppercase tracking-wide text-ink-400 mr-0.5">Due</span>
               <ChipButton href={link({ urgent: undefined })} active={!urgent}>All</ChipButton>
               <ChipButton href={link({ urgent: '1' })} active={urgent}>Late only</ChipButton>
-              <span className="w-px h-4 bg-ink-200 mx-1" />
-            </>
-          )}
+            </div>
+            <span className="w-px h-5 bg-ink-200" />
+          </>
+        )}
+
+        {/* Only the stores with work in this queue: a list of forty where
+            thirty-nine read zero is a list nobody reads. */}
+        <div className="flex items-center gap-1.5">
+          <span className="text-[11px] uppercase tracking-wide text-ink-400 mr-0.5">Store</span>
+          <StorePicker
+            options={storeFacet}
+            selected={stores}
+            carry={carry('store')}
+            basePath="/order-tracking"
+          />
+        </div>
+
+        <span className="w-px h-5 bg-ink-200" />
+
+        <div className="flex items-center gap-1.5">
+          <span className="text-[11px] uppercase tracking-wide text-ink-400 mr-0.5">Owner</span>
           <ChipButton href={link({ mine: undefined })} active={!mine}>Everyone</ChipButton>
           <ChipButton href={link({ mine: '1' })} active={mine}>Assigned to me</ChipButton>
         </div>
       </div>
-
-      {/* Whose account it is. Only the stores with work in this queue, because
-          a row of forty chips where thirty-nine read zero is a row nobody
-          reads. Several at once: a person owns a handful of accounts. */}
-      {storeFacet.length > 1 && (
-        <div className="flex flex-wrap items-center gap-1.5 mb-4">
-          <span className="text-[11px] uppercase tracking-wide text-ink-400 mr-1">Store</span>
-          <ChipButton href={link({ store: undefined })} active={stores.length === 0}>All</ChipButton>
-          {storeFacet.map((st) => {
-            const on = stores.includes(st.store_id);
-            const next = on ? stores.filter((x) => x !== st.store_id) : [...stores, st.store_id];
-            return (
-              <ChipButton key={st.store_id}
-                          href={link({ store: next.length ? next.join(',') : undefined })}
-                          active={on}>
-                {st.name} <span className="text-ink-400">{st.n}</span>
-              </ChipButton>
-            );
-          })}
-        </div>
-      )}
 
       <Card>
         <CardBody className="pt-4">

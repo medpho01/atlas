@@ -14,7 +14,7 @@ import {
   type RequestState,
 } from '@/lib/requests';
 import { RequestsTable } from './RequestsTable';
-import { StorePicker } from './StorePicker';
+import { StorePicker } from '@/components/ui/StorePicker';
 import { RequestFunnel } from './RequestFunnel';
 import { SearchBar } from './SearchBar';
 import { RefreshRequests } from './RefreshRequests';
@@ -350,6 +350,7 @@ export default async function RequestsPage({
             options={facets.stores}
             selected={stores}
             carry={carry('store')}
+            basePath="/requests"
           />
           <Link href="/settings/stores"
                 className="text-[11px] text-brand-600 hover:underline whitespace-nowrap">

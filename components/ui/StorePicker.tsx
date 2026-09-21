@@ -3,7 +3,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { Check, ChevronDown, Search } from 'lucide-react';
-import { startNav } from '@/components/ui/NavProgress';
+import { startNav } from './NavProgress';
 
 export type StoreOption = { store_id: number; name: string; n: number };
 
@@ -20,10 +20,12 @@ export type StoreOption = { store_id: number; name: string; n: number };
  * while you are still deciding.
  */
 export function StorePicker({
-  options, selected, carry,
+  options, selected, carry, basePath,
 }: {
   options: StoreOption[];
   selected: number[];
+  /** The page this filter belongs to — requests and order tracking share it. */
+  basePath: string;
   /**
    * Every other search param, so applying a selection keeps the queue, the
    * window and the sort. A function would be the obvious shape, but this
@@ -69,7 +71,7 @@ export function StorePicker({
     const p = new URLSearchParams(carry);
     if (ids.length) p.set('store', ids.join(','));
     const q = p.toString();
-    router.push(`/requests${q ? `?${q}` : ''}`);
+    router.push(`${basePath}${q ? `?${q}` : ''}`);
   };
 
   const shown = q
