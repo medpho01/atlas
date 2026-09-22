@@ -46,6 +46,95 @@ export const STATE_OWNER: Record<RequestState, 'console' | 'network' | 'data'> =
   NO_PINCODE: 'data',
 };
 
+/**
+ * Who acts, in the words the row can print.
+ *
+ * STATE_OWNER has named the owner since the state model was written, and the
+ * queue has never shown it — so a person reading thirty rows re-derives it
+ * thirty times from the state chip, and the two states that are somebody
+ * else's job entirely (a missing pincode, an unparsed ask) look like work for
+ * whoever opened the page. Naming it is the difference between a list of
+ * problems and a list of assignments.
+ */
+export const OWNER_LABEL: Record<'console' | 'network' | 'data', string> = {
+  console: 'Ops',
+  network: 'Network',
+  data: 'Data',
+};
+
+/**
+ * What each owner is being asked to do, in one line, for the hover.
+ *
+ * Short enough to read without stopping, because it is shown on a chip that
+ * somebody is passing over on their way down the list.
+ */
+export const OWNER_ACTION: Record<'console' | 'network' | 'data', string> = {
+  console: 'Ops can quote and convert this today — the network is already in place.',
+  network: 'Needs the network team: a lab has to be activated or onboarded before this can be served.',
+  data: 'Needs a data fix before anyone can price it — the request is missing what it asked for or where it is.',
+};
+
+export const OWNER_TONE: Record<'console' | 'network' | 'data', 'brand' | 'warn' | 'ink'> = {
+  console: 'brand',
+  network: 'warn',
+  data: 'ink',
+};
+
+/**
+ * How long a request may sit in a stage before it is late.
+ *
+ * The queue has always been able to show how long something has waited, and
+ * has never said how long was acceptable — so "12 days" is a number the reader
+ * has to hold an opinion about. These are that opinion, written once:
+ *
+ *   · Needs a quote — the store is waiting on a price and cannot do anything
+ *     until it has one. A day is generous; two is late.
+ *   · Awaiting acceptance — the ball is with the store, so the clock is
+ *     slower, but a quote nobody has answered in a week is a quote that has
+ *     been forgotten rather than considered.
+ *   · Ready to order — the store has said yes and the promised date is moving
+ *     while this sits. Same day, and late tomorrow.
+ *
+ * Deliberately per stage rather than one number for the page: the three
+ * queues are three different promises, and a single threshold would be wrong
+ * for two of them.
+ */
+export const STAGE_SLA: Record<string, { due: number; late: number }> = {
+  OPEN: { due: 1, late: 2 },
+  CONSENTED: { due: 1, late: 2 },
+  QUOTED: { due: 3, late: 7 },
+  QUOTATION_ACCEPTED: { due: 0, late: 1 },
+};
+
+export type SlaLevel = 'ok' | 'due' | 'late' | 'none';
+
+/**
+ * Where a request sits against the promise for its stage.
+ *
+ * 'none' rather than 'ok' when there is no threshold or no clock: a stage
+ * nobody is waiting on must not render as though it passed a check, or the
+ * colour stops meaning anything.
+ */
+export function slaLevel(status: string | null | undefined, waitingDays: number | null): SlaLevel {
+  const sla = status ? STAGE_SLA[status] : undefined;
+  if (!sla || waitingDays == null) return 'none';
+  if (waitingDays >= sla.late) return 'late';
+  if (waitingDays >= sla.due) return 'due';
+  return 'ok';
+}
+
+/** What the rail and the age cell are saying, spelled out for the title attribute. */
+export function slaReason(status: string | null | undefined, waitingDays: number | null): string {
+  const sla = status ? STAGE_SLA[status] : undefined;
+  if (!sla || waitingDays == null) return 'No clock on this stage.';
+  const stage = STAGE_LABEL[status!] ?? status;
+  const d = (n: number) => (n === 0 ? 'the same day' : n === 1 ? '1 day' : `${n} days`);
+  const level = slaLevel(status, waitingDays);
+  if (level === 'late') return `Late — ${stage} should move within ${d(sla.late)}, and this has waited ${waitingDays}.`;
+  if (level === 'due')  return `Due — ${stage} should move within ${d(sla.due)}, and this has waited ${waitingDays}.`;
+  return `On time — ${stage} is worked within ${d(sla.due)}.`;
+}
+
 export const STATE_TONE: Record<RequestState, 'success' | 'warn' | 'danger' | 'ink'> = {
   SERVICEABLE: 'success',
   PACKAGE_GAP: 'warn',
