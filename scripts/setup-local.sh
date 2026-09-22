@@ -151,6 +151,18 @@ ok "$(psqlq -tAc "SELECT COUNT(*) FROM pg_matviews WHERE schemaname='analytics'"
 # resolve pincode coordinates, then recompute what reads them. Without this the
 # readiness pages are honestly empty, which reads like a broken setup.
 say "Running the derived-data pass"
+# What each request asked for, normalised out of the two join tables.
+#
+# The nightly refresh reaches this through atlas.sync_recent_requests, which
+# pulls from the foreign tables first — and there are none locally, so it
+# raises rather than returning nothing. Called directly, it reads the seeded
+# join tables and is idempotent, which is all this needs. Skipping it left
+# atlas.request_item empty and every request classified NO_ITEMS: a /requests
+# queue of identical "Unidentified items" rows, with five of the six
+# serviceability states unreachable on a fresh laptop.
+psqlq -c "SELECT * FROM atlas.sync_request_items();" >/dev/null 2>&1 || true
+psqlq -c "REFRESH MATERIALIZED VIEW analytics.mv_request_state;" >/dev/null 2>&1 || true
+psqlq -c "REFRESH MATERIALIZED VIEW analytics.mv_request_quote;" >/dev/null 2>&1 || true
 psqlq -c "SELECT total FROM atlas.rebuild_pincode_geo();" >/dev/null 2>&1 || true
 psqlq -c "SELECT atlas.seed_city_bands();" >/dev/null 2>&1 || true
 psqlq -c "SELECT atlas.seed_integration_from_signals();" >/dev/null 2>&1 || true

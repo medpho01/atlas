@@ -238,7 +238,12 @@ INSERT INTO "Request" (id, name, mobile, email, address, locality, city, state, 
 SELECT g, 'Requester ' || g, '97000' || lpad(g::text, 5, '0'),
        'requester' || g || '@example.test',
        g || ', Enquiry Street', 'Zone ' || (1 + g % 7), a.city, a.state,
-       lpad((a.pin_base + (g % 8))::text, 6, '0'),
+       -- A handful arrive with no pincode at all. Requests reach LabStack from
+       -- a web form and a QR code as well as from a store, and the two public
+       -- routes do not make the field mandatory — so NO_PINCODE is a state the
+       -- queue really has to handle, and without a few of these it could not
+       -- be seen locally.
+       CASE WHEN g % 23 = 0 THEN NULL ELSE lpad((a.pin_base + (g % 8))::text, 6, '0') END,
        (ARRAY['MALE','FEMALE','OTHERS']::"Gender"[])[1 + (g % 3)],
        (ARRAY['WEBSITE','STORE','QR_CODE','SOCIAL_MEDIA']::"RequestSource"[])[1 + (g % 4)],
        (ARRAY['OPEN','QUOTED','ORDERED','NON_SERVICEABLE','CANCELLED',
@@ -319,6 +324,40 @@ SELECT s.id, p.id, (500 + ((s.id * 31 + p.id * 17) % 1500))::int,
        (900 + ((s.id * 31 + p.id * 17) % 1500))::int,
        now() - interval '3 months', 'seed', now() - interval '3 months', now()
 FROM "Store" s JOIN "Package" p ON (s.id + p.id) % 4 = 0;
+
+-- ---------------------------------------------------------------------------
+-- What each request actually asked for.
+--
+-- Without these two join tables atlas.sync_request_items() has nothing to
+-- read, every request classifies as NO_ITEMS, and the /requests queue — the
+-- page the whole fulfilment side exists for — renders 120 identical rows
+-- reading "Unidentified items". Five of the six serviceability states were
+-- unreachable locally, so nothing that depends on them could be seen or
+-- tested: the state chips, the covering-lab column, the price basis, the
+-- funnel's answerable step.
+--
+-- Spread deliberately rather than uniformly, because the states are the point:
+--   · one in nine is left with no items at all, so NO_ITEMS stays reachable
+--     and the "not identified" path keeps a row to render;
+--   · the rest ask for one package, and one in three adds a loose test on top,
+--     which is what makes a request bigger than any single lab's offering and
+--     produces the package gaps;
+--   · the package is picked by a stride co-prime with the catalogue size, so
+--     requests in the same city do not all land on the same package and the
+--     covering-lab column has something to differ about.
+--
+-- Whether a given request comes out serviceable, a package gap or a supply gap
+-- is then a fact about the network above, not something asserted here.
+-- ---------------------------------------------------------------------------
+INSERT INTO "_PackageToRequest" ("A", "B")
+SELECT 1 + ((r.id * 7) % 30), r.id
+FROM "Request" r
+WHERE r.id % 9 <> 0;
+
+INSERT INTO "_MasterToRequest" ("A", "B")
+SELECT 1 + ((r.id * 11) % 60), r.id
+FROM "Request" r
+WHERE r.id % 9 <> 0 AND r.id % 3 = 1;
 
 -- ---------------------------------------------------------------------------
 -- Teleconsults and pharmacy orders — thin, but the demand views join them.
