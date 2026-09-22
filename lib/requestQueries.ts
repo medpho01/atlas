@@ -386,8 +386,9 @@ export async function getQueueHealth(f: RequestFilters = {}) {
       return `WHEN s.status = $${params.length - 1} THEN s.wd >= $${params.length}`;
     }).join(' ');
 
-  // Order matters: `late` is pushed first, so its placeholders are numbered
-  // before `due`'s. Both are read into the same parameter list.
+  // Each call captures its own placeholder numbers as it pushes, so the two
+  // are independent of the order they are built in — swapping these lines
+  // cannot silently pair `due`'s thresholds with `late`'s test.
   const lateCase = `CASE ${branches('late')} ELSE false END`;
   const dueCase = `CASE ${branches('due')} ELSE false END`;
 

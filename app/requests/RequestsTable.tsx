@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
@@ -54,6 +54,51 @@ const OWNER_CHIP: Record<'brand' | 'warn' | 'ink', string> = {
 };
 
 /**
+ * What each column needs, in pixels, and the only place that is written down.
+ *
+ * The header used Tailwind width classes and the table declared its own
+ * minimum separately, which is two numbers that have to agree and no way to
+ * notice when they stop. They had already stopped: the columns added up to
+ * 1392 and the table asked for 1270, so in that 122px band the browser sized
+ * the table and squashed the columns underneath their stated minimums.
+ *
+ * Applied as inline widths rather than arbitrary Tailwind values because the
+ * total has to be computed, and Tailwind only ever sees class names it can
+ * read in the source — a built `min-w-[${n}px]` compiles to nothing.
+ *
+ * Making the total honest also showed that the columns had wanted 1392px all
+ * along and were being compressed into the 1302px a 1600px screen has to give.
+ * It only ever "fitted" because nothing enforced the minimums. So the budget
+ * here is 1286px: the widest columns gave up their padding, and the three that
+ * truncate already — store, requested items, covering labs — truncate a little
+ * sooner rather than pushing the dates off the edge, which is the column this
+ * layout exists to keep on screen.
+ */
+const COL_W = {
+  pick: 36,
+  request: 96,
+  age: 88,
+  store: 158,
+  stage: 120,
+  location: 118,
+  items: 170,
+  service: 148,
+  labs: 150,
+  quote: 92,
+  dates: 150,
+  order: 150,
+  actions: 80,
+} as const;
+
+/** The table's minimum, as the sum of the columns actually rendered. */
+function tableMinWidth({ showStage, showOrder }: { showStage: boolean; showOrder: boolean }): number {
+  const { stage, order, ...always } = COL_W;
+  return Object.values(always).reduce((a, b) => a + b, 0)
+    + (showStage ? stage : 0)
+    + (showOrder ? order : 0);
+}
+
+/**
  * How long it has sat, against how long that stage is allowed.
  *
  * The number on its own was a fact nobody had an opinion about — twelve days
@@ -87,33 +132,98 @@ const appointmentTime = (t: string | null) => {
 };
 
 /**
+ * Put text on the clipboard, and say whether it actually got there.
+ *
+ * `navigator.clipboard` is only defined in a secure context. Atlas over plain
+ * http on an office address — which is how an internal tool tends to get
+ * reached — has no `clipboard` at all, so the old `navigator.clipboard.writeText(…)`
+ * threw on the property access before it ever reached the promise. Even where
+ * the API exists the write can reject, on a permission or an unfocused
+ * document.
+ *
+ * Both were fire-and-forget, and the button set itself to "Copied" on the next
+ * line either way. That is the worst available outcome: the operator reads the
+ * confirmation, pastes into the console, and gets whatever was on the
+ * clipboard beforehand. Failing loudly is recoverable; a false success is not.
+ */
+async function copyText(text: string): Promise<boolean> {
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch {
+    // Fall through — an insecure context and a refused permission both land
+    // here, and the fallback below handles the first of them.
+  }
+  // execCommand is deprecated and still the only thing that works without a
+  // secure context. The textarea has to be in the document and focusable for
+  // the selection to take.
+  try {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.setAttribute('readonly', '');
+    ta.style.cssText = 'position:fixed;top:0;left:0;opacity:0;pointer-events:none';
+    document.body.appendChild(ta);
+    ta.select();
+    const ok = document.execCommand('copy');
+    document.body.removeChild(ta);
+    return ok;
+  } catch {
+    return false;
+  }
+}
+
+/** How long a "Copied" / "Copy failed" confirmation stays on a button. */
+const FLASH_MS = 1600;
+
+/**
+ * A boolean that resets itself, and stops doing so once its owner is gone.
+ *
+ * Every one of these buttons sets a flag, waits, and clears it. Without the
+ * cleanup the timer outlives an unmount — and the bulk bar unmounts the moment
+ * the selection is cleared, which is frequently within the window.
+ */
+function useFlash(): ['idle' | 'ok' | 'fail', (v: 'ok' | 'fail') => void] {
+  const [state, setState] = useState<'idle' | 'ok' | 'fail'>('idle');
+  const timer = useRef<ReturnType<typeof setTimeout>>();
+  useEffect(() => () => clearTimeout(timer.current), []);
+  const flash = (v: 'ok' | 'fail') => {
+    setState(v);
+    clearTimeout(timer.current);
+    timer.current = setTimeout(() => setState('idle'), FLASH_MS);
+  };
+  return [state, flash];
+}
+
+/**
  * The copy button is the whole point of the ops screen: the answer is computed
  * here and recorded in the console, so the handoff has to be one click and the
  * text has to survive a paste into a plain input.
  */
 function CopyQuote({ row }: { row: RequestRow }) {
-  const [done, setDone] = useState(false);
+  const [state, flash] = useFlash();
   const disabled = row.quote_price == null && row.promised_date == null;
   return (
     <button
       type="button"
       disabled={disabled}
-      onClick={(e) => {
+      onClick={async (e) => {
         e.stopPropagation();
-        navigator.clipboard.writeText(quoteBlock(row));
-        setDone(true);
-        setTimeout(() => setDone(false), 1600);
+        flash(await copyText(quoteBlock(row)) ? 'ok' : 'fail');
       }}
       className={`inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[11px] transition
         ${disabled
           ? 'border-ink-200 text-ink-400 cursor-not-allowed'
-          : done
+          : state === 'ok'
             ? 'border-success-100 bg-success-50 text-success-600'
-            : 'border-ink-200 text-ink-700 hover:bg-ink-100'}`}
+            : state === 'fail'
+              ? 'border-danger-100 bg-danger-50 text-danger-500'
+              : 'border-ink-200 text-ink-700 hover:bg-ink-100'}`}
       title={disabled ? 'Nothing to quote — see the reason' : 'Copy price and date for the console'}
     >
-      {done ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
-      {done ? 'Copied' : 'Copy'}
+      {state === 'ok' ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
+      {state === 'ok' ? 'Copied' : state === 'fail' ? 'Failed' : 'Copy'}
     </button>
   );
 }
@@ -155,7 +265,7 @@ function toCsv(rows: RequestRow[]): string {
   const body = rows.map((r) => CSV_COLUMNS.map((c) => csvCell(c.value(r))).join(','));
   // A BOM, because the whole point of the export is that somebody opens it in
   // Excel, and without one every lab name with an accent in it arrives broken.
-  return '﻿' + [head, ...body].join('\r\n');
+  return '\uFEFF' + [head, ...body].join('\r\n');
 }
 
 /**
@@ -175,24 +285,18 @@ function BulkBar({
   selected: RequestRow[];
   onClear: () => void;
 }) {
-  const [copied, setCopied] = useState<'quotes' | 'ids' | null>(null);
+  const [which, setWhich] = useState<'quotes' | 'ids' | null>(null);
+  const [state, flash] = useFlash();
   const n = selected.length;
   const quotable = selected.filter((r) => r.quote_price != null || r.promised_date != null);
 
-  const flash = (what: 'quotes' | 'ids') => {
-    setCopied(what);
-    setTimeout(() => setCopied(null), 1600);
+  const copy = async (what: 'quotes' | 'ids', text: string) => {
+    setWhich(what);
+    flash(await copyText(text) ? 'ok' : 'fail');
   };
 
-  const copyQuotes = () => {
-    navigator.clipboard.writeText(quotable.map(quoteBlock).join('\n\n'));
-    flash('quotes');
-  };
-
-  const copyIds = () => {
-    navigator.clipboard.writeText(selected.map((r) => r.request_id).join(', '));
-    flash('ids');
-  };
+  const copyQuotes = () => copy('quotes', quotable.map(quoteBlock).join('\n\n'));
+  const copyIds = () => copy('ids', selected.map((r) => r.request_id).join(', '));
 
   const download = () => {
     const blob = new Blob([toCsv(selected)], { type: 'text/csv;charset=utf-8' });
@@ -200,12 +304,28 @@ function BulkBar({
     const a = document.createElement('a');
     a.href = url;
     a.download = `requests-${new Date().toISOString().slice(0, 10)}.csv`;
+    // In the document, not merely constructed. Chrome and Safari will fire a
+    // click on a detached anchor; Firefox silently does nothing, which is a
+    // download button that works for most of the team and not the rest.
+    a.style.display = 'none';
+    document.body.appendChild(a);
     a.click();
-    // Revoked on the next tick rather than immediately: Safari has not started
+    document.body.removeChild(a);
+    // Revoked on a later tick rather than immediately: Safari has not started
     // reading the blob by the time click() returns, and an early revoke lands
     // as a silent no-download.
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   };
+
+  /** What a copy button should read right now. */
+  const label = (what: 'quotes' | 'ids', idle: string) =>
+    which !== what || state === 'idle' ? idle : state === 'ok' ? 'Copied' : 'Copy failed';
+  const tone = (what: 'quotes' | 'ids') =>
+    which !== what || state === 'idle'
+      ? 'border-ink-200 text-ink-700 hover:bg-ink-100'
+      : state === 'ok'
+        ? 'border-success-100 bg-success-50 text-success-600'
+        : 'border-danger-100 bg-danger-50 text-danger-500';
 
   return (
     <div className="sticky bottom-0 z-20 -mx-5 px-5 py-2.5 border-t border-ink-200
@@ -225,12 +345,11 @@ function BulkBar({
         className={`inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs font-medium transition
           ${quotable.length === 0
             ? 'border-ink-200 text-ink-400 cursor-not-allowed'
-            : copied === 'quotes'
-              ? 'border-success-100 bg-success-50 text-success-600'
-              : 'border-ink-200 text-ink-700 hover:bg-ink-100'}`}
+            : tone('quotes')}`}
       >
-        {copied === 'quotes' ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
-        {copied === 'quotes' ? 'Copied' : `Copy ${quotable.length} quote${quotable.length === 1 ? '' : 's'}`}
+        {which === 'quotes' && state === 'ok'
+          ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+        {label('quotes', `Copy ${quotable.length} quote${quotable.length === 1 ? '' : 's'}`)}
       </button>
 
       <button
@@ -238,12 +357,11 @@ function BulkBar({
         onClick={copyIds}
         title="Copy just the request ids, for a console search or a message."
         className={`inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs font-medium transition
-          ${copied === 'ids'
-            ? 'border-success-100 bg-success-50 text-success-600'
-            : 'border-ink-200 text-ink-700 hover:bg-ink-100'}`}
+          ${tone('ids')}`}
       >
-        {copied === 'ids' ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
-        {copied === 'ids' ? 'Copied' : 'Copy ids'}
+        {which === 'ids' && state === 'ok'
+          ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+        {label('ids', 'Copy ids')}
       </button>
 
       <button
@@ -375,9 +493,16 @@ export function RequestsTable({
   // information either way — a density control that hides columns is a column
   // chooser wearing the wrong label.
   const pad = dense ? 'py-1 leading-[1.15]' : 'py-2.5';
-  // Wide enough for the columns actually on screen, and no wider. The full
-  // surface still scrolls; a queue no longer has to.
-  const minWidth = showStage && showOrder ? 'min-w-[1720px]' : 'min-w-[1270px]';
+  // Wide enough for the columns actually on screen, and no wider — derived
+  // from COL_W rather than written as a number beside it.
+  //
+  // The two were separate before, and they disagreed: the table asked for
+  // 1270px while its own columns needed 1392px. Between those two widths the
+  // browser honoured the table and quietly squeezed the columns under their
+  // stated minimums, so the layout degraded in a band nobody had looked at.
+  // Adding a column would have widened that band without changing the number
+  // anybody was maintaining.
+  const minWidth = tableMinWidth({ showStage, showOrder });
 
   return (
     <>
@@ -410,10 +535,10 @@ export function RequestsTable({
           it simply drew over the card's edge — the rounded corner clipped the
           last column and there was no way to reach it. */}
       <div className="overflow-x-auto">
-      <table className={`w-full text-sm tabular-nums ${minWidth}`}>
+      <table className="w-full text-sm tabular-nums" style={{ minWidth }}>
         <thead>
           <tr className="text-[11px] uppercase tracking-wide text-ink-400 border-b border-ink-200">
-            <th className="w-9 pl-5 pr-0 py-2">
+            <th className="pl-5 pr-0 py-2" style={{ width: COL_W.pick }}>
               <input
                 type="checkbox"
                 checked={allPicked}
@@ -423,28 +548,32 @@ export function RequestsTable({
                 className="align-middle accent-brand-600 cursor-pointer"
               />
             </th>
-            <th className="text-left font-medium px-2 py-2 w-[104px]">Request</th>
+            <th className="text-left font-medium px-2 py-2" style={{ width: COL_W.request }}>Request</th>
             {/* The sort key, and until now the column that fell off the right
                 edge: the queue opens sorted by longest wait and the number it
                 was sorted by was the one you had to scroll to see. */}
-            <th className="text-left font-medium px-2 py-2 w-[88px]">Age</th>
-            <th className="text-left font-medium px-2 py-2 min-w-[176px]">Store &amp; requester</th>
-            {showStage && <th className="text-left font-medium px-2 py-2 w-[120px]">Request status</th>}
-            <th className="text-left font-medium px-2 py-2 w-[132px]">Location</th>
-            <th className="text-left font-medium px-2 py-2 min-w-[196px]">Requested items</th>
-            <th className="text-left font-medium px-2 py-2 w-[148px]">Serviceability</th>
-            <th className="text-left font-medium px-2 py-2 min-w-[190px]">Covering labs</th>
-            <th className="text-right font-medium px-2 py-2 w-[92px]">Quote</th>
+            <th className="text-left font-medium px-2 py-2" style={{ width: COL_W.age }}>Age</th>
+            <th className="text-left font-medium px-2 py-2" style={{ minWidth: COL_W.store }}>Store &amp; requester</th>
+            {showStage && (
+              <th className="text-left font-medium px-2 py-2" style={{ width: COL_W.stage }}>Request status</th>
+            )}
+            <th className="text-left font-medium px-2 py-2" style={{ width: COL_W.location }}>Location</th>
+            <th className="text-left font-medium px-2 py-2" style={{ minWidth: COL_W.items }}>Requested items</th>
+            <th className="text-left font-medium px-2 py-2" style={{ width: COL_W.service }}>Serviceability</th>
+            <th className="text-left font-medium px-2 py-2" style={{ minWidth: COL_W.labs }}>Covering labs</th>
+            <th className="text-right font-medium px-2 py-2" style={{ width: COL_W.quote }}>Quote</th>
             {/* Asked for and offered, in one cell. They are only ever read
                 against each other — the question is whether we can do the day
                 they wanted — and two columns put a lab name between them. */}
-            <th className="text-left font-medium px-2 py-2 w-[150px]">Wanted → offered</th>
-            {showOrder && <th className="text-left font-medium px-2 py-2 min-w-[150px]">Order</th>}
+            <th className="text-left font-medium px-2 py-2" style={{ width: COL_W.dates }}>Wanted → offered</th>
+            {showOrder && (
+              <th className="text-left font-medium px-2 py-2" style={{ minWidth: COL_W.order }}>Order</th>
+            )}
             {/* Pinned, because it is the action. Scrolling sideways to reach
                 the Copy button would make the one thing this page exists for
                 the hardest thing on it. */}
-            <th className="text-left font-medium px-5 py-2 w-20 sticky right-0 bg-surface
-                           border-l border-ink-150">Actions</th>
+            <th className="text-left font-medium px-5 py-2 sticky right-0 bg-surface border-l border-ink-150"
+                style={{ width: COL_W.actions }}>Actions</th>
           </tr>
         </thead>
         <tbody>
@@ -466,7 +595,10 @@ export function RequestsTable({
                   {/* The rail carries the deadline. It is the only thing on the
                       row that can be read without reading anything — which is
                       what a list of thirty needs before it needs detail. */}
-                  <td className={`w-9 pl-5 pr-0 ${pad} border-l-[3px] ${SLA_RAIL[level]}`}
+                  {/* No width here: the header cell sizes the column, and a
+                      second number to keep in step with COL_W is the drift
+                      this was just pulled out of. */}
+                  <td className={`pl-5 pr-0 ${pad} border-l-[3px] ${SLA_RAIL[level]}`}
                       onClick={(e) => e.stopPropagation()}>
                     <input
                       type="checkbox"
@@ -492,10 +624,10 @@ export function RequestsTable({
                       one question — who is waiting on this — and they were two
                       columns because they came from two tables. */}
                   <td className={`px-2 ${pad} text-xs`} onClick={(e) => e.stopPropagation()}>
-                    <span className="block text-ink-700 truncate max-w-[176px]">
+                    <span className="block text-ink-700 truncate max-w-[158px]">
                       {r.store_name ?? <span className="text-ink-400">—</span>}
                     </span>
-                    <span className="block text-ink-800 truncate max-w-[176px]">
+                    <span className="block text-ink-800 truncate max-w-[158px]">
                       {r.requester_name ?? <span className="text-ink-400">no name</span>}
                     </span>
                     {r.requester_mobile ? (
