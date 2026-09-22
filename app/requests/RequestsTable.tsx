@@ -461,7 +461,7 @@ export function RequestsTable({
                   key={r.request_id}
                   onClick={() => { startNav(); router.push(`/requests/${r.request_id}`); }}
                   className={`group border-b border-ink-100 last:border-0 cursor-pointer align-top
-                              transition-colors ${isPicked ? 'bg-brand-50/60' : 'hover:bg-ink-100/40'}`}
+                              transition-colors ${isPicked ? 'bg-brand-50' : 'hover:bg-ink-100/40'}`}
                 >
                   {/* The rail carries the deadline. It is the only thing on the
                       row that can be read without reading anything — which is
@@ -645,8 +645,17 @@ export function RequestsTable({
                       )}
                     </td>
                   )}
-                  <td className={`px-5 ${pad} sticky right-0 bg-surface group-hover:bg-ink-100
-                                 border-l border-ink-150`}
+                  {/* The pinned cell has to be opaque or the row scrolls
+                      visibly underneath it, which means it cannot inherit the
+                      row's selected tint the way every other cell does — it
+                      has to repeat it. Without this the Actions column stayed
+                      surface-coloured on a selected row and read as a strip of
+                      unselected table welded to the right-hand edge.
+                      Both use the same token at full opacity, so they match in
+                      either theme rather than only in the one that was open
+                      when the shade was picked. */}
+                  <td className={`px-5 ${pad} sticky right-0 border-l border-ink-150
+                                 ${isPicked ? 'bg-brand-50' : 'bg-surface group-hover:bg-ink-100'}`}
                       onClick={(e) => e.stopPropagation()}>
                     <CopyQuote row={r} />
                   </td>
