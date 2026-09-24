@@ -137,6 +137,14 @@ for f in "$ROOT"/sql/init/*.sql; do
   printf '  %s\n' "$base"
   psqlq < "$f" || fail "$base failed"
 done
+
+# 26 drops analytics.v_lab_order_history CASCADE, which takes the two order
+# views built by 25 with it — and 26 sorts after 25, so the loop above always
+# left /order-tracking with no views at all on a fresh machine. 26 says in its
+# own header that it must run before 25 and that re-running the pair is safe;
+# this is the line that makes the filename order stop mattering.
+printf '  %s (again, after 26 cascaded it away)\n' "25_request_orders.sql"
+psqlq < "$ROOT/sql/init/25_request_orders.sql" || fail "25_request_orders.sql failed"
 ok "Atlas schema built"
 
 say "Building the analytics views (the ones that read Atlas's own tables)"

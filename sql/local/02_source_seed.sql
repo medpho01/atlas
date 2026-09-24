@@ -153,17 +153,35 @@ CROSS JOIN LATERAL (SELECT * FROM city_anchor ORDER BY (g * 17) % 10 LIMIT 1 OFF
 -- ---------------------------------------------------------------------------
 -- Stores: the B2B partners orders arrive from.
 -- ---------------------------------------------------------------------------
+-- Ten, not eight, and the last two earn their place: store 9 is active with no
+-- orders at all and store 10 is closed. Both are states the stores screen has
+-- to render — an empty partner must not look like a broken query, and a closed
+-- one must stay reachable for the orders it left behind — and with eight
+-- identical busy stores neither was ever exercised.
 INSERT INTO "Store" (id, "storeName", "legalName", "storeType", address, locality, city, state,
-                     pincode, active, "apiEnabled", "createdAt", "updatedAt", "isDoctor")
+                     pincode, active, "apiEnabled", "createdAt", "updatedAt", "isDoctor", pocs)
 SELECT g,
        (ARRAY['Riverbend Clinic','Parkview Polyclinic','Trailhead Wellness','Stonegate Care',
-              'Maple Health','Eastfield Clinic','Fernway Medical','Harbourside Care'])[g],
-       (ARRAY['Riverbend','Parkview','Trailhead','Stonegate','Maple','Eastfield','Fernway','Harbourside'])[g] || ' Pvt Ltd',
+              'Maple Health','Eastfield Clinic','Fernway Medical','Harbourside Care',
+              'Willowmere Health','Oldgate Clinic'])[g],
+       (ARRAY['Riverbend','Parkview','Trailhead','Stonegate','Maple','Eastfield','Fernway',
+              'Harbourside','Willowmere','Oldgate'])[g] || ' Pvt Ltd',
        CASE WHEN g % 3 = 0 THEN 'CLINIC' ELSE 'CORPORATE' END,
        g || ', Partner Avenue', 'Phase ' || g, a.city, a.state,
        lpad((a.pin_base + (g % 8))::text, 6, '0'),
-       true, (g % 2 = 0), now() - ((g * 40) || ' days')::interval, now(), (g % 3 = 0)
-FROM generate_series(1, 8) g
+       (g <> 10), (g % 2 = 0), now() - ((g * 40) || ' days')::interval, now(), (g % 3 = 0),
+       -- One point of contact each. The console stores these as an array of
+       -- objects; the stores screen reads the first.
+       ARRAY[jsonb_build_object(
+         'name',  (ARRAY['Asha','Vikram','Meera','Joseph','Nandini','Rahul','Farah','Dev',
+                         'Ila','Samir'])[g] || ' ' ||
+                  (ARRAY['Rao','Nair','Sen','Mathew','Kulkarni','Bose','Sheikh','Menon',
+                         'Chawla','Iyer'])[g],
+         'phone', '98' || lpad((1000000 + g * 37)::text, 8, '0'),
+         'email', 'ops@' || lower((ARRAY['riverbend','parkview','trailhead','stonegate','maple',
+                                         'eastfield','fernway','harbourside','willowmere',
+                                         'oldgate'])[g]) || '.example.test')]
+FROM generate_series(1, 10) g
 CROSS JOIN LATERAL (SELECT * FROM city_anchor ORDER BY (g * 23) % 10 LIMIT 1 OFFSET (g % 10)) a;
 
 -- ---------------------------------------------------------------------------
@@ -201,12 +219,29 @@ INSERT INTO city_weight VALUES
   ('Mumbai', 6), ('Delhi', 5), ('Bengaluru', 5), ('Hyderabad', 4), ('Pune', 3),
   ('Jaipur', 2), ('Indore', 2), ('Kochi', 2), ('Nagpur', 1), ('Guwahati', 1);
 
+-- Twenty-one slots rather than seven, because the stores screen groups orders
+-- into six stages and the old seed only ever produced four of them: nothing
+-- was pending, nothing had been rescheduled, nobody had missed an
+-- appointment, and no order had a phlebo on it. Every one of those is a
+-- column somebody reads, and a column that is always empty is a feature
+-- nobody can check.
+--
+-- The proportions are held to what they were. Delivered is 9 of 21 against 3
+-- of 7 — the same 43% — and the scheduled and in-flight shares move by less
+-- than five points, so the leaderboard, the coverage views and the lab
+-- history that read this table keep the book shape they were built against.
+--
+-- Twenty-one and not twenty: orderType cycles every 5, and any array length
+-- divisible by 5 locks the two together, so every pending order would have
+-- been a CENTER_VISIT. Coprime lengths keep them independent.
 INSERT INTO "Order" (id, "orderType", "orderStatus", "storeId", "labId", "userId",
-                     "createdAt", "updatedAt", "appointmentTime", "isPostpaid", source)
-SELECT row_number() OVER ()::int AS id,
-       (ARRAY['HOME_SAMPLE','HOME_SAMPLE','HOME_SAMPLE','CENTER_VISIT','CAMP']::"OrderType"[])[1 + (x.k % 5)],
-       (ARRAY['REPORT_DELIVERED','REPORT_DELIVERED','REPORT_DELIVERED','SAMPLE_PROCESSED',
-              'SAMPLE_COLLECTED','ORDER_SCHEDULED','CANCELED']::"OrderStatus"[])[1 + (x.k % 7)],
+                     "createdAt", "updatedAt", "appointmentTime", "statusUpdatedAt",
+                     "isPostpaid", source, "referenceId",
+                     "phleboName", "phleboNumber", "assignedAt", "assignedBy",
+                     "cancelReason")
+SELECT x.k,
+       t.order_type,
+       s.status,
        1 + (x.k % 8),
        -- Served by a lab in the same city where there is one, which is what
        -- makes the coverage and imbalance views say anything at all.
@@ -214,18 +249,99 @@ SELECT row_number() OVER ()::int AS id,
          (SELECT l.id FROM "Lab" l WHERE l.city = x.city ORDER BY (l.id + x.k) % 97 LIMIT 1),
          1 + (x.k % 40)),
        x.uid,
-       now() - ((x.k % 365) || ' days')::interval,
-       now() - ((x.k % 365) || ' days')::interval,
-       now() - ((x.k % 365) || ' days')::interval + interval '10 hours',
+       d.created_at,
+       d.created_at,
+       d.appointment_at,
+       d.status_at,
        (x.k % 4 = 0),
-       'STORE_API'::"Source"
+       'STORE_API'::"Source",
+       -- The store's own reference, which is what a partner quotes on a call
+       -- and therefore what the stores screen has to be searchable by.
+       'ST' || lpad((1 + (x.k % 8))::text, 2, '0') || '-' || lpad(x.k::text, 6, '0'),
+       ph.name, ph.phone, ph.assigned_at, ph.assigned_by,
+       CASE WHEN s.status IN ('CANCELED', 'PATIENT_MISSED')
+            THEN (ARRAY['Patient unavailable','Duplicate order','Booked elsewhere',
+                        'Patient declined','Address unreachable','Sample rejected'])[1 + (x.k % 6)]
+       END
 FROM (
   SELECT p."profileUserId" AS uid, p.city,
          row_number() OVER (ORDER BY p.id, g) AS k
   FROM "Profile" p
   JOIN city_weight w ON w.city = p.city
   CROSS JOIN LATERAL generate_series(1, w.w) g
-) x;
+) x
+CROSS JOIN LATERAL (SELECT
+  (ARRAY['HOME_SAMPLE','HOME_SAMPLE','HOME_SAMPLE','CENTER_VISIT','CAMP']::"OrderType"[])[1 + (x.k % 5)]
+) t(order_type)
+CROSS JOIN LATERAL (SELECT (ARRAY[
+  'REPORT_DELIVERED','SAMPLE_PROCESSED','REPORT_DELIVERED','ORDER_SCHEDULED',
+  'REPORT_DELIVERED','SAMPLE_COLLECTED','CANCELED','REPORT_DELIVERED',
+  'PHLEBO_ASSIGNED','REPORT_DELIVERED','SAMPLE_PROCESSED','REPORT_DELIVERED',
+  'RESCHEDULED','SAMPLE_COLLECTED','REPORT_DELIVERED','PENDING',
+  'REPORT_DELIVERED','SAMPLE_DELIVERED','PATIENT_MISSED','REPORT_DELIVERED',
+  'ORDER_SCHEDULED']::"OrderStatus"[])[1 + (x.k % 21)]
+) s(status)
+CROSS JOIN LATERAL (
+  -- Age follows the stage, because a book where a quarter of the pending
+  -- orders are eleven months old is not a book anybody would recognise, and
+  -- it would have made the delayed count meaningless — everything would be
+  -- delayed, so nothing would stand out.
+  --
+  --   finished or cancelled  →  anywhere in the last year
+  --   sample in flight       →  collected in the last day or two, with a
+  --                             quarter stretching back a fortnight
+  --   waiting on a date      →  mostly the coming week, with a fifth that
+  --                             has genuinely stalled
+  --
+  -- The tails are deliberately minorities. An earlier version spread the open
+  -- orders evenly over a fortnight, which made 57% of the whole book count as
+  -- delayed — every store red, the alert meaningless, and no way to tell a
+  -- working page from a broken one. Delayed has to be the exception here for
+  -- the same reason it is the exception in a real book.
+  SELECT c.created_at,
+         c.created_at + interval '10 hours' AS appointment_at,
+         -- When the order last moved. For a delivered one that is when the
+         -- report landed, and it is what turnaround is measured to — so it
+         -- has to be a real interval after the booking, not a copy of it.
+         -- Clamped to now(): an order that has not happened yet cannot have
+         -- been updated after it, and a future timestamp here would have made
+         -- every average negative.
+         GREATEST(c.created_at,
+                  LEAST(c.created_at + interval '10 hours'
+                          + ((6 + (x.k % 66)) || ' hours')::interval,
+                        now())) AS status_at
+  FROM (SELECT now() - ((CASE
+          WHEN s.status IN ('REPORT_DELIVERED','CANCELED','PATIENT_MISSED') THEN (x.k % 365)
+          WHEN s.status IN ('SAMPLE_COLLECTED','SAMPLE_DELIVERED','SAMPLE_PROCESSED',
+                            'PATIENT_VISITED')
+            THEN CASE WHEN x.k % 4 = 0 THEN 3 + (x.k % 11) ELSE (x.k % 2) END
+          -- Negative is an appointment still ahead, which is most of them.
+          ELSE CASE WHEN x.k % 5 = 0 THEN 4 + (x.k % 15) ELSE (x.k % 9) - 6 END
+        END) || ' days')::interval AS created_at) c
+) d
+CROSS JOIN LATERAL (
+  -- A phlebo, but only where there would be one: somebody has to be sent to a
+  -- home collection, nobody is sent to a centre visit, and the assignment has
+  -- not happened yet while the order is still waiting on a date.
+  SELECT CASE WHEN t.order_type = 'HOME_SAMPLE'
+                AND s.status NOT IN ('PENDING','CREATED','ORDER_SCHEDULED','RESCHEDULED')
+              THEN (ARRAY['Anil Kumar','Pooja Shetty','Imran Qureshi','Lata Deshmukh',
+                          'Rohit Varma','Sneha Pillai','Tarun Ghosh','Kavya Reddy',
+                          'Mohan Das','Ritika Jain','Salim Ansari','Nisha Thomas'])[1 + (x.k % 12)]
+         END,
+         CASE WHEN t.order_type = 'HOME_SAMPLE'
+                AND s.status NOT IN ('PENDING','CREATED','ORDER_SCHEDULED','RESCHEDULED')
+              THEN '97' || lpad((2000000 + x.k * 13)::text, 8, '0')
+         END,
+         CASE WHEN t.order_type = 'HOME_SAMPLE'
+                AND s.status NOT IN ('PENDING','CREATED','ORDER_SCHEDULED','RESCHEDULED')
+              THEN d.created_at + interval '4 hours'
+         END,
+         CASE WHEN t.order_type = 'HOME_SAMPLE'
+                AND s.status NOT IN ('PENDING','CREATED','ORDER_SCHEDULED','RESCHEDULED')
+              THEN 'dispatch-console'
+         END
+) ph(name, phone, assigned_at, assigned_by);
 
 -- ---------------------------------------------------------------------------
 -- Requests: demand that has not become an order yet. The /requests queue reads
@@ -252,6 +368,41 @@ SELECT g, 'Requester ' || g, '97000' || lpad(g::text, 5, '0'),
        now() + interval '1 day', 'Seeded enquiry'
 FROM generate_series(1, 120) g
 CROSS JOIN LATERAL (SELECT * FROM city_anchor ORDER BY (g * 19) % 10 LIMIT 1 OFFSET (g % 10)) a;
+
+-- Which request became which order.
+--
+-- "Request"."isConverted" was set above and "convertedOrderId" never was, so
+-- the link was a flag with nothing on the other end. analytics.v_request_order
+-- joins Order to Request through exactly that column, and every queue on
+-- /order-tracking derives from it — which means all three came up empty on a
+-- fresh machine whatever the data said, and the page could not be checked at
+-- all. Same shape as the request-item gap: the rows existed and the join
+-- between them did not.
+--
+-- Paired by rank within a store so no two requests claim the same order, and
+-- drawn from the orders still in flight, because an order that has already
+-- been delivered is not work anybody is tracking.
+WITH conv AS (
+  SELECT id, "storeId",
+         row_number() OVER (PARTITION BY "storeId" ORDER BY id) AS rn
+  FROM "Request" WHERE "isConverted"
+), cand AS (
+  SELECT id, "storeId",
+         row_number() OVER (PARTITION BY "storeId" ORDER BY "appointmentTime" DESC) AS rn
+  FROM "Order"
+  WHERE "orderStatus" NOT IN ('REPORT_DELIVERED', 'CANCELED', 'PATIENT_MISSED')
+)
+UPDATE "Request" r
+   SET "convertedOrderId" = cand.id
+  FROM conv JOIN cand ON cand."storeId" = conv."storeId" AND cand.rn = conv.rn
+ WHERE r.id = conv.id;
+
+-- The same link from the other side, which is the column the stores screen
+-- reads to say an order came from a request rather than straight from a store.
+UPDATE "Order" o
+   SET "requestId" = r.id
+  FROM "Request" r
+ WHERE r."convertedOrderId" = o.id;
 
 -- ---------------------------------------------------------------------------
 -- The catalogue: tests, the packages they sit in, and what each lab charges.
