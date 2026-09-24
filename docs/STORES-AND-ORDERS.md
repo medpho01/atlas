@@ -82,6 +82,57 @@ change log.
 
 ---
 
+## Deploying this
+
+**`sql/init/` runs once, on a database's first boot.** A host that already
+exists will not pick up `28_store_orders.sql` from a deploy, and `/stores` will
+fail with `relation "analytics.v_store_order" does not exist` until it is
+applied by hand — the same step `20_lab_discovery_ranking.sql` and
+`24_order_tracking.sql` needed:
+
+```bash
+cd ~/atlas && git pull
+docker exec -i atlas-db psql -U atlas -d atlas -v ON_ERROR_STOP=1 -f -   < sql/init/28_store_orders.sql
+```
+
+Idempotent throughout — safe to run twice. It creates `atlas.order_stage()`,
+three Atlas-owned tables (`store_profile`, `store_change_log`,
+`order_reschedule_flag`), the view `analytics.v_store_order`, and four indexes
+on `src_local."Order"`.
+
+Two things it does **not** do, deliberately:
+
+- **It does not touch LabStack.** Every object is in `atlas` or `analytics`;
+  the only thing it does to `src_local` is add indexes, and `TRUNCATE` in the
+  nightly refresh keeps those.
+- **It adds no materialized view, so there is nothing new to refresh.**
+  `v_store_order` is a plain view over the `src_local` mirror, which means it
+  is exactly as fresh as the 3 AM refresh and never separately stale.
+
+Then confirm:
+
+```bash
+docker exec -i atlas-db psql -U atlas -d atlas -f - < scripts/check-stage-map.sql
+```
+
+Every row should read `ok`. A row reading `NEW ENUM VALUE` means LabStack has
+added an `OrderStatus` that neither this file nor `lib/stores.ts` knows about;
+it will be counted as `pending` until both are updated.
+
+### What merging changes for people already using Atlas
+
+- **Nobody's existing access moves.** The permission change is purely additive:
+  one new feature row, and zero existing (feature, role) pairs change
+  capability. Verified by diffing `permissionMatrix()` across the branch.
+- **One nav item is renamed.** Admin › *Stores* becomes Admin › *Tracked
+  stores*, because "Stores" sitting one word away from "Stores & Orders" while
+  doing an entirely different job is a trap. Same route, same page.
+- **`viewer` gains nothing** — the one role that cannot reach this screen.
+- **The seed and `setup-local.sh` changes are local-only.** Neither runs
+  against a deployed database.
+
+---
+
 ## Definitions
 
 **Stage.** `OrderStatus` has thirteen values and nobody groups orders by
