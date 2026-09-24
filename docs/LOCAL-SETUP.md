@@ -229,3 +229,22 @@ overwrite an existing `.env.local`; fix it by hand or delete it and re-run.
 
 **The app builds but a page 500s** — check the terminal running `npm run dev`.
 The stack trace is server-side and will not appear in the browser.
+
+**`Failed to generate static paths` with `SyntaxError: Unexpected end of JSON
+input`**, usually alongside `GET /_next/undefined 404` — a manifest inside
+`.next` was read while it was still being written. Nothing is wrong with the
+page named in the error; it is simply the first one compiled after the clash.
+Run `npm run dev:clean`.
+
+**A page renders with no styling at all, or the buttons do nothing** — the same
+cause, showing its other face. Unstyled means the CSS chunk in the manifest no
+longer exists on disk; dead buttons mean the client bundle 404'd, so nothing
+hydrated and a checkbox ticks natively while React never hears about it. It
+looks exactly like a bug in whichever component you last touched, which is what
+makes it expensive. `npm run dev:clean`.
+
+Both come from `.next` being written by two things at once. The usual causes are
+running `npm run build` while `npm run dev` is up — the build replaces the
+directory underneath the running server — and switching branches or checking
+files out with the dev server attached. Neither leaves an obviously broken file
+behind, so it is worth clearing before spending any time debugging the symptom.
