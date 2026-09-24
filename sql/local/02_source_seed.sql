@@ -253,6 +253,40 @@ SELECT g, 'Requester ' || g, '97000' || lpad(g::text, 5, '0'),
 FROM generate_series(1, 120) g
 CROSS JOIN LATERAL (SELECT * FROM city_anchor ORDER BY (g * 19) % 10 LIMIT 1 OFFSET (g % 10)) a;
 
+-- Which request became which order.
+--
+-- "Request"."isConverted" was set above and "convertedOrderId" never was, so
+-- the link was a flag with nothing on the other end. analytics.v_request_order
+-- joins Order to Request through exactly that column, and every queue on
+-- /order-tracking derives from it — which means all three came up empty on a
+-- fresh machine whatever the data said, and the page could not be checked at
+-- all. Same shape as the request-item gap: the rows existed and the join
+-- between them did not.
+--
+-- Paired by rank within a store so no two requests claim the same order, and
+-- drawn from the orders still in flight, because an order that has already
+-- been delivered is not work anybody is tracking.
+WITH conv AS (
+  SELECT id, "storeId",
+         row_number() OVER (PARTITION BY "storeId" ORDER BY id) AS rn
+  FROM "Request" WHERE "isConverted"
+), cand AS (
+  SELECT id, "storeId",
+         row_number() OVER (PARTITION BY "storeId" ORDER BY "appointmentTime" DESC) AS rn
+  FROM "Order"
+  WHERE "orderStatus" NOT IN ('REPORT_DELIVERED', 'CANCELED', 'PATIENT_MISSED')
+)
+UPDATE "Request" r
+   SET "convertedOrderId" = cand.id
+  FROM conv JOIN cand ON cand."storeId" = conv."storeId" AND cand.rn = conv.rn
+ WHERE r.id = conv.id;
+
+-- The same link from the other side.
+UPDATE "Order" o
+   SET "requestId" = r.id
+  FROM "Request" r
+ WHERE r."convertedOrderId" = o.id;
+
 -- ---------------------------------------------------------------------------
 -- The catalogue: tests, the packages they sit in, and what each lab charges.
 -- ---------------------------------------------------------------------------
