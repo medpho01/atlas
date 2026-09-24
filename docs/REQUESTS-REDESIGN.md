@@ -124,11 +124,29 @@ to do.
 **Columns that follow the queue.** `showStage` and `showOrder` are off inside a
 queue. With store and requester folded into one cell, the two dates merged into
 `wanted → offered`, and arrival tucked under the request id, the table drops
-from 1810px to **1270px — no horizontal scroll**, with the sort key visible.
+from 1810px to **1200px — no horizontal scroll**, with the sort key visible.
 
 **Density.** Comfortable/compact, persisted in `localStorage`, 81px → 51px per
 row. It changes leading and padding only: a density control that hides columns
 is a column chooser wearing the wrong label.
+
+**Responsive column priority.** The first pass fitted 1600px and quietly
+scrolled below it — and worse, it only *appeared* to fit, because the table
+declared a smaller minimum than its own columns summed to and the browser
+squeezed them. Widths now come from one `COL_W` map, and covering labs — the
+widest column that is not the job itself — drops below `2xl`. Measured: fits at
+1920, 1600, 1440 and 1366.
+
+**A pager.** `offset` had been in `RequestFilters` since it was written and the
+page never set one, so the queue showed the first 150 matches and nothing could
+reach the rest. 100 to a page now, with `1–100 of 120` and `Page 1 of 2`, and
+every filter link drops `page` so narrowing while on page three cannot land you
+on an out-of-range page reading as "no matches".
+
+**A keyboard path.** The row carried an `onClick` and nothing else, so a request
+could only be opened with a pointer. The id is a real link now — one tab stop
+per row, an `aria-label` that reads "Request 119, Supply gap", a visible focus
+ring, and Enter opens it.
 
 ### 2.2 Still open
 
@@ -137,6 +155,13 @@ is a column chooser wearing the wrong label.
 - **Row height still varies** with the covering-lab list. Clamping that cell to
   one line in compact mode would fix the scan rhythm.
 - **No column chooser.** The adaptive set is a good default, not a preference.
+- **Below 1366px it still scrolls.** 1280 and under is a laptop nobody on this
+  team works a queue on; the fix there is a different layout, not a narrower
+  table.
+- **Select-all remains page-scoped.** It now says so — "Select all 100 on this
+  page. Rows on other pages are not included." — rather than implying it took
+  the queue. Scoping an export to the filter rather than the page is server-side
+  work and wants its own change.
 
 ---
 
@@ -170,7 +195,7 @@ of their queue without saying so.
 | **Smart lab suggestion on the row** — nearest candidate lab with the missing items named | `getCoveringLabs` already computes this for the detail page. Surfacing the top candidate inline turns a supply gap from a report into a decision. | Medium |
 | **Escalation from the row** — "hand to network" / "flag data fix" with an audit entry | Makes the owner chip actionable instead of descriptive. | Medium |
 | **Saved views** (`?queue=open&state=SUPPLY_GAP_KNOWN&store=…` as a named, shareable filter) | The URL already carries complete state; only the naming and the list are missing. | Low |
-| **Keyboard traversal** — `j`/`k`, `x` to select, `c` to copy | A queue worked daily is a queue worked by muscle memory. | Low |
+| **Keyboard traversal** — `j`/`k`, `x` to select, `c` to copy | A queue worked daily is a queue worked by muscle memory. Each row is focusable now, so this is shortcuts on top of a path that exists rather than building the path. | Low |
 
 ---
 
@@ -241,8 +266,9 @@ it.
   grade how much to trust a quote, and nothing records whether the store
   accepted it. Capturing that would let the markup bands learn.
 - **Say when a figure is partial.** `getQueueHealth` counts the whole filtered
-  queue while the table caps at 150 rows. Today that gap is invisible; at scale
-  the strip and the list would quietly disagree.
+  queue while the table shows one page of it. The pager now names the gap —
+  `1–100 of 120` — so the strip counting more than the list is legible rather
+  than a contradiction.
 
 ---
 

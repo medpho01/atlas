@@ -17,6 +17,7 @@ import { RequestsTable } from './RequestsTable';
 import { StorePicker } from '@/components/ui/StorePicker';
 import { RequestFunnel } from './RequestFunnel';
 import { QueueHealth } from './QueueHealth';
+import { Pager } from './Pager';
 import { SearchBar } from './SearchBar';
 import { RefreshRequests } from './RefreshRequests';
 
@@ -78,6 +79,15 @@ const EMPTY_FUNNEL = {
   no_ask: 0, no_pincode: 0, supply_gap: 0, awaiting: 0,
 };
 
+/**
+ * How many rows a page carries.
+ *
+ * Was a bare `limit: 150` with nothing to reach row 151 by. The number is a
+ * little lower now because there is a second page to go to — a queue is read
+ * from the top, and a shorter first page renders sooner.
+ */
+const PAGE_SIZE = 100;
+
 const WINDOW_LABEL = {
   today: 'today', week: 'last 7 days', month: 'last 30 days', all: 'all time',
 } as const;
@@ -119,6 +129,7 @@ export default async function RequestsPage({
   // looking at an empty table and a stage chip you did not know was on.
   const stages = queue ? [...queue.statuses] : csv(searchParams.status);
   const stores = csv(searchParams.store).map(Number).filter(Number.isInteger);
+  const page = Math.max(1, Math.floor(Number(searchParams.page)) || 1);
 
   // Asking about appointments is asking about orders, and an order means the
   // request converted — which the open queue hides. Filtering to "appointment
@@ -163,7 +174,10 @@ export default async function RequestsPage({
     etaFrom: searchParams.etaFrom,         etaTo: searchParams.etaTo,
     orderStatus: searchParams.orderStatus,
     openOnly,
-    limit: 150,
+    limit: PAGE_SIZE,
+    // Page 1 is offset 0. Anything unparseable is page 1 rather than an error:
+    // a hand-edited URL should land somewhere sensible, not on a stack trace.
+    offset: (page - 1) * PAGE_SIZE,
   };
 
   // The funnel is a shape-of-the-month chart, and inside a queue it is both a
@@ -211,7 +225,9 @@ export default async function RequestsPage({
    */
   const withState = (st?: string) => {
     const p = new URLSearchParams();
-    for (const [k, v] of Object.entries(searchParams)) if (v && k !== 'state') p.set(k, v);
+    for (const [k, v] of Object.entries(searchParams)) {
+      if (v && k !== 'state' && k !== 'page') p.set(k, v);
+    }
     if (queue) p.set('queue', queue.key);
     if (st) p.set('state', st);
     return `/requests?${p.toString()}`;
@@ -220,7 +236,9 @@ export default async function RequestsPage({
   /** Every search param except the named one, for a client component to carry. */
   const carry = (without: string) => {
     const out: Record<string, string> = {};
-    for (const [k, v] of Object.entries(searchParams)) if (v && k !== without) out[k] = v;
+    for (const [k, v] of Object.entries(searchParams)) {
+      if (v && k !== without && k !== 'page') out[k] = v;
+    }
     return out;
   };
 
@@ -233,8 +251,22 @@ export default async function RequestsPage({
 
   const keep = (k: string, v?: string) => {
     const p = new URLSearchParams();
-    for (const [key, val] of Object.entries(searchParams)) if (val && key !== k) p.set(key, val);
+    // `page` is dropped on every other change. Narrowing a filter while on page
+    // three otherwise keeps you on page three of a result that now has one, and
+    // an empty table reads as "no matches" rather than "wrong page".
+    for (const [key, val] of Object.entries(searchParams)) {
+      if (val && key !== k && key !== 'page') p.set(key, val);
+    }
     if (v) p.set(k, v);
+    return `/requests?${p.toString()}`;
+  };
+
+  /** The same filters, a different page. The only link that keeps `page`. */
+  const hrefForPage = (n: number) => {
+    const p = new URLSearchParams();
+    for (const [key, val] of Object.entries(searchParams)) if (val && key !== 'page') p.set(key, val);
+    if (queue) p.set('queue', queue.key);
+    if (n > 1) p.set('page', String(n));
     return `/requests?${p.toString()}`;
   };
 
@@ -463,6 +495,13 @@ export default async function RequestsPage({
               showOrder={!queue}
             />
           </div>
+          <Pager
+            page={page}
+            pageSize={PAGE_SIZE}
+            total={total}
+            shown={rows.length}
+            hrefForPage={hrefForPage}
+          />
         </CardBody>
       </Card>
     </div>

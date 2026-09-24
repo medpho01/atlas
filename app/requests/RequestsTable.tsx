@@ -68,34 +68,46 @@ const OWNER_CHIP: Record<'brand' | 'warn' | 'ink', string> = {
  *
  * Making the total honest also showed that the columns had wanted 1392px all
  * along and were being compressed into the 1302px a 1600px screen has to give.
- * It only ever "fitted" because nothing enforced the minimums. So the budget
- * here is 1286px: the widest columns gave up their padding, and the three that
- * truncate already — store, requested items, covering labs — truncate a little
- * sooner rather than pushing the dates off the edge, which is the column this
- * layout exists to keep on screen.
+ * It only ever "fitted" because nothing enforced the minimums.
+ *
+ * So the budget is now 1200px with covering labs and 1050px without, against
+ * roughly 1302px of room at 1600px and 1068px at 1366px. Every column gave up
+ * the padding it was not using, and the ones that truncate already truncate a
+ * little sooner, rather than pushing the dates off the edge — which is the
+ * column this layout was rearranged to keep on screen.
  */
 const COL_W = {
-  pick: 36,
-  request: 96,
-  age: 88,
-  store: 158,
-  stage: 120,
-  location: 118,
-  items: 170,
-  service: 148,
+  pick: 32,
+  request: 92,
+  age: 80,
+  store: 140,
+  stage: 116,
+  location: 112,
+  items: 146,
+  service: 140,
   labs: 150,
-  quote: 92,
-  dates: 150,
-  order: 150,
-  actions: 80,
+  quote: 88,
+  dates: 144,
+  order: 144,
+  actions: 76,
 } as const;
 
-/** The table's minimum, as the sum of the columns actually rendered. */
-function tableMinWidth({ showStage, showOrder }: { showStage: boolean; showOrder: boolean }): number {
-  const { stage, order, ...always } = COL_W;
+/**
+ * The table's minimum, as the sum of the columns actually rendered.
+ *
+ * `showLabs` is a width, not a preference: covering labs is the widest column
+ * that is not the job itself, so below a wide desktop it is the one that goes
+ * and the queue fits instead of scrolling. Everything else is in both layouts.
+ */
+function tableMinWidth(
+  { showStage, showOrder, showLabs }:
+  { showStage: boolean; showOrder: boolean; showLabs: boolean },
+): number {
+  const { stage, order, labs, ...always } = COL_W;
   return Object.values(always).reduce((a, b) => a + b, 0)
     + (showStage ? stage : 0)
-    + (showOrder ? order : 0);
+    + (showOrder ? order : 0)
+    + (showLabs ? labs : 0);
 }
 
 /**
@@ -502,7 +514,14 @@ export function RequestsTable({
   // stated minimums, so the layout degraded in a band nobody had looked at.
   // Adding a column would have widened that band without changing the number
   // anybody was maintaining.
-  const minWidth = tableMinWidth({ showStage, showOrder });
+  //
+  // Two totals, because the covering-labs column is dropped below 2xl. They go
+  // out as custom properties and the class picks between them at the
+  // breakpoint: Tailwind only ever sees class names it can read in the source,
+  // so a computed `min-w-[1200px]` would compile to nothing, while
+  // `min-w-[var(--t-min)]` is a literal it can find.
+  const minWide = tableMinWidth({ showStage, showOrder, showLabs: true });
+  const minNarrow = tableMinWidth({ showStage, showOrder, showLabs: false });
 
   return (
     <>
@@ -535,7 +554,13 @@ export function RequestsTable({
           it simply drew over the card's edge — the rounded corner clipped the
           last column and there was no way to reach it. */}
       <div className="overflow-x-auto">
-      <table className="w-full text-sm tabular-nums" style={{ minWidth }}>
+      <table
+        className="w-full text-sm tabular-nums min-w-[var(--t-min)] 2xl:min-w-[var(--t-min-wide)]"
+        style={{
+          '--t-min': `${minNarrow}px`,
+          '--t-min-wide': `${minWide}px`,
+        } as React.CSSProperties}
+      >
         <thead>
           <tr className="text-[11px] uppercase tracking-wide text-ink-400 border-b border-ink-200">
             <th className="pl-5 pr-0 py-2" style={{ width: COL_W.pick }}>
@@ -543,8 +568,12 @@ export function RequestsTable({
                 type="checkbox"
                 checked={allPicked}
                 onChange={toggleAll}
-                aria-label={allPicked ? 'Clear selection' : 'Select every row shown'}
-                title={allPicked ? 'Clear selection' : 'Select every row shown'}
+                aria-label={allPicked
+                  ? 'Clear selection'
+                  : `Select all ${rows.length} requests on this page`}
+                title={allPicked
+                  ? 'Clear selection'
+                  : `Select all ${rows.length} on this page. Rows on other pages are not included.`}
                 className="align-middle accent-brand-600 cursor-pointer"
               />
             </th>
@@ -560,7 +589,14 @@ export function RequestsTable({
             <th className="text-left font-medium px-2 py-2" style={{ width: COL_W.location }}>Location</th>
             <th className="text-left font-medium px-2 py-2" style={{ minWidth: COL_W.items }}>Requested items</th>
             <th className="text-left font-medium px-2 py-2" style={{ width: COL_W.service }}>Serviceability</th>
-            <th className="text-left font-medium px-2 py-2" style={{ minWidth: COL_W.labs }}>Covering labs</th>
+            {/* Dropped below a wide desktop. It is the widest column that is
+                not the job itself, and on a 1366px laptop keeping it pushed
+                the dates and the price back off the right-hand edge — which is
+                the whole thing this layout was rearranged to prevent. The
+                serviceability chip beside it already says whether anyone can
+                serve the request; the names are a click away on the row. */}
+            <th className="hidden 2xl:table-cell text-left font-medium px-2 py-2"
+                style={{ minWidth: COL_W.labs }}>Covering labs</th>
             <th className="text-right font-medium px-2 py-2" style={{ width: COL_W.quote }}>Quote</th>
             {/* Asked for and offered, in one cell. They are only ever read
                 against each other — the question is whether we can do the day
@@ -608,9 +644,26 @@ export function RequestsTable({
                       className="align-middle accent-brand-600 cursor-pointer"
                     />
                   </td>
+                  {/* A real link, not just a row that happens to navigate.
+                      The <tr> has carried an onClick since this table was
+                      written, which means the only way to open a request was
+                      with a pointer: no tab stop, nothing for a screen reader
+                      to announce, no way to middle-click one into a new tab.
+                      One focusable link per row rather than a focusable row as
+                      well, so tabbing down the queue is one stop per request
+                      instead of two. */}
                   <td className={`px-2 ${pad} font-medium text-ink-900 whitespace-nowrap`}>
-                    <ChevronRight className="inline w-3.5 h-3.5 mr-1 text-ink-400" />
-                    #{r.request_id}
+                    <Link
+                      href={`/requests/${r.request_id}`}
+                      onClick={(e) => { e.stopPropagation(); startNav(); }}
+                      className="rounded-sm hover:underline focus:outline-none focus-visible:ring-2
+                                 focus-visible:ring-brand-500 focus-visible:ring-offset-1
+                                 focus-visible:ring-offset-surface"
+                      aria-label={`Request ${r.request_id}, ${STATE_SHORT[r.state] ?? r.state}`}
+                    >
+                      <ChevronRight className="inline w-3.5 h-3.5 mr-1 text-ink-400" />
+                      #{r.request_id}
+                    </Link>
                     {/* Arrival, under the id. It was its own column for a date
                         nobody sorts by and everybody wants beside the age. */}
                     <span className="block text-[10px] text-ink-400 pl-[18px]">
@@ -624,10 +677,10 @@ export function RequestsTable({
                       one question — who is waiting on this — and they were two
                       columns because they came from two tables. */}
                   <td className={`px-2 ${pad} text-xs`} onClick={(e) => e.stopPropagation()}>
-                    <span className="block text-ink-700 truncate max-w-[158px]">
+                    <span className="block text-ink-700 truncate max-w-[140px]">
                       {r.store_name ?? <span className="text-ink-400">—</span>}
                     </span>
-                    <span className="block text-ink-800 truncate max-w-[158px]">
+                    <span className="block text-ink-800 truncate max-w-[140px]">
                       {r.requester_name ?? <span className="text-ink-400">no name</span>}
                     </span>
                     {r.requester_mobile ? (
@@ -704,8 +757,9 @@ export function RequestsTable({
                       </span>
                     )}
                   </td>
-                  {/* Who can serve it and what they lack — the negotiation, in the row. */}
-                  <td className={`px-2 ${pad} text-xs`}>
+                  {/* Who can serve it and what they lack — the negotiation, in
+                      the row. Hidden below 2xl with its header; see there. */}
+                  <td className={`hidden 2xl:table-cell px-2 ${pad} text-xs`}>
                     {ready.length > 0 ? (
                       <span className="text-success-600">{ready.slice(0, 2).join(', ')}</span>
                     ) : covering.length > 0 ? (
