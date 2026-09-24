@@ -66,14 +66,19 @@ export default async function StoresPage({ searchParams }: { searchParams: SP })
   const needsAttention = searchParams.attention === '1';
   const sort: StoreSort = (STORE_SORTS as readonly string[]).includes(searchParams.sort ?? '')
     ? (searchParams.sort as StoreSort) : 'orders';
-  const page = Math.max(1, Math.floor(Number(searchParams.page)) || 1);
+  const requestedPage = Math.max(1, Math.floor(Number(searchParams.page)) || 1);
 
   const f = { q: searchParams.q?.trim() || undefined, from, to, activeOnly, trackedOnly,
               needsAttention, sort };
 
-  const [rows, total, overview] = await Promise.all([
+  // Counted first so the page can be clamped to one that exists — see the note
+  // on the same pattern in [id]/page.tsx.
+  const total = await countStores(f);
+  const lastPage = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const page = Math.min(requestedPage, lastPage);
+
+  const [rows, overview] = await Promise.all([
     getStoreRows({ ...f, limit: PAGE_SIZE, offset: (page - 1) * PAGE_SIZE }),
-    countStores(f),
     getStoreOverview({ from, to }),
   ]);
 

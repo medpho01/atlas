@@ -2,7 +2,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSessionUser, audit } from '@/lib/auth';
 import { canView } from '@/lib/access';
 import { isStage, STAGE_LABEL, statusLabel } from '@/lib/stores';
-import { getStoreOrders, getStoreDetail, type OrderRow } from '@/lib/storeOrders';
+import {
+  getStoreOrders, getStoreDetail, countStoreOrders, MAX_ORDER_ROWS, type OrderRow,
+} from '@/lib/storeOrders';
 import { badDate, idParam } from '../../params';
 
 export const dynamic = 'force-dynamic';
@@ -16,7 +18,7 @@ export const dynamic = 'force-dynamic';
  * an uncapped export of a large partner is how a dashboard takes the process
  * down with it.
  */
-const MAX_ROWS = 20_000;
+const MAX_ROWS = MAX_ORDER_ROWS;
 
 /** U+FEFF. Excel needs it to read UTF-8 correctly; see the note in toCsv(). */
 const BOM = String.fromCharCode(0xFEFF);
@@ -43,17 +45,22 @@ export async function GET(
     return NextResponse.json({ error: `Unknown stage "${stageRaw}"` }, { status: 400 });
   }
 
-  const [store, rows] = await Promise.all([
+  const filters = {
+    q: sp.get('q')?.trim() || undefined,
+    stage: stageRaw && isStage(stageRaw) ? stageRaw : undefined,
+    from: sp.get('from') || undefined,
+    to: sp.get('to') || undefined,
+    delayedOnly: sp.get('delayed') === '1',
+    flaggedOnly: sp.get('flagged') === '1',
+  };
+
+  // The count as well as the rows, so the file can say when it is not the
+  // whole answer. An export that quietly stops at the cap is the worst kind of
+  // wrong number: it looks complete, and somebody reconciles against it.
+  const [store, total, rows] = await Promise.all([
     getStoreDetail(storeId),
-    getStoreOrders(storeId, {
-      q: sp.get('q')?.trim() || undefined,
-      stage: stageRaw && isStage(stageRaw) ? stageRaw : undefined,
-      from: sp.get('from') || undefined,
-      to: sp.get('to') || undefined,
-      delayedOnly: sp.get('delayed') === '1',
-      flaggedOnly: sp.get('flagged') === '1',
-      limit: MAX_ROWS,
-    }),
+    countStoreOrders(storeId, filters),
+    getStoreOrders(storeId, { ...filters, limit: MAX_ROWS }),
   ]);
 
   if (!store) return NextResponse.json({ error: 'No such store' }, { status: 404 });
@@ -61,7 +68,8 @@ export async function GET(
   // Exports leave the building. Who took what, and when, is worth a row.
   audit(me.id, `/api/stores/${storeId}/export`, 'export');
 
-  const csv = toCsv(rows);
+  const truncated = total > rows.length;
+  const csv = toCsv(rows, truncated ? total : null);
   const stamp = new Date().toISOString().slice(0, 10);
   const name = `${slug(store.name)}-orders-${stamp}.csv`;
 
@@ -72,6 +80,11 @@ export async function GET(
       'Content-Type': 'text/csv; charset=utf-8',
       'Content-Disposition': `attachment; filename="${name}"`,
       'Cache-Control': 'no-store',
+      // For anything reading this programmatically, which will not see the
+      // notice row at the bottom of the file.
+      'X-Atlas-Rows': String(rows.length),
+      'X-Atlas-Total': String(total),
+      ...(truncated ? { 'X-Atlas-Truncated': 'true' } : {}),
     },
   });
 }
@@ -117,9 +130,16 @@ function cell(v: string | number | null | undefined): string {
   return /[",\r\n]/.test(guarded) ? `"${guarded.replace(/"/g, '""')}"` : guarded;
 }
 
-function toCsv(rows: OrderRow[]): string {
+function toCsv(rows: OrderRow[], truncatedTotal: number | null): string {
   const head = COLUMNS.map((c) => cell(c.header)).join(',');
   const body = rows.map((o) => COLUMNS.map((c) => cell(c.get(o))).join(','));
+  // Said in the file itself, in the first column of the last row, because the
+  // person who opens this in Excel will never see a response header.
+  if (truncatedTotal != null) {
+    body.push(cell(`TRUNCATED — this file holds the first ${rows.length.toLocaleString('en-IN')} `
+      + `of ${truncatedTotal.toLocaleString('en-IN')} matching orders. `
+      + `Narrow the date range or the stage and export again.`));
+  }
   // The mark comes from BOM, built by char code. Typing the character or
   // writing a \uFEFF escape both leave an invisible byte in the source,
   // where a formatter, an editor or a JSON round-trip strips it without

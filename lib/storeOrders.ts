@@ -43,6 +43,23 @@ export type StoreFilters = {
 export const STORE_SORTS = ['orders', 'name', 'delayed', 'cancelled', 'turnaround'] as const;
 export type StoreSort = (typeof STORE_SORTS)[number];
 
+/**
+ * The hard ceilings, and where each one belongs.
+ *
+ * These are the last line — a defence against a caller asking for everything,
+ * not the per-request policy. The API routes clamp much lower (200 stores, 500
+ * orders) because that is a decision about what one HTTP request may cost, and
+ * the untrusted boundary is the right place to make it.
+ *
+ * The distinction matters: an earlier version clamped here at 500, which the
+ * CSV export could not raise, so a store with 1,130 orders exported 500 of
+ * them under a button that said "Export 1,130 as CSV". A truncated export that
+ * announces its own full size is worse than no export — somebody reconciles
+ * against it.
+ */
+export const MAX_STORE_ROWS = 200;
+export const MAX_ORDER_ROWS = 20_000;
+
 export type OrderFilters = {
   /** Patient name, store reference, order id or phlebo. */
   q?: string;
@@ -180,7 +197,7 @@ export async function getStoreRows(f: StoreFilters = {}): Promise<StoreRow[]> {
   const attention = f.needsAttention
     ? ' AND (COALESCE(o.delayed, 0) > 0 OR COALESCE(o.flagged, 0) > 0)' : '';
 
-  const limit = Math.min(Math.max(f.limit ?? 25, 1), 200);
+  const limit = Math.min(Math.max(f.limit ?? 25, 1), MAX_STORE_ROWS);
   params.push(limit);
   const limitP = `$${params.length}`;
   params.push(Math.max(f.offset ?? 0, 0));
@@ -348,7 +365,7 @@ function orderWhere(storeId: number, f: OrderFilters, params: unknown[]): string
 export async function getStoreOrders(storeId: number, f: OrderFilters = {}): Promise<OrderRow[]> {
   const params: unknown[] = [];
   const where = orderWhere(storeId, f, params);
-  const limit = Math.min(Math.max(f.limit ?? 50, 1), 500);
+  const limit = Math.min(Math.max(f.limit ?? 50, 1), MAX_ORDER_ROWS);
   params.push(limit);
   const limitP = `$${params.length}`;
   params.push(Math.max(f.offset ?? 0, 0));

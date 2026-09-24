@@ -107,14 +107,36 @@ COMMENT ON TABLE atlas.store_profile IS
 
 -- Defaults, in one place, so a store with no row and a store with a row that
 -- happens to match cannot be read differently.
+--
+-- IMMUTABLE and constant, which means the planner folds them at plan time and
+-- they cost nothing per row. They exist as functions rather than as literals
+-- so the number lives in exactly one place: analytics.v_store_order needs the
+-- same default through a join, and a second copy of "48" in a view definition
+-- is a number that drifts.
+CREATE OR REPLACE FUNCTION atlas.store_delay_hours_default()
+RETURNS int LANGUAGE sql IMMUTABLE PARALLEL SAFE AS $$ SELECT 48 $$;
+
+CREATE OR REPLACE FUNCTION atlas.store_pending_limit_default()
+RETURNS int LANGUAGE sql IMMUTABLE PARALLEL SAFE AS $$ SELECT 5 $$;
+
+-- The per-store lookups. Fine where they are called once — the store detail
+-- page, a single row — and deliberately NOT used inside analytics.v_store_order.
+--
+-- They read a table, so they are STABLE, so Postgres evaluates them once per
+-- row rather than folding them. In the row view that is one extra buffer per
+-- order: measured at 22,788 rows in a ninety-day window, it was 17,796 of the
+-- 45,602 buffers the store list touched, and it grows with the book. The view
+-- joins atlas.store_profile once instead.
 CREATE OR REPLACE FUNCTION atlas.store_delay_hours(sid int)
 RETURNS int LANGUAGE sql STABLE AS $$
-  SELECT COALESCE((SELECT delay_alert_hours FROM atlas.store_profile WHERE store_id = sid), 48)
+  SELECT COALESCE((SELECT delay_alert_hours FROM atlas.store_profile WHERE store_id = sid),
+                  atlas.store_delay_hours_default())
 $$;
 
 CREATE OR REPLACE FUNCTION atlas.store_pending_limit(sid int)
 RETURNS int LANGUAGE sql STABLE AS $$
-  SELECT COALESCE((SELECT pending_alert_count FROM atlas.store_profile WHERE store_id = sid), 5)
+  SELECT COALESCE((SELECT pending_alert_count FROM atlas.store_profile WHERE store_id = sid),
+                  atlas.store_pending_limit_default())
 $$;
 
 
@@ -247,9 +269,14 @@ SELECT
   -- Delayed: past its appointment, still unfinished, and past this store's
   -- own patience. Cancelled is not delayed — it is closed, badly, and counted
   -- in the cancellation rate instead.
+  -- The threshold comes from the joined profile row, not from
+  -- atlas.store_delay_hours() — see the note on that function. Same number,
+  -- same default, one hash join instead of one subquery per order.
   (atlas.order_stage(o."orderStatus"::text) NOT IN ('completed', 'cancelled')
     AND o."appointmentTime" IS NOT NULL
-    AND o."appointmentTime" < now() - (atlas.store_delay_hours(o."storeId") || ' hours')::interval
+    AND o."appointmentTime" < now()
+        - (COALESCE(sp.delay_alert_hours, atlas.store_delay_hours_default())
+           || ' hours')::interval
   )                                   AS delayed,
 
   -- Hours past the appointment, for sorting the worst first. Negative for an
@@ -271,6 +298,7 @@ SELECT
   )                                   AS reschedule_stale
 
 FROM src_local."Order" o
+LEFT JOIN atlas.store_profile sp ON sp.store_id = o."storeId"
 LEFT JOIN src_local."Lab"     l  ON l.id = o."labId"
 LEFT JOIN src_local."Profile" p  ON p."profileUserId" = o."userId"
 LEFT JOIN src_local."User"    u  ON u.id = o."userId"

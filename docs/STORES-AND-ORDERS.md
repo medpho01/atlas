@@ -203,6 +203,38 @@ CSV exports are audited too — they leave the building.
 
 ---
 
+## Performance
+
+Measured against 40,241 orders over 40 stores — roughly the size of the real
+book — with `EXPLAIN (ANALYZE, BUFFERS)`:
+
+| Query | Time |
+|---|---|
+| Store list, 25 rows, 90-day window | 54 ms |
+| The overview strip | 36 ms |
+| One store's orders, page 1 | 2 ms |
+| The same store, page 20 (deep `OFFSET`) | 2 ms |
+| Stage facets | 1 ms |
+| Search inside a store | 2 ms |
+| Full 20,000-row export | 6 ms |
+
+The two aggregate queries were originally 101 ms and 77 ms. The difference was
+`atlas.store_delay_hours()`: a `STABLE` function that reads a table is
+evaluated **once per row**, so computing `delayed` across a 22,788-row window
+cost 17,796 buffer reads on its own — more than a third of the total, and
+growing with the book rather than with the page. `analytics.v_store_order`
+joins `atlas.store_profile` once instead.
+
+The functions remain for single-row callers, where they read better and cost
+nothing. `atlas.store_delay_hours_default()` is `IMMUTABLE`, so the default
+folds at plan time and the number still lives in exactly one place.
+
+Page latency in dev sits in the same 1.3–2.0 s band as `/requests` and
+`/order-tracking` on the same data, which is the only comparison that means
+anything — dev figures are inflated by per-request compilation.
+
+---
+
 ## API
 
 Both endpoints are read-only, gated on the same feature as the page, and built
@@ -275,8 +307,11 @@ it is capped at 20,000 rows.
   1366; the order table has a 1180px minimum and scrolls inside its own box
   below that. A phone wants a different layout, not a narrower table.
 - **Export is capped at 20,000 rows** and held in memory before it is sent.
-  A partner with more than that needs a streaming export, which is its own
-  change.
+  When a filter matches more than that, the file's last row says so in its
+  first column and the response carries `X-Atlas-Truncated`, `X-Atlas-Rows` and
+  `X-Atlas-Total` — a truncated export that looks complete is the worst kind of
+  wrong number, because somebody reconciles against it. A partner who routinely
+  exceeds the cap needs a streaming export, which is its own change.
 - **`notFound()` renders the 404 page with a 200 status.** A consequence of
   streaming a `force-dynamic` page, shared with `/requests/[id]`,
   `/chain/[id]` and `/pincode/[code]`. Not introduced here.

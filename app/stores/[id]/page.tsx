@@ -45,7 +45,7 @@ export default async function StorePage({
   const stage: Stage | undefined = isStage(searchParams.stage) ? searchParams.stage : undefined;
   const delayedOnly = searchParams.delayed === '1';
   const flaggedOnly = searchParams.flagged === '1';
-  const page = Math.max(1, Math.floor(Number(searchParams.page)) || 1);
+  const requestedPage = Math.max(1, Math.floor(Number(searchParams.page)) || 1);
   const showLog = searchParams.tab === 'log';
 
   const f = {
@@ -61,15 +61,24 @@ export default async function StorePage({
   // partner and the question here is "what does their whole book look like",
   // not "how do they compare to another". The table below is where a window
   // belongs, and it has one.
-  const [store, rows, total, facets, trend, log, owners] = await Promise.all([
+  // The count first, so the page number can be clamped to a page that exists.
+  // Asking for ?page=9999 used to render an empty table under a pager reading
+  // "Page 9999 of 23" — which says the filter found nothing, when what happened
+  // is that the URL was stale or somebody typed it. It costs one extra round
+  // trip on a query that runs in two milliseconds.
+  const matching = await countStoreOrders(id, f);
+  const lastPage = Math.max(1, Math.ceil(matching / PAGE_SIZE));
+  const page = Math.min(requestedPage, lastPage);
+
+  const [store, rows, facets, trend, log, owners] = await Promise.all([
     getStoreDetail(id),
     getStoreOrders(id, { ...f, limit: PAGE_SIZE, offset: (page - 1) * PAGE_SIZE }),
-    countStoreOrders(id, f),
     getStageFacets(id, f),
     getStoreTrend(id, 6),
     showLog ? getStoreChangeLog(id) : Promise.resolve([]),
     getOpsOwners(),
   ]);
+  const total = matching;
 
   if (!store) notFound();
 
