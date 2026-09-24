@@ -256,6 +256,21 @@ it is capped at 20,000 rows.
 
 ## Things worth knowing
 
+- **During the 3 AM refresh this page can read low or empty.**
+  `scripts/refresh-data.sh` TRUNCATEs the `src_local` tables in one committed
+  transaction and re-inserts them in chunks afterwards, so for the minutes that
+  takes, anything reading `src_local` live sees a partial table. That is not
+  new — `analytics.v_request_order` behind `/order-tracking` is a plain view
+  over the same mirror and has the same window; the comment in the refresh
+  script claiming only materialized views are queried has been out of date
+  since order tracking shipped.
+
+  Left as a live view deliberately. Making it materialized would fix the
+  window and break something worse: the reschedule flags and the account
+  overlay are Atlas-owned and edited during the day, and they would then be as
+  stale as the last refresh. A page that is briefly thin at 3 AM is better than
+  one that shows yesterday's flags at noon.
+
 - **Sideways scroll below 1366px.** The store list fits at 1920, 1600, 1440 and
   1366; the order table has a 1180px minimum and scrolls inside its own box
   below that. A phone wants a different layout, not a narrower table.
