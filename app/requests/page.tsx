@@ -7,7 +7,7 @@ import { PageHeader } from '@/components/ui/PageHeader';
 import { InfoTip } from '@/components/ui/InfoTip';
 import { ChipButton } from '@/components/ui/Toggle';
 import {
-  getRequests, getRequestFunnel, getFacets, getRequestFreshness,
+  getRequests, getRequestFunnel, getFacets, getRequestFreshness, getQueueHealth,
 } from '@/lib/requestQueries';
 import {
   REQUEST_STATES, STAGE_LABEL, SETTLED_STAGES, PIPELINE_STAGES,
@@ -16,6 +16,8 @@ import {
 import { RequestsTable } from './RequestsTable';
 import { StorePicker } from '@/components/ui/StorePicker';
 import { RequestFunnel } from './RequestFunnel';
+import { QueueHealth } from './QueueHealth';
+import { Pager } from './Pager';
 import { SearchBar } from './SearchBar';
 import { RefreshRequests } from './RefreshRequests';
 
@@ -77,6 +79,15 @@ const EMPTY_FUNNEL = {
   no_ask: 0, no_pincode: 0, supply_gap: 0, awaiting: 0,
 };
 
+/**
+ * How many rows a page carries.
+ *
+ * Was a bare `limit: 150` with nothing to reach row 151 by. The number is a
+ * little lower now because there is a second page to go to — a queue is read
+ * from the top, and a shorter first page renders sooner.
+ */
+const PAGE_SIZE = 100;
+
 const WINDOW_LABEL = {
   today: 'today', week: 'last 7 days', month: 'last 30 days', all: 'all time',
 } as const;
@@ -118,6 +129,7 @@ export default async function RequestsPage({
   // looking at an empty table and a stage chip you did not know was on.
   const stages = queue ? [...queue.statuses] : csv(searchParams.status);
   const stores = csv(searchParams.store).map(Number).filter(Number.isInteger);
+  const page = Math.max(1, Math.floor(Number(searchParams.page)) || 1);
 
   // Asking about appointments is asking about orders, and an order means the
   // request converted — which the open queue hides. Filtering to "appointment
@@ -162,7 +174,10 @@ export default async function RequestsPage({
     etaFrom: searchParams.etaFrom,         etaTo: searchParams.etaTo,
     orderStatus: searchParams.orderStatus,
     openOnly,
-    limit: 150,
+    limit: PAGE_SIZE,
+    // Page 1 is offset 0. Anything unparseable is page 1 rather than an error:
+    // a hand-edited URL should land somewhere sensible, not on a stack trace.
+    offset: (page - 1) * PAGE_SIZE,
   };
 
   // The funnel is a shape-of-the-month chart, and inside a queue it is both a
@@ -171,11 +186,16 @@ export default async function RequestsPage({
   // facet aggregates share one round trip, and the funnel and the untracked
   // count are gone from the critical path — each was a full pass over the
   // table to print a number beside a filter nobody had clicked.
-  const [list, facets, funnel, fresh] = await Promise.all([
+  const [list, facets, funnel, fresh, health] = await Promise.all([
     getRequests(f),
     getFacets(f),
     queue ? Promise.resolve(EMPTY_FUNNEL) : getRequestFunnel({ ...f, state: undefined }),
     getRequestFreshness(),
+    // Deliberately blind to the serviceability filter. The strip describes the
+    // queue; the table below shows whatever slice of it is selected. Scoping
+    // the strip too would collapse the mix to the one chip already clicked and
+    // take away the only thing that could undo it.
+    queue ? getQueueHealth({ ...f, state: undefined }) : Promise.resolve(null),
   ]);
   const { rows, total } = list;
 
@@ -195,10 +215,30 @@ export default async function RequestsPage({
     return keep(k, next.length ? next.join(',') : undefined);
   };
 
+  /**
+   * The same page filtered to one serviceability state, with the queue pinned.
+   *
+   * `keep` alone is not enough here. An absent `queue` means the default
+   * queue, but a present `state` means somebody arrived from an old link and
+   * wants the full surface — so a link that set `state` and left `queue` out
+   * would quietly drop the reader from "Needs a quote" into "All requests".
+   */
+  const withState = (st?: string) => {
+    const p = new URLSearchParams();
+    for (const [k, v] of Object.entries(searchParams)) {
+      if (v && k !== 'state' && k !== 'page') p.set(k, v);
+    }
+    if (queue) p.set('queue', queue.key);
+    if (st) p.set('state', st);
+    return `/requests?${p.toString()}`;
+  };
+
   /** Every search param except the named one, for a client component to carry. */
   const carry = (without: string) => {
     const out: Record<string, string> = {};
-    for (const [k, v] of Object.entries(searchParams)) if (v && k !== without) out[k] = v;
+    for (const [k, v] of Object.entries(searchParams)) {
+      if (v && k !== without && k !== 'page') out[k] = v;
+    }
     return out;
   };
 
@@ -211,8 +251,22 @@ export default async function RequestsPage({
 
   const keep = (k: string, v?: string) => {
     const p = new URLSearchParams();
-    for (const [key, val] of Object.entries(searchParams)) if (val && key !== k) p.set(key, val);
+    // `page` is dropped on every other change. Narrowing a filter while on page
+    // three otherwise keeps you on page three of a result that now has one, and
+    // an empty table reads as "no matches" rather than "wrong page".
+    for (const [key, val] of Object.entries(searchParams)) {
+      if (val && key !== k && key !== 'page') p.set(key, val);
+    }
     if (v) p.set(k, v);
+    return `/requests?${p.toString()}`;
+  };
+
+  /** The same filters, a different page. The only link that keeps `page`. */
+  const hrefForPage = (n: number) => {
+    const p = new URLSearchParams();
+    for (const [key, val] of Object.entries(searchParams)) if (val && key !== 'page') p.set(key, val);
+    if (queue) p.set('queue', queue.key);
+    if (n > 1) p.set('page', String(n));
     return `/requests?${p.toString()}`;
   };
 
@@ -300,20 +354,44 @@ export default async function RequestsPage({
         </p>
       )}
 
-      {/* A stale snapshot looks exactly like a quiet day. Say which it is. */}
-      {!queue && funnel.received === 0 && (fresh?.age_hours ?? 0) > 36 && (
+      {/* A stale snapshot looks exactly like a quiet day. Say which it is.
+          It used to say it only on "All requests" and only when the funnel was
+          empty — which is to say, never on the screen the page opens on. A
+          queue is the default front door and it is the worst place to be
+          looking at yesterday's data quietly: the rows that are there look
+          entirely convincing, and the ones missing are the ones that arrived
+          this morning. The threshold is the same; only the audience widened. */}
+      {(fresh?.age_hours ?? 0) > 36 && (
         <div className="mt-4 mb-4 rounded-lg border border-warn-100 bg-warn-50 px-4 py-3 text-sm text-ink-700">
-          <span className="font-medium text-warn-600">No rows here may mean stale data.</span>{' '}
+          <span className="font-medium text-warn-600">
+            {rows.length === 0
+              ? 'No rows here may mean stale data.'
+              : 'This may not be everything.'}
+          </span>{' '}
           The newest request Atlas holds arrived{' '}
           <b>{Math.round((fresh!.age_hours ?? 0) / 24)} days ago</b>
           {fresh?.newest && ` (${new Date(fresh.newest).toLocaleDateString('en-IN',
             { day: 'numeric', month: 'short' })})`}
-          , so the nightly refresh has probably not run. Widen the window to see
-          what is there, and check <code className="font-mono text-[11px]">docker compose logs atlas-refresh</code>.
+          , so the nightly refresh has probably not run.{' '}
+          {rows.length === 0
+            ? 'Widen the window to see what is there, and check '
+            : 'Anything raised since then is missing from this queue. Use Check for new, and check '}
+          <code className="font-mono text-[11px]">docker compose logs atlas-refresh</code>.
         </div>
       )}
 
       <div className="mt-4" />
+
+      {queue && health && (
+        <QueueHealth
+          health={health}
+          statuses={queue.statuses}
+          hrefForState={withState}
+          activeState={state}
+          clearHref={withState()}
+        />
+      )}
+
       {!queue && <RequestFunnel
         funnel={funnel}
         windowLabel={WINDOW_LABEL[activeWindow as keyof typeof WINDOW_LABEL]}
@@ -408,8 +486,22 @@ export default async function RequestsPage({
               windowLabel={WINDOW_LABEL[activeWindow as keyof typeof WINDOW_LABEL]}
               widenHref={keep('window', 'all')}
               emptyQueue={queue ? queue.empty : undefined}
+              // Inside a queue both of these print the same answer on every
+              // row: the tab is the stage filter, and a queue excludes
+              // converted requests, so the order column is empty throughout.
+              // Dropping them is what lets the dates and the price fit without
+              // a sideways scroll.
+              showStage={!queue}
+              showOrder={!queue}
             />
           </div>
+          <Pager
+            page={page}
+            pageSize={PAGE_SIZE}
+            total={total}
+            shown={rows.length}
+            hrefForPage={hrefForPage}
+          />
         </CardBody>
       </Card>
     </div>

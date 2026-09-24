@@ -1,6 +1,7 @@
 import 'server-only';
 import { query, queryOne } from './db';
 import type { RequestRow, CommitmentRow } from './requests';
+import { STAGE_SLA } from './requests';
 
 /**
  * Statuses that mean nobody is waiting on us. The default queue hides them,
@@ -342,6 +343,104 @@ export async function getRequestFunnel(f: RequestFilters = {}) {
   return row ?? {
     received: 0, answerable: 0, priced: 0, quoted: 0, ordered: 0, sourced: 0,
     no_ask: 0, no_pincode: 0, supply_gap: 0, awaiting: 0,
+  };
+}
+
+/**
+ * The shape of the queue you are looking at, in the numbers that change what
+ * you do with it.
+ *
+ * The page could tell you how many requests there were and nothing else about
+ * them, so "34 to quote" was the whole briefing — the same sentence whether
+ * they all arrived this morning or a third had been sitting for a fortnight.
+ * Three of these are about time and the rest are about cause:
+ *
+ *   · late / due — against the per-stage promise in STAGE_SLA, so the count
+ *     means the same thing as the rail on each row;
+ *   · oldest and median — the two numbers that separate "a busy morning" from
+ *     "this queue has been losing" without reading a row;
+ *   · by state — which of the six reasons the queue is made of, because the
+ *     work is completely different for each and the mix decides who to hand it
+ *     to before anybody opens a request.
+ *
+ * The thresholds come from STAGE_SLA rather than being written again here.
+ * They were going to drift the first time somebody tuned one.
+ */
+export async function getQueueHealth(f: RequestFilters = {}) {
+  const { params, clause } = build(f);
+
+  // The waiting clock lives on the source row, not the view, so the same
+  // lateral the list uses has to be here too — otherwise the strip would be
+  // counting against a different definition of "waiting" than the column.
+  const waiting = `(SELECT EXTRACT(day FROM (now() - r."updatedAt"))::int
+                      FROM src_local."Request" r WHERE r.id = q.request_id)`;
+
+  // One CASE per stage that has a threshold, built from the shared map and
+  // written against the CTE's own alias so nothing has to be rewritten after
+  // the fact. The numbers are parameters rather than interpolated text: they
+  // are ours today, and a threshold that arrives from settings later should
+  // not change how this is written.
+  const branches = (pick: 'due' | 'late') =>
+    Object.entries(STAGE_SLA).map(([status, sla]) => {
+      params.push(status, sla[pick]);
+      return `WHEN s.status = $${params.length - 1} THEN s.wd >= $${params.length}`;
+    }).join(' ');
+
+  // Each call captures its own placeholder numbers as it pushes, so the two
+  // are independent of the order they are built in — swapping these lines
+  // cannot silently pair `due`'s thresholds with `late`'s test.
+  const lateCase = `CASE ${branches('late')} ELSE false END`;
+  const dueCase = `CASE ${branches('due')} ELSE false END`;
+
+  const row = await queryOne<{
+    total: number; late: number; due: number;
+    oldest: number | null; median: number | null;
+    unquoted: number; states: { state: string; n: number }[] | null;
+    gap_pincodes: { pincode: string; city: string | null; n: number }[] | null;
+  }>(`
+    WITH scoped AS (
+      SELECT q.request_id, q.status, q.state, q.quote_price,
+             q.pincode, q.city, ${waiting} AS wd
+      FROM analytics.v_request_quote q ${clause}
+    ),
+    marked AS (
+      SELECT s.*, ${lateCase} AS is_late, ${dueCase} AS is_due
+      FROM scoped s
+    )
+    SELECT
+      COUNT(*)::int AS total,
+      COUNT(*) FILTER (WHERE is_late)::int AS late,
+      -- Due but not yet late, so the two counts add up rather than overlap.
+      COUNT(*) FILTER (WHERE is_due AND NOT is_late)::int AS due,
+      MAX(wd)::int AS oldest,
+      percentile_cont(0.5) WITHIN GROUP (ORDER BY wd)::int AS median,
+      -- Priced by Atlas and still sitting before the quote: the part of the
+      -- queue where the answer already exists and only the handoff is missing.
+      COUNT(*) FILTER (WHERE quote_price IS NOT NULL
+                         AND status IN ('OPEN','CONSENTED'))::int AS unquoted,
+      (SELECT json_agg(x) FROM (
+         SELECT state, COUNT(*)::int AS n FROM marked GROUP BY 1 ORDER BY 2 DESC
+       ) x) AS states,
+      -- Where the gaps are, rather than how many there are.
+      --
+      -- A supply gap is only a queue row once; it is a network decision when
+      -- the same pincode produces four of them. Scattered down a list sorted
+      -- by age that pattern is invisible — the four rows are nowhere near each
+      -- other — and it is the one thing on this page that tells the network
+      -- team where to onboard next.
+      (SELECT json_agg(y) FROM (
+         SELECT pincode, city, COUNT(*)::int AS n
+         FROM marked
+         WHERE state LIKE 'SUPPLY_GAP%' AND pincode IS NOT NULL
+         GROUP BY 1, 2 HAVING COUNT(*) > 1
+         ORDER BY 3 DESC, 1 LIMIT 4
+       ) y) AS gap_pincodes
+    FROM marked
+  `, params);
+
+  return row ?? {
+    total: 0, late: 0, due: 0, oldest: null, median: null, unquoted: 0,
+    states: [], gap_pincodes: [],
   };
 }
 

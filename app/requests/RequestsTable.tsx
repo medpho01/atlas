@@ -1,12 +1,15 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Copy, Check, ChevronRight, Phone } from 'lucide-react';
+import {
+  Copy, Check, ChevronRight, Phone, Download, X, Rows3, Rows4,
+} from 'lucide-react';
 import {
   STATE_SHORT, STATE_TONE, STATE_OWNER, TONE_CHIP, STAGE_TONE, stageLabel,
-  quoteBlock, type RequestRow,
+  OWNER_LABEL, OWNER_ACTION, OWNER_TONE, slaLevel, slaReason,
+  quoteBlock, type RequestRow, type SlaLevel,
 } from '@/lib/requests';
 import { startNav } from '@/components/ui/NavProgress';
 
@@ -24,19 +27,109 @@ const shortDay = (d: string | null) =>
 const Blank = () => <span className="text-ink-300">—</span>;
 
 /**
- * Days since anybody touched the request.
+ * The rail down the left of a row, and the colour the age reads in.
  *
- * Coloured rather than merely printed, because the number's whole job is to
- * be noticed: a fortnight-old quote nobody has chased looks identical to a
- * fresh one in every other column.
+ * One scale, used in both places, because they are the same statement: this
+ * has been sitting longer than the stage allows. Written out rather than
+ * interpolated — Tailwind's scanner never finds a built class name.
  */
-function Waiting({ days }: { days: number | null }) {
+const SLA_RAIL: Record<SlaLevel, string> = {
+  late: 'border-l-danger-500',
+  due: 'border-l-warn-500',
+  ok: 'border-l-success-600/40',
+  none: 'border-l-transparent',
+};
+
+const SLA_TEXT: Record<SlaLevel, string> = {
+  late: 'text-danger-500 font-semibold',
+  due: 'text-warn-600 font-medium',
+  ok: 'text-ink-700',
+  none: 'text-ink-500',
+};
+
+const OWNER_CHIP: Record<'brand' | 'warn' | 'ink', string> = {
+  brand: 'bg-brand-50 text-brand-600 border-brand-100',
+  warn: 'bg-warn-50 text-warn-600 border-warn-100',
+  ink: 'bg-ink-100 text-ink-500 border-ink-200',
+};
+
+/**
+ * What each column needs, in pixels, and the only place that is written down.
+ *
+ * The header used Tailwind width classes and the table declared its own
+ * minimum separately, which is two numbers that have to agree and no way to
+ * notice when they stop. They had already stopped: the columns added up to
+ * 1392 and the table asked for 1270, so in that 122px band the browser sized
+ * the table and squashed the columns underneath their stated minimums.
+ *
+ * Applied as inline widths rather than arbitrary Tailwind values because the
+ * total has to be computed, and Tailwind only ever sees class names it can
+ * read in the source — a built `min-w-[${n}px]` compiles to nothing.
+ *
+ * Making the total honest also showed that the columns had wanted 1392px all
+ * along and were being compressed into the 1302px a 1600px screen has to give.
+ * It only ever "fitted" because nothing enforced the minimums.
+ *
+ * So the budget is now 1200px with covering labs and 1050px without, against
+ * roughly 1302px of room at 1600px and 1068px at 1366px. Every column gave up
+ * the padding it was not using, and the ones that truncate already truncate a
+ * little sooner, rather than pushing the dates off the edge — which is the
+ * column this layout was rearranged to keep on screen.
+ */
+const COL_W = {
+  pick: 32,
+  request: 92,
+  age: 80,
+  store: 140,
+  stage: 116,
+  location: 112,
+  items: 146,
+  service: 140,
+  labs: 150,
+  quote: 88,
+  dates: 144,
+  order: 144,
+  actions: 76,
+} as const;
+
+/**
+ * The table's minimum, as the sum of the columns actually rendered.
+ *
+ * `showLabs` is a width, not a preference: covering labs is the widest column
+ * that is not the job itself, so below a wide desktop it is the one that goes
+ * and the queue fits instead of scrolling. Everything else is in both layouts.
+ */
+function tableMinWidth(
+  { showStage, showOrder, showLabs }:
+  { showStage: boolean; showOrder: boolean; showLabs: boolean },
+): number {
+  const { stage, order, labs, ...always } = COL_W;
+  return Object.values(always).reduce((a, b) => a + b, 0)
+    + (showStage ? stage : 0)
+    + (showOrder ? order : 0)
+    + (showLabs ? labs : 0);
+}
+
+/**
+ * How long it has sat, against how long that stage is allowed.
+ *
+ * The number on its own was a fact nobody had an opinion about — twelve days
+ * is either fine or a fire depending on which queue you are in, and the reader
+ * was left to know which. The tone carries the threshold, so the eye sorts the
+ * column before the reader has finished the first row.
+ */
+function Age({ days, status }: { days: number | null; status: string | null }) {
   if (days == null) return <Blank />;
-  if (days === 0) return <span className="text-ink-500">Today</span>;
-  const tone = days >= 14 ? 'text-danger-500 font-semibold'
-             : days >= 3 ? 'text-warn-600 font-medium'
-             : 'text-ink-700';
-  return <span className={tone}>{days} day{days === 1 ? '' : 's'}</span>;
+  const level = slaLevel(status, days);
+  // The colour says late; the word said it again, thirty times, on a morning
+  // where most of the queue is behind. How many are late is a fact about the
+  // queue rather than about any one row, so it is stated once, in the strip
+  // above, and the column is left to rank.
+  return (
+    <span className={SLA_TEXT[level]} title={slaReason(status, days)}>
+      {days === 0 ? 'Today' : `${days}d`}
+    </span>
+  );
 }
 
 /**
@@ -51,39 +144,273 @@ const appointmentTime = (t: string | null) => {
 };
 
 /**
+ * Put text on the clipboard, and say whether it actually got there.
+ *
+ * `navigator.clipboard` is only defined in a secure context. Atlas over plain
+ * http on an office address — which is how an internal tool tends to get
+ * reached — has no `clipboard` at all, so the old `navigator.clipboard.writeText(…)`
+ * threw on the property access before it ever reached the promise. Even where
+ * the API exists the write can reject, on a permission or an unfocused
+ * document.
+ *
+ * Both were fire-and-forget, and the button set itself to "Copied" on the next
+ * line either way. That is the worst available outcome: the operator reads the
+ * confirmation, pastes into the console, and gets whatever was on the
+ * clipboard beforehand. Failing loudly is recoverable; a false success is not.
+ */
+async function copyText(text: string): Promise<boolean> {
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch {
+    // Fall through — an insecure context and a refused permission both land
+    // here, and the fallback below handles the first of them.
+  }
+  // execCommand is deprecated and still the only thing that works without a
+  // secure context. The textarea has to be in the document and focusable for
+  // the selection to take.
+  try {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.setAttribute('readonly', '');
+    ta.style.cssText = 'position:fixed;top:0;left:0;opacity:0;pointer-events:none';
+    document.body.appendChild(ta);
+    ta.select();
+    const ok = document.execCommand('copy');
+    document.body.removeChild(ta);
+    return ok;
+  } catch {
+    return false;
+  }
+}
+
+/** How long a "Copied" / "Copy failed" confirmation stays on a button. */
+const FLASH_MS = 1600;
+
+/**
+ * A boolean that resets itself, and stops doing so once its owner is gone.
+ *
+ * Every one of these buttons sets a flag, waits, and clears it. Without the
+ * cleanup the timer outlives an unmount — and the bulk bar unmounts the moment
+ * the selection is cleared, which is frequently within the window.
+ */
+function useFlash(): ['idle' | 'ok' | 'fail', (v: 'ok' | 'fail') => void] {
+  const [state, setState] = useState<'idle' | 'ok' | 'fail'>('idle');
+  const timer = useRef<ReturnType<typeof setTimeout>>();
+  useEffect(() => () => clearTimeout(timer.current), []);
+  const flash = (v: 'ok' | 'fail') => {
+    setState(v);
+    clearTimeout(timer.current);
+    timer.current = setTimeout(() => setState('idle'), FLASH_MS);
+  };
+  return [state, flash];
+}
+
+/**
  * The copy button is the whole point of the ops screen: the answer is computed
  * here and recorded in the console, so the handoff has to be one click and the
  * text has to survive a paste into a plain input.
  */
 function CopyQuote({ row }: { row: RequestRow }) {
-  const [done, setDone] = useState(false);
+  const [state, flash] = useFlash();
   const disabled = row.quote_price == null && row.promised_date == null;
   return (
     <button
       type="button"
       disabled={disabled}
-      onClick={(e) => {
+      onClick={async (e) => {
         e.stopPropagation();
-        navigator.clipboard.writeText(quoteBlock(row));
-        setDone(true);
-        setTimeout(() => setDone(false), 1600);
+        flash(await copyText(quoteBlock(row)) ? 'ok' : 'fail');
       }}
       className={`inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[11px] transition
         ${disabled
           ? 'border-ink-200 text-ink-400 cursor-not-allowed'
-          : done
+          : state === 'ok'
             ? 'border-success-100 bg-success-50 text-success-600'
-            : 'border-ink-200 text-ink-700 hover:bg-ink-100'}`}
+            : state === 'fail'
+              ? 'border-danger-100 bg-danger-50 text-danger-500'
+              : 'border-ink-200 text-ink-700 hover:bg-ink-100'}`}
       title={disabled ? 'Nothing to quote — see the reason' : 'Copy price and date for the console'}
     >
-      {done ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
-      {done ? 'Copied' : 'Copy'}
+      {state === 'ok' ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
+      {state === 'ok' ? 'Copied' : state === 'fail' ? 'Failed' : 'Copy'}
     </button>
   );
 }
 
+/** The columns an export carries, in the order a spreadsheet wants them. */
+const CSV_COLUMNS: { header: string; value: (r: RequestRow) => string }[] = [
+  { header: 'Request', value: (r) => String(r.request_id) },
+  { header: 'Stage', value: (r) => stageLabel(r.status) },
+  { header: 'Serviceability', value: (r) => STATE_SHORT[r.state] ?? r.state },
+  { header: 'Owner', value: (r) => OWNER_LABEL[STATE_OWNER[r.state]] ?? '' },
+  { header: 'Waiting days', value: (r) => (r.waiting_days == null ? '' : String(r.waiting_days)) },
+  { header: 'Store', value: (r) => r.store_name ?? '' },
+  { header: 'Requester', value: (r) => r.requester_name ?? '' },
+  { header: 'Mobile', value: (r) => r.requester_mobile ?? '' },
+  { header: 'City', value: (r) => r.city ?? '' },
+  { header: 'Pincode', value: (r) => r.pincode ?? '' },
+  { header: 'Requested items', value: (r) => (r.packages?.length ? r.packages : r.item_names ?? []).join('; ') },
+  { header: 'Covering labs', value: (r) => (r.labs_covering ?? []).join('; ') },
+  { header: 'Missing items', value: (r) => r.missing_items ?? '' },
+  { header: 'Quote', value: (r) => (r.quote_price == null ? '' : String(Math.round(Number(r.quote_price)))) },
+  { header: 'Created', value: (r) => r.created_date ?? '' },
+  { header: 'Requested date', value: (r) => r.requested_date ?? '' },
+  { header: 'Earliest available', value: (r) => r.committed_date ?? r.promised_date ?? '' },
+  { header: 'Order', value: (r) => (r.order_id == null ? '' : String(r.order_id)) },
+];
+
+/**
+ * Excel opens a .csv by double-click and reads a leading `=`, `+`, `-` or `@`
+ * as a formula, so a lab called "-Northwind" arrives as an error cell. Prefix
+ * those with an apostrophe and quote everything else the usual way.
+ */
+function csvCell(v: string): string {
+  const safe = /^[=+\-@]/.test(v) ? `'${v}` : v;
+  return `"${safe.replace(/"/g, '""')}"`;
+}
+
+function toCsv(rows: RequestRow[]): string {
+  const head = CSV_COLUMNS.map((c) => csvCell(c.header)).join(',');
+  const body = rows.map((r) => CSV_COLUMNS.map((c) => csvCell(c.value(r))).join(','));
+  // A BOM, because the whole point of the export is that somebody opens it in
+  // Excel, and without one every lab name with an accent in it arrives broken.
+  return '\uFEFF' + [head, ...body].join('\r\n');
+}
+
+/**
+ * What to do with several requests at once.
+ *
+ * The queue's unit of work was always one row — one Copy button, one paste
+ * into the console — and the queue's unit of arrival is a morning's worth.
+ * Thirty-four requests needing a price meant thirty-four round trips between
+ * two windows, in an order nobody was tracking. Selecting is the cheap half of
+ * the fix: the copy is one block with every request in it, and the export is
+ * for the half of this work that happens in a spreadsheet and comes back as a
+ * bulk update.
+ */
+function BulkBar({
+  selected, onClear,
+}: {
+  selected: RequestRow[];
+  onClear: () => void;
+}) {
+  const [which, setWhich] = useState<'quotes' | 'ids' | null>(null);
+  const [state, flash] = useFlash();
+  const n = selected.length;
+  const quotable = selected.filter((r) => r.quote_price != null || r.promised_date != null);
+
+  const copy = async (what: 'quotes' | 'ids', text: string) => {
+    setWhich(what);
+    flash(await copyText(text) ? 'ok' : 'fail');
+  };
+
+  const copyQuotes = () => copy('quotes', quotable.map(quoteBlock).join('\n\n'));
+  const copyIds = () => copy('ids', selected.map((r) => r.request_id).join(', '));
+
+  const download = () => {
+    const blob = new Blob([toCsv(selected)], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `requests-${new Date().toISOString().slice(0, 10)}.csv`;
+    // In the document, not merely constructed. Chrome and Safari will fire a
+    // click on a detached anchor; Firefox silently does nothing, which is a
+    // download button that works for most of the team and not the rest.
+    a.style.display = 'none';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    // Revoked on a later tick rather than immediately: Safari has not started
+    // reading the blob by the time click() returns, and an early revoke lands
+    // as a silent no-download.
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
+
+  /** What a copy button should read right now. */
+  const label = (what: 'quotes' | 'ids', idle: string) =>
+    which !== what || state === 'idle' ? idle : state === 'ok' ? 'Copied' : 'Copy failed';
+  const tone = (what: 'quotes' | 'ids') =>
+    which !== what || state === 'idle'
+      ? 'border-ink-200 text-ink-700 hover:bg-ink-100'
+      : state === 'ok'
+        ? 'border-success-100 bg-success-50 text-success-600'
+        : 'border-danger-100 bg-danger-50 text-danger-500';
+
+  return (
+    <div className="sticky bottom-0 z-20 -mx-5 px-5 py-2.5 border-t border-ink-200
+                    bg-surface/95 backdrop-blur flex flex-wrap items-center gap-2">
+      <span className="text-[13px] font-semibold text-ink-900 tabular-nums">
+        {n} selected
+      </span>
+      <span className="w-px h-4 bg-ink-200" />
+
+      <button
+        type="button"
+        onClick={copyQuotes}
+        disabled={quotable.length === 0}
+        title={quotable.length === 0
+          ? 'None of these has a price or a date yet — there is nothing to paste.'
+          : 'Copy one block per request, ready to paste into the console.'}
+        className={`inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs font-medium transition
+          ${quotable.length === 0
+            ? 'border-ink-200 text-ink-400 cursor-not-allowed'
+            : tone('quotes')}`}
+      >
+        {which === 'quotes' && state === 'ok'
+          ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+        {label('quotes', `Copy ${quotable.length} quote${quotable.length === 1 ? '' : 's'}`)}
+      </button>
+
+      <button
+        type="button"
+        onClick={copyIds}
+        title="Copy just the request ids, for a console search or a message."
+        className={`inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs font-medium transition
+          ${tone('ids')}`}
+      >
+        {which === 'ids' && state === 'ok'
+          ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+        {label('ids', 'Copy ids')}
+      </button>
+
+      <button
+        type="button"
+        onClick={download}
+        title="Download these rows as CSV."
+        className="inline-flex items-center gap-1.5 rounded-md border border-ink-200 px-2.5 py-1
+                   text-xs font-medium text-ink-700 hover:bg-ink-100 transition"
+      >
+        <Download className="w-3.5 h-3.5" />
+        Export CSV
+      </button>
+
+      {/* Said out loud, because a bulk copy that quietly dropped rows is worse
+          than one that refused: the person pastes it and believes it covered
+          everything they ticked. */}
+      {quotable.length < n && (
+        <span className="text-[11px] text-ink-500">
+          {n - quotable.length} of these {n - quotable.length === 1 ? 'has' : 'have'} no price
+          or date yet and {n - quotable.length === 1 ? 'is' : 'are'} left out of the quote block.
+        </span>
+      )}
+
+      <button
+        type="button"
+        onClick={onClear}
+        className="ml-auto inline-flex items-center gap-1 text-xs text-ink-500 hover:text-ink-900"
+      >
+        <X className="w-3.5 h-3.5" />
+        Clear
+      </button>
+    </div>
+  );
+}
+
 export function RequestsTable({
-  rows, windowLabel, widenHref, emptyQueue,
+  rows, windowLabel, widenHref, emptyQueue, showStage = true, showOrder = true,
 }: {
   rows: RequestRow[];
   /** The active arrival window, so an empty result can name what hid the rows. */
@@ -92,8 +419,49 @@ export function RequestsTable({
   widenHref?: string;
   /** Inside a queue, what an empty one means — which is good news, not a filter problem. */
   emptyQueue?: string;
+  /**
+   * Inside a queue every row is at the same stage and none has converted, so
+   * both columns print the same value thirty times or nothing at all. The tab
+   * above is the stage filter; repeating its answer in a column costs the
+   * width that the dates and the price need.
+   */
+  showStage?: boolean;
+  showOrder?: boolean;
 }) {
   const router = useRouter();
+  const [picked, setPicked] = useState<ReadonlySet<number>>(new Set());
+  const [dense, setDense] = useState(false);
+
+  // Density survives the navigation, because every filter click is a full page
+  // load and a preference that resets on each one is not a preference.
+  useEffect(() => {
+    try {
+      setDense(localStorage.getItem('atlas.requests.dense') === '1');
+    } catch { /* private mode, or storage switched off — the default is fine. */ }
+  }, []);
+  const setDensity = (v: boolean) => {
+    setDense(v);
+    try { localStorage.setItem('atlas.requests.dense', v ? '1' : '0'); } catch { /* as above */ }
+  };
+
+  // A selection is only meaningful for rows that are still on screen. Filter
+  // it against the current page rather than clearing it, so paging back and
+  // forth does not silently throw the selection away.
+  const byId = useMemo(() => new Map(rows.map((r) => [r.request_id, r])), [rows]);
+  const selected = useMemo(
+    () => [...picked].map((id) => byId.get(id)).filter((r): r is RequestRow => !!r),
+    [picked, byId],
+  );
+
+  const allPicked = rows.length > 0 && selected.length === rows.length;
+  const toggleAll = () =>
+    setPicked(allPicked ? new Set() : new Set(rows.map((r) => r.request_id)));
+  const toggleOne = (id: number) =>
+    setPicked((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
 
   // An empty queue is a finished queue. The generic empty state explains which
   // filters might be hiding rows, which inside a queue is both wrong — the
@@ -132,217 +500,361 @@ export function RequestsTable({
     );
   }
 
+  // Padding alone barely moved the row: most of its height is the two and
+  // three line cells inside it, so compact tightens the leading as well. Same
+  // information either way — a density control that hides columns is a column
+  // chooser wearing the wrong label.
+  const pad = dense ? 'py-1 leading-[1.15]' : 'py-2.5';
+  // Wide enough for the columns actually on screen, and no wider — derived
+  // from COL_W rather than written as a number beside it.
+  //
+  // The two were separate before, and they disagreed: the table asked for
+  // 1270px while its own columns needed 1392px. Between those two widths the
+  // browser honoured the table and quietly squeezed the columns under their
+  // stated minimums, so the layout degraded in a band nobody had looked at.
+  // Adding a column would have widened that band without changing the number
+  // anybody was maintaining.
+  //
+  // Two totals, because the covering-labs column is dropped below 2xl. They go
+  // out as custom properties and the class picks between them at the
+  // breakpoint: Tailwind only ever sees class names it can read in the source,
+  // so a computed `min-w-[1200px]` would compile to nothing, while
+  // `min-w-[var(--t-min)]` is a literal it can find.
+  const minWide = tableMinWidth({ showStage, showOrder, showLabs: true });
+  const minNarrow = tableMinWidth({ showStage, showOrder, showLabs: false });
+
   return (
-    // The columns have real minimum widths and there are eleven of them, so at
-    // anything under a wide desktop the table is wider than the card. Without
-    // a scroll container it simply drew over the card's edge — the rounded
-    // corner clipped the last column and there was no way to reach it.
-    <div className="overflow-x-auto">
-    <table className="w-full text-sm tabular-nums min-w-[1810px]">
-      <thead>
-        <tr className="text-[11px] uppercase tracking-wide text-ink-400 border-b border-ink-200">
-          <th className="text-left font-medium px-5 py-2">Request</th>
-          <th className="text-left font-medium px-2 py-2">Store</th>
-          {/* Who asked. Every row here ends in somebody being rung, and
-              opening the request to find the number is the slowest part. */}
-          <th className="text-left font-medium px-2 py-2 min-w-[150px]">User</th>
-          <th className="text-left font-medium px-2 py-2 w-[120px]">Request status</th>
-          <th className="text-left font-medium px-2 py-2">Location</th>
-          <th className="text-left font-medium px-2 py-2 min-w-[220px]">Requested items</th>
-          <th className="text-left font-medium px-2 py-2 w-[130px]">Serviceability</th>
-          <th className="text-left font-medium px-2 py-2 min-w-[200px]">Covering labs</th>
-          <th className="text-right font-medium px-2 py-2">Quote</th>
-          {/* The three dates, side by side, because the only useful thing to
-              do with them is compare them: how long it has waited, the date
-              asked for, and the date we can do. */}
-          {/* How long it has sat where it is. Without this, "Quoted 197" does
-              not distinguish a quote sent this morning from one sent in March. */}
-          <th className="text-left font-medium px-2 py-2 w-[96px]">Waiting</th>
-          <th className="text-left font-medium px-2 py-2 w-[86px]">Created</th>
-          <th className="text-left font-medium px-2 py-2 w-[104px]">Requested</th>
-          <th className="text-left font-medium px-2 py-2 w-[104px]">Earliest available</th>
-          <th className="text-left font-medium px-2 py-2 min-w-[150px]">Order</th>
-          {/* Pinned, because it is the action. Scrolling sideways to reach
-              the Copy button would make the one thing this page exists for
-              the hardest thing on it. */}
-          <th className="text-left font-medium px-5 py-2 w-20 sticky right-0 bg-surface
-                         border-l border-ink-150">Actions</th>
-        </tr>
-      </thead>
-      <tbody>
-        {rows.map((r) => {
-          const tone = STATE_TONE[r.state] ?? 'ink';
-          const owner = STATE_OWNER[r.state];
-          const items = r.item_names ?? [];
-          const ready = r.labs_ready ?? [];
-          const covering = r.labs_covering ?? [];
-          return (
-              <tr
-                key={r.request_id}
-                onClick={() => { startNav(); router.push(`/requests/${r.request_id}`); }}
-                className="group border-b border-ink-100 last:border-0 cursor-pointer hover:bg-ink-100/40 align-top"
-              >
-                <td className="px-5 py-2.5 font-medium text-ink-900 whitespace-nowrap">
-                  <ChevronRight className="inline w-3.5 h-3.5 mr-1 text-ink-400" />
-                  #{r.request_id}
-                </td>
-                <td className="px-2 py-2.5 text-ink-700 text-xs">
-                  {r.store_name ?? <span className="text-ink-400">—</span>}
-                </td>
-                <td className="px-2 py-2.5 text-xs" onClick={(e) => e.stopPropagation()}>
-                  <span className="block text-ink-800 truncate max-w-[150px]">
-                    {r.requester_name ?? <span className="text-ink-400">no name</span>}
-                  </span>
-                  {r.requester_mobile ? (
-                    <a href={`tel:${r.requester_mobile.replace(/[^\d+]/g, '')}`}
-                       className="inline-flex items-center gap-1 text-[11px] text-brand-700 dark:text-brand-400 num hover:underline">
-                      <Phone className="w-2.5 h-2.5" />{r.requester_mobile}
-                    </a>
-                  ) : (
-                    <span className="block text-[11px] text-ink-400">no number</span>
+    <>
+      {/* The density control sits with the table rather than in the filter bar:
+          it changes how this list reads, not which rows are in it, and a filter
+          bar that mixes the two teaches people that every control costs a page
+          load. This one costs nothing. */}
+      <div className="flex items-center justify-end gap-1 px-5 pb-1.5">
+        <span className="text-[11px] uppercase tracking-wide text-ink-400 mr-1">Rows</span>
+        {([[false, 'Comfortable', Rows3], [true, 'Compact', Rows4]] as const).map(([v, label, Icon]) => (
+          <button
+            key={label}
+            type="button"
+            onClick={() => setDensity(v)}
+            title={label}
+            aria-pressed={dense === v}
+            className={`inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[11px] font-medium transition
+              ${dense === v
+                ? 'border-ink-300 bg-ink-100 text-ink-900'
+                : 'border-ink-200 text-ink-500 hover:bg-ink-100'}`}
+          >
+            <Icon className="w-3.5 h-3.5" />
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {/* The columns have real minimum widths, so at anything under a wide
+          desktop the table is wider than the card. Without a scroll container
+          it simply drew over the card's edge — the rounded corner clipped the
+          last column and there was no way to reach it. */}
+      <div className="overflow-x-auto">
+      <table
+        className="w-full text-sm tabular-nums min-w-[var(--t-min)] 2xl:min-w-[var(--t-min-wide)]"
+        style={{
+          '--t-min': `${minNarrow}px`,
+          '--t-min-wide': `${minWide}px`,
+        } as React.CSSProperties}
+      >
+        <thead>
+          <tr className="text-[11px] uppercase tracking-wide text-ink-400 border-b border-ink-200">
+            <th className="pl-5 pr-0 py-2" style={{ width: COL_W.pick }}>
+              <input
+                type="checkbox"
+                checked={allPicked}
+                onChange={toggleAll}
+                aria-label={allPicked
+                  ? 'Clear selection'
+                  : `Select all ${rows.length} requests on this page`}
+                title={allPicked
+                  ? 'Clear selection'
+                  : `Select all ${rows.length} on this page. Rows on other pages are not included.`}
+                className="align-middle accent-brand-600 cursor-pointer"
+              />
+            </th>
+            <th className="text-left font-medium px-2 py-2" style={{ width: COL_W.request }}>Request</th>
+            {/* The sort key, and until now the column that fell off the right
+                edge: the queue opens sorted by longest wait and the number it
+                was sorted by was the one you had to scroll to see. */}
+            <th className="text-left font-medium px-2 py-2" style={{ width: COL_W.age }}>Age</th>
+            <th className="text-left font-medium px-2 py-2" style={{ minWidth: COL_W.store }}>Store &amp; requester</th>
+            {showStage && (
+              <th className="text-left font-medium px-2 py-2" style={{ width: COL_W.stage }}>Request status</th>
+            )}
+            <th className="text-left font-medium px-2 py-2" style={{ width: COL_W.location }}>Location</th>
+            <th className="text-left font-medium px-2 py-2" style={{ minWidth: COL_W.items }}>Requested items</th>
+            <th className="text-left font-medium px-2 py-2" style={{ width: COL_W.service }}>Serviceability</th>
+            {/* Dropped below a wide desktop. It is the widest column that is
+                not the job itself, and on a 1366px laptop keeping it pushed
+                the dates and the price back off the right-hand edge — which is
+                the whole thing this layout was rearranged to prevent. The
+                serviceability chip beside it already says whether anyone can
+                serve the request; the names are a click away on the row. */}
+            <th className="hidden 2xl:table-cell text-left font-medium px-2 py-2"
+                style={{ minWidth: COL_W.labs }}>Covering labs</th>
+            <th className="text-right font-medium px-2 py-2" style={{ width: COL_W.quote }}>Quote</th>
+            {/* Asked for and offered, in one cell. They are only ever read
+                against each other — the question is whether we can do the day
+                they wanted — and two columns put a lab name between them. */}
+            <th className="text-left font-medium px-2 py-2" style={{ width: COL_W.dates }}>Wanted → offered</th>
+            {showOrder && (
+              <th className="text-left font-medium px-2 py-2" style={{ minWidth: COL_W.order }}>Order</th>
+            )}
+            {/* Pinned, because it is the action. Scrolling sideways to reach
+                the Copy button would make the one thing this page exists for
+                the hardest thing on it. */}
+            <th className="text-left font-medium px-5 py-2 sticky right-0 bg-surface border-l border-ink-150"
+                style={{ width: COL_W.actions }}>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r) => {
+            const tone = STATE_TONE[r.state] ?? 'ink';
+            const owner = STATE_OWNER[r.state];
+            const items = r.item_names ?? [];
+            const ready = r.labs_ready ?? [];
+            const covering = r.labs_covering ?? [];
+            const level = slaLevel(r.status, r.waiting_days);
+            const isPicked = picked.has(r.request_id);
+            return (
+                <tr
+                  key={r.request_id}
+                  onClick={() => { startNav(); router.push(`/requests/${r.request_id}`); }}
+                  className={`group border-b border-ink-100 last:border-0 cursor-pointer align-top
+                              transition-colors ${isPicked ? 'bg-brand-50' : 'hover:bg-ink-100/40'}`}
+                >
+                  {/* The rail carries the deadline. It is the only thing on the
+                      row that can be read without reading anything — which is
+                      what a list of thirty needs before it needs detail. */}
+                  {/* No width here: the header cell sizes the column, and a
+                      second number to keep in step with COL_W is the drift
+                      this was just pulled out of. */}
+                  <td className={`pl-5 pr-0 ${pad} border-l-[3px] ${SLA_RAIL[level]}`}
+                      onClick={(e) => e.stopPropagation()}>
+                    <input
+                      type="checkbox"
+                      checked={isPicked}
+                      onChange={() => toggleOne(r.request_id)}
+                      aria-label={`Select request ${r.request_id}`}
+                      className="align-middle accent-brand-600 cursor-pointer"
+                    />
+                  </td>
+                  {/* A real link, not just a row that happens to navigate.
+                      The <tr> has carried an onClick since this table was
+                      written, which means the only way to open a request was
+                      with a pointer: no tab stop, nothing for a screen reader
+                      to announce, no way to middle-click one into a new tab.
+                      One focusable link per row rather than a focusable row as
+                      well, so tabbing down the queue is one stop per request
+                      instead of two. */}
+                  <td className={`px-2 ${pad} font-medium text-ink-900 whitespace-nowrap`}>
+                    <Link
+                      href={`/requests/${r.request_id}`}
+                      onClick={(e) => { e.stopPropagation(); startNav(); }}
+                      className="rounded-sm hover:underline focus:outline-none focus-visible:ring-2
+                                 focus-visible:ring-brand-500 focus-visible:ring-offset-1
+                                 focus-visible:ring-offset-surface"
+                      aria-label={`Request ${r.request_id}, ${STATE_SHORT[r.state] ?? r.state}`}
+                    >
+                      <ChevronRight className="inline w-3.5 h-3.5 mr-1 text-ink-400" />
+                      #{r.request_id}
+                    </Link>
+                    {/* Arrival, under the id. It was its own column for a date
+                        nobody sorts by and everybody wants beside the age. */}
+                    <span className="block text-[10px] text-ink-400 pl-[18px]">
+                      {shortDay(r.created_date ?? r.created_at) ?? '—'}
+                    </span>
+                  </td>
+                  <td className={`px-2 ${pad} whitespace-nowrap`}>
+                    <Age days={r.waiting_days} status={r.status} />
+                  </td>
+                  {/* Whose account it is and who to ring, in one cell. They are
+                      one question — who is waiting on this — and they were two
+                      columns because they came from two tables. */}
+                  <td className={`px-2 ${pad} text-xs`} onClick={(e) => e.stopPropagation()}>
+                    <span className="block text-ink-700 truncate max-w-[140px]">
+                      {r.store_name ?? <span className="text-ink-400">—</span>}
+                    </span>
+                    <span className="block text-ink-800 truncate max-w-[140px]">
+                      {r.requester_name ?? <span className="text-ink-400">no name</span>}
+                    </span>
+                    {r.requester_mobile ? (
+                      <a href={`tel:${r.requester_mobile.replace(/[^\d+]/g, '')}`}
+                         className="inline-flex items-center gap-1 text-[11px] text-brand-700 dark:text-brand-400 num hover:underline">
+                        <Phone className="w-2.5 h-2.5" />{r.requester_mobile}
+                      </a>
+                    ) : (
+                      <span className="block text-[11px] text-ink-400">no number</span>
+                    )}
+                  </td>
+                  {/* The console's stage, beside Atlas's verdict. A request can
+                      be Quoted here and a supply gap there — that pairing is the
+                      whole point of the network bucket. */}
+                  {showStage && (
+                    <td className={`px-2 ${pad} whitespace-nowrap`}>
+                      <span className={`inline-block rounded border px-1.5 py-0.5 text-[11px]
+                                        ${TONE_CHIP[STAGE_TONE[r.status] ?? 'ink']}`}>
+                        {stageLabel(r.status)}
+                      </span>
+                    </td>
                   )}
-                </td>
-                {/* The console's stage, beside Atlas's verdict. A request can
-                    be Quoted here and a supply gap there — that pairing is the
-                    whole point of the network bucket. */}
-                <td className="px-2 py-2.5 whitespace-nowrap">
-                  <span className={`inline-block rounded border px-1.5 py-0.5 text-[11px]
-                                    ${TONE_CHIP[STAGE_TONE[r.status] ?? 'ink']}`}>
-                    {stageLabel(r.status)}
-                  </span>
-                </td>
-                <td className="px-2 py-2.5 text-ink-700">
-                  {r.city ?? <span className="text-ink-400">—</span>}
-                  <span className="block text-[10px] text-ink-400">
-                    {r.pincode ?? 'no pincode'}
-                    {r.nearest_km && <> · lab {r.nearest_km} km</>}
-                  </span>
-                </td>
-                {/* The package, where the request is a package. Listing its
-                    component tests said less in more words — "LS SF Onboarding
-                    Package" is the thing the store ordered and the thing a lab
-                    quotes against. Individual tests only show when there is no
-                    package to name. */}
-                <td className="px-2 py-2.5 text-xs">
-                  {(() => {
-                    const packages = r.packages ?? [];
-                    const shown = packages.length > 0 ? packages : items;
-                    if (shown.length === 0) return <span className="text-ink-400">Not identified</span>;
-                    return (
+                  <td className={`px-2 ${pad} text-ink-700`}>
+                    {r.city ?? <span className="text-ink-400">—</span>}
+                    <span className="block text-[10px] text-ink-400">
+                      {r.pincode ?? 'no pincode'}
+                      {r.nearest_km && <> · lab {r.nearest_km} km</>}
+                    </span>
+                  </td>
+                  {/* The package, where the request is a package. Listing its
+                      component tests said less in more words — "LS SF Onboarding
+                      Package" is the thing the store ordered and the thing a lab
+                      quotes against. Individual tests only show when there is no
+                      package to name. */}
+                  <td className={`px-2 ${pad} text-xs`}>
+                    {(() => {
+                      const packages = r.packages ?? [];
+                      const shown = packages.length > 0 ? packages : items;
+                      if (shown.length === 0) return <span className="text-ink-400">Not identified</span>;
+                      return (
+                        <>
+                          <span className="text-ink-800">{shown.slice(0, 2).join(', ')}</span>
+                          {shown.length > 2 && (
+                            <span className="text-ink-400"> +{shown.length - 2} more</span>
+                          )}
+                          {packages.length > 0 && (r.tests?.length ?? 0) > 0 && (
+                            <span className="block text-[10px] text-ink-400">
+                              + {r.tests!.length} individual test{r.tests!.length === 1 ? '' : 's'}
+                            </span>
+                          )}
+                          {(r.unnamed ?? 0) > 0 && (
+                            <span className="block text-[10px] text-warn-600">
+                              {r.unnamed} not in catalogue
+                            </span>
+                          )}
+                        </>
+                      );
+                    })()}
+                  </td>
+                  <td className={`px-2 ${pad} whitespace-nowrap`}>
+                    <span className={`inline-block rounded border px-1.5 py-0.5 text-[11px] ${TONE_CHIP[tone]}`}>
+                      {STATE_SHORT[r.state] ?? r.state}
+                    </span>
+                    {/* Who has to act, which the state model has always known
+                        and the row has never said. "Convert in console" was the
+                        same sentence printed on every serviceable row; the
+                        three states that are not ops' work said nothing at all. */}
+                    {owner && (
+                      <span
+                        className={`block w-fit mt-0.5 rounded border px-1 py-px text-[10px] ${OWNER_CHIP[OWNER_TONE[owner]]}`}
+                        title={OWNER_ACTION[owner]}
+                      >
+                        {OWNER_LABEL[owner]}
+                      </span>
+                    )}
+                  </td>
+                  {/* Who can serve it and what they lack — the negotiation, in
+                      the row. Hidden below 2xl with its header; see there. */}
+                  <td className={`hidden 2xl:table-cell px-2 ${pad} text-xs`}>
+                    {ready.length > 0 ? (
+                      <span className="text-success-600">{ready.slice(0, 2).join(', ')}</span>
+                    ) : covering.length > 0 ? (
                       <>
-                        <span className="text-ink-800">{shown.slice(0, 2).join(', ')}</span>
-                        {shown.length > 2 && (
-                          <span className="text-ink-400"> +{shown.length - 2} more</span>
-                        )}
-                        {packages.length > 0 && (r.tests?.length ?? 0) > 0 && (
-                          <span className="block text-[10px] text-ink-400">
-                            + {r.tests!.length} individual test{r.tests!.length === 1 ? '' : 's'}
-                          </span>
-                        )}
-                        {(r.unnamed ?? 0) > 0 && (
+                        <span className="text-ink-700">{covering.slice(0, 2).join(', ')}</span>
+                        {r.missing_items && (
                           <span className="block text-[10px] text-warn-600">
-                            {r.unnamed} not in catalogue
+                            Missing: {r.missing_items.length > 60
+                              ? r.missing_items.slice(0, 60) + '…'
+                              : r.missing_items}
                           </span>
                         )}
                       </>
-                    );
-                  })()}
-                </td>
-                <td className="px-2 py-2.5 whitespace-nowrap">
-                  <span className={`inline-block rounded border px-1.5 py-0.5 text-[11px] ${TONE_CHIP[tone]}`}>
-                    {STATE_SHORT[r.state] ?? r.state}
-                  </span>
-                  {/* One verdict per row. The console's own isServiceable
-                      column is not the same measure — it is false on 3,326
-                      requests that became orders — so showing both invited a
-                      comparison neither field can win. */}
-                  {owner === 'console' && (
-                    <span className="block text-[10px] text-ink-400 mt-0.5">Convert in console</span>
-                  )}
-                </td>
-                {/* Who can serve it and what they lack — the negotiation, in the row. */}
-                <td className="px-2 py-2.5 text-xs">
-                  {ready.length > 0 ? (
-                    <span className="text-success-600">{ready.slice(0, 2).join(', ')}</span>
-                  ) : covering.length > 0 ? (
-                    <>
-                      <span className="text-ink-700">{covering.slice(0, 2).join(', ')}</span>
-                      {r.missing_items && (
-                        <span className="block text-[10px] text-warn-600">
-                          Missing: {r.missing_items.length > 60
-                            ? r.missing_items.slice(0, 60) + '…'
-                            : r.missing_items}
-                        </span>
+                    ) : (
+                      <span className="text-danger-500">No covering lab</span>
+                    )}
+                    {covering.length > 2 && (
+                      <span className="text-[10px] text-ink-400"> +{r.covering_labs - 2} more</span>
+                    )}
+                  </td>
+                  <td className={`px-2 ${pad} text-right whitespace-nowrap`}>
+                    {inr(r.quote_price)
+                      ? <span className="font-semibold text-ink-900">{inr(r.quote_price)}</span>
+                      : <span className="text-[11px] text-ink-400">—</span>}
+                    {r.quote_price && r.markup_pct && (
+                      <span className="block text-[10px] text-ink-400">+{Number(r.markup_pct)}%</span>
+                    )}
+                  </td>
+                  {/* The date they asked for and the date we can do, stacked so
+                      the comparison is vertical and costs no eye movement. */}
+                  <td className={`px-2 ${pad} whitespace-nowrap text-xs`}>
+                    <span className="block text-ink-500">
+                      {day(r.requested_date) ?? <Blank />}
+                    </span>
+                    <span className="block text-ink-800">
+                      {day(r.committed_date ?? r.promised_date)
+                        ?? <span className="text-danger-500">Not available</span>}
+                      {/* What was actually promised, where it differs from what
+                          Atlas would offer today. A commitment is a date somebody
+                          has already been given. */}
+                      {r.committed_date && r.committed_date !== r.promised_date && (
+                        <span className="ml-1 text-[10px] text-ink-400">committed</span>
                       )}
-                    </>
-                  ) : (
-                    <span className="text-danger-500">No covering lab</span>
-                  )}
-                  {covering.length > 2 && (
-                    <span className="text-[10px] text-ink-400"> +{r.covering_labs - 2} more</span>
-                  )}
-                </td>
-                <td className="px-2 py-2.5 text-right whitespace-nowrap">
-                  {inr(r.quote_price)
-                    ? <span className="font-semibold text-ink-900">{inr(r.quote_price)}</span>
-                    : <span className="text-[11px] text-ink-400">—</span>}
-                  {r.quote_price && r.markup_pct && (
-                    <span className="block text-[10px] text-ink-400">+{Number(r.markup_pct)}%</span>
-                  )}
-                </td>
-                <td className="px-2 py-2.5 whitespace-nowrap">
-                  <Waiting days={r.waiting_days} />
-                </td>
-                <td className="px-2 py-2.5 whitespace-nowrap text-ink-600">
-                  {shortDay(r.created_date ?? r.created_at) ?? <Blank />}
-                </td>
-                <td className="px-2 py-2.5 whitespace-nowrap text-ink-700">
-                  {day(r.requested_date) ?? <Blank />}
-                </td>
-                <td className="px-2 py-2.5 whitespace-nowrap text-ink-700">
-                  {day(r.committed_date ?? r.promised_date)
-                    ?? <span className="text-[11px] text-danger-500">Not available</span>}
-                  {/* What was actually promised, where it differs from what
-                      Atlas would offer today. A commitment is a date somebody
-                      has already been given. */}
-                  {r.committed_date && r.committed_date !== r.promised_date && (
-                    <span className="block text-[10px] text-ink-400">Committed</span>
-                  )}
-                </td>
-                {/* Converted, and what happened next. Until now the queue could
-                    say a request became an order but not which one, who is
-                    serving it, or when — so every follow-up meant opening the
-                    console to find out. */}
-                <td className="px-2 py-2.5 text-xs">
-                  {r.order_id ? (
-                    <>
-                      <span className="text-ink-900 font-medium">#{r.order_id}</span>
-                      {r.order_appointment && (
-                        <span className="block text-[10px] text-ink-600">
-                          {day(r.order_appointment.slice(0, 10))}
-                          {appointmentTime(r.order_appointment) && (
-                            <span className="text-ink-400"> · {appointmentTime(r.order_appointment)}</span>
+                    </span>
+                  </td>
+                  {/* Converted, and what happened next. Until now the queue could
+                      say a request became an order but not which one, who is
+                      serving it, or when — so every follow-up meant opening the
+                      console to find out. */}
+                  {showOrder && (
+                    <td className={`px-2 ${pad} text-xs`}>
+                      {r.order_id ? (
+                        <>
+                          <span className="text-ink-900 font-medium">#{r.order_id}</span>
+                          {r.order_appointment && (
+                            <span className="block text-[10px] text-ink-600">
+                              {day(r.order_appointment.slice(0, 10))}
+                              {appointmentTime(r.order_appointment) && (
+                                <span className="text-ink-400"> · {appointmentTime(r.order_appointment)}</span>
+                              )}
+                            </span>
                           )}
-                        </span>
+                          <span className="block text-[10px] text-ink-500 truncate max-w-[150px]">
+                            {r.order_lab_name ?? <span className="text-danger-500">No lab assigned</span>}
+                          </span>
+                        </>
+                      ) : (
+                        <span className="text-ink-300">—</span>
                       )}
-                      <span className="block text-[10px] text-ink-500 truncate max-w-[150px]">
-                        {r.order_lab_name ?? <span className="text-danger-500">No lab assigned</span>}
-                      </span>
-                    </>
-                  ) : (
-                    <span className="text-ink-300">—</span>
+                    </td>
                   )}
-                </td>
-                <td className="px-5 py-2.5 sticky right-0 bg-surface group-hover:bg-ink-100
-                               border-l border-ink-150"
-                    onClick={(e) => e.stopPropagation()}>
-                  <CopyQuote row={r} />
-                </td>
-              </tr>
-          );
-        })}
-      </tbody>
-    </table>
-    </div>
+                  {/* The pinned cell has to be opaque or the row scrolls
+                      visibly underneath it, which means it cannot inherit the
+                      row's selected tint the way every other cell does — it
+                      has to repeat it. Without this the Actions column stayed
+                      surface-coloured on a selected row and read as a strip of
+                      unselected table welded to the right-hand edge.
+                      Both use the same token at full opacity, so they match in
+                      either theme rather than only in the one that was open
+                      when the shade was picked. */}
+                  <td className={`px-5 ${pad} sticky right-0 border-l border-ink-150
+                                 ${isPicked ? 'bg-brand-50' : 'bg-surface group-hover:bg-ink-100'}`}
+                      onClick={(e) => e.stopPropagation()}>
+                    <CopyQuote row={r} />
+                  </td>
+                </tr>
+            );
+          })}
+        </tbody>
+      </table>
+      </div>
+
+      {selected.length > 0 && (
+        <BulkBar selected={selected} onClear={() => setPicked(new Set())} />
+      )}
+    </>
   );
 }
