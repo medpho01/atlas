@@ -30,6 +30,8 @@ export type StoreFilters = {
   activeOnly?: boolean;
   /** Only the stores the requests queue is working. */
   trackedOnly?: boolean;
+  /** Only the stores order tracking watches — the list from the spec. */
+  inTrackingOnly?: boolean;
   /** Counts and analytics are computed inside this window; ISO dates. */
   from?: string;
   to?: string;
@@ -40,7 +42,9 @@ export type StoreFilters = {
   offset?: number;
 };
 
-export const STORE_SORTS = ['orders', 'name', 'delayed', 'cancelled', 'turnaround'] as const;
+export const STORE_SORTS = [
+  'orders', 'name', 'delayed', 'cancelled', 'turnaround', 'today',
+] as const;
 export type StoreSort = (typeof STORE_SORTS)[number];
 
 /**
@@ -130,6 +134,18 @@ export type StoreRow = {
   last_order_at: string | null;
   /** Whether the pending pile has passed this store's own limit. */
   pending_over_limit: boolean;
+  /**
+   * Whether order tracking watches this store, and what it currently has.
+   *
+   * The same two numbers /order-tracking shows, read from the same view. A
+   * ledger that disagrees with the work queue about how many appointments a
+   * partner has today is a ledger nobody trusts twice.
+   */
+  in_tracking: boolean;
+  needs_lab: number;
+  needs_lab_tomorrow: number;
+  pickup_today: number;
+  pickup_no_lab: number;
 };
 
 const STORE_ORDER_BY: Record<StoreSort, string> = {
@@ -138,6 +154,8 @@ const STORE_ORDER_BY: Record<StoreSort, string> = {
   delayed: 'o.delayed DESC NULLS LAST, o.total DESC NULLS LAST',
   cancelled: 'o.cancellation_rate DESC NULLS LAST, o.total DESC NULLS LAST',
   turnaround: 'o.avg_turnaround_hours DESC NULLS LAST, o.total DESC NULLS LAST',
+  // The spec's own ordering: whose appointments today have nobody behind them.
+  today: 'COALESCE(q.pickup_no_lab, 0) DESC, COALESCE(q.pickup_today, 0) DESC, s.store_name',
 };
 
 /** The WHERE on stores, shared by the page query and its count. */
@@ -152,6 +170,7 @@ function storeWhere(f: StoreFilters, params: unknown[]): string {
   }
   if (f.activeOnly) where.push('s.active');
   if (f.trackedOnly) where.push('atlas.store_is_tracked(s.id)');
+  if (f.inTrackingOnly) where.push(`atlas.store_in_group('TRACKED', s.id)`);
   return where.join(' AND ');
 }
 
@@ -232,8 +251,14 @@ export async function getStoreRows(f: StoreFilters = {}): Promise<StoreRow[]> {
            o.median_turnaround_hours::float8 AS median_turnaround_hours,
            o.cancellation_rate::float8       AS cancellation_rate,
            o.last_order_at,
-           COALESCE(o.pending, 0) >= atlas.store_pending_limit(s.id) AS pending_over_limit
+           COALESCE(o.pending, 0) >= atlas.store_pending_limit(s.id) AS pending_over_limit,
+           atlas.store_in_group('TRACKED', s.id)  AS in_tracking,
+           COALESCE(q.needs_lab, 0)               AS needs_lab,
+           COALESCE(q.needs_lab_tomorrow, 0)      AS needs_lab_tomorrow,
+           COALESCE(q.pickup_today, 0)            AS pickup_today,
+           COALESCE(q.pickup_no_lab, 0)           AS pickup_no_lab
     FROM analytics.v_store_directory s
+    LEFT JOIN analytics.v_store_queue q ON q.store_id = s.id
     LEFT JOIN atlas.store_profile sp ON sp.store_id = s.id
     LEFT JOIN atlas.users ou ON ou.id = sp.ops_owner_id
     ${stats}
@@ -483,8 +508,14 @@ export async function getStoreDetail(
            o.median_turnaround_hours::float8 AS median_turnaround_hours,
            o.cancellation_rate::float8       AS cancellation_rate,
            o.last_order_at,
-           COALESCE(o.pending, 0) >= atlas.store_pending_limit(s.id) AS pending_over_limit
+           COALESCE(o.pending, 0) >= atlas.store_pending_limit(s.id) AS pending_over_limit,
+           atlas.store_in_group('TRACKED', s.id)  AS in_tracking,
+           COALESCE(q.needs_lab, 0)               AS needs_lab,
+           COALESCE(q.needs_lab_tomorrow, 0)      AS needs_lab_tomorrow,
+           COALESCE(q.pickup_today, 0)            AS pickup_today,
+           COALESCE(q.pickup_no_lab, 0)           AS pickup_no_lab
     FROM analytics.v_store_directory s
+    LEFT JOIN analytics.v_store_queue q ON q.store_id = s.id
     LEFT JOIN atlas.store_profile sp ON sp.store_id = s.id
     LEFT JOIN atlas.users ou ON ou.id = sp.ops_owner_id
     LEFT JOIN atlas.users pu ON pu.id = sp.updated_by

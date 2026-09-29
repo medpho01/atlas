@@ -201,7 +201,7 @@ export function TaskTable({
                 </th>
               )}
               <th className={`text-left font-medium py-2 w-[108px] ${canAssign ? 'px-2' : 'pl-5 pr-2'}`}>
-                {kind === 'chase_report' ? 'Late by' : kind === 'pickup_today' ? 'Time' : 'Deadline'}
+                {kind === 'chase_report' ? 'Late by' : kind === 'confirm_pickup' ? 'Time' : 'Deadline'}
               </th>
               <th className="text-left font-medium px-2 py-2 w-[124px]">Order</th>
               <th className="text-left font-medium px-2 py-2 w-[130px]">Store</th>
@@ -240,11 +240,11 @@ export function TaskTable({
                   </td>
                 )}
                 <td className={`py-2.5 whitespace-nowrap ${canAssign ? 'px-2' : 'pl-5 pr-2'}`}>
-                  {kind === 'pickup_today'
+                  {kind === 'confirm_pickup'
                     ? <><span className="font-semibold text-ink-900">{clock(r.appointment_at)}</span>
                         <span className="block text-[11px] text-ink-400">today</span></>
                     : <Due row={r} />}
-                  {kind !== 'pickup_today' && (
+                  {kind !== 'confirm_pickup' && (
                     <span className="block text-[11px] text-ink-400">{day(r.due_date)}</span>
                   )}
                 </td>
@@ -436,7 +436,7 @@ function TaskDrawer({
 
   const closesOn = kind === 'needs_lab'
     ? 'a real lab is put on the order'
-    : kind === 'pickup_today'
+    : kind === 'confirm_pickup'
       ? 'the order reaches Sample collected'
       : 'the order reaches Report delivered';
 
@@ -451,7 +451,7 @@ function TaskDrawer({
               <span className={`inline-block rounded border px-1.5 py-0.5 text-[11px] font-semibold ${
                 row.overdue ? 'bg-danger-50 text-danger-500 border-danger-100'
                             : 'bg-warn-50 text-warn-600 border-warn-100'}`}>
-                {kind === 'needs_lab' ? 'Needs a lab' : kind === 'pickup_today' ? 'Pickup today' : 'Report outstanding'}
+                {kind === 'needs_lab' ? 'Needs a lab' : kind === 'confirm_pickup' ? 'Pickup today' : 'Report outstanding'}
               </span>
               {row.overdue && <span className="text-[12px] font-bold text-danger-500">Overdue</span>}
             </div>

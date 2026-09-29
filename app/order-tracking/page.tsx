@@ -9,10 +9,8 @@ import { ChipButton } from '@/components/ui/Toggle';
 import { InfoTip } from '@/components/ui/InfoTip';
 import {
   getQueueCounts, getTasks, getAssignableUsers, getQueueStores,
-  getStoreQueues, getStoreTrackingOptions,
   TASK_BLURB, TASK_KINDS, type TaskKind,
 } from '@/lib/orderTracking';
-import { StoreQueues } from './StoreQueues';
 import { TaskTable } from './TaskTable';
 import { StorePicker } from '@/components/ui/StorePicker';
 
@@ -28,13 +26,13 @@ const QUEUE = {
     chip: 'bg-danger-500',
     urgent: (n: number) => `${n} due today`,
   },
-  pickup_today: {
+  confirm_pickup: {
     label: 'Pickup today',
     icon: <CalendarClock className="w-3.5 h-3.5" />,
     dot: 'bg-warn-500',
     bar: 'border-warn-500',
     chip: 'bg-warn-500',
-    urgent: (n: number) => `${n} still without a lab`,
+    urgent: (n: number) => `${n} still to confirm`,
   },
   chase_report: {
     label: 'Report outstanding',
@@ -79,8 +77,8 @@ export default async function OrderTrackingPage({
     .split(',').map((x) => x.trim()).filter(Boolean)
     .map(Number).filter(Number.isInteger);
 
-  const [counts, rows, people, storeFacet, storeQueues, storeOptions] = await Promise.all([
-    getQueueCounts(stores),
+  const [counts, rows, people, storeFacet] = await Promise.all([
+    getQueueCounts(),
     getTasks(tab, {
       apptInDays: tab === 'needs_lab' ? (horizon as { exact?: number } | undefined)?.exact : undefined,
       apptWithinDays: tab === 'needs_lab' ? (horizon as { within?: number } | undefined)?.within : undefined,
@@ -91,8 +89,6 @@ export default async function OrderTrackingPage({
     }),
     getAssignableUsers(),
     getQueueStores(tab),
-    getStoreQueues(),
-    canAssign ? getStoreTrackingOptions() : Promise.resolve([]),
   ]);
 
   /** Every search param except the named one, for a client component to carry. */
@@ -126,7 +122,7 @@ export default async function OrderTrackingPage({
     <div className="px-6 lg:px-8 py-6 max-w-[1700px] mx-auto">
       <PageHeader
         title="Order tracking"
-        subtitle="The partners we watch, and every order of theirs that still needs somebody."
+        subtitle="Every order in flight, in the three stages where it can quietly go wrong."
         actions={
           <InfoTip
             title="Order tracking"
@@ -143,16 +139,6 @@ export default async function OrderTrackingPage({
             drives="A lead assigns the rows; whoever holds one calls the lab and records what was said. Nobody closes a task by hand."
           />
         }
-      />
-
-      {/* Stores first. Everything below is derived from this list, and a
-          queue tab means nothing until you know whose orders are in it. */}
-      <StoreQueues
-        rows={storeQueues}
-        options={storeOptions}
-        canEdit={canAssign}
-        activeStore={stores.length === 1 ? stores[0] : null}
-        carry={carry('store')}
       />
 
       {/* Three tabs, because they are three different jobs with three

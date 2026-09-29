@@ -1,11 +1,13 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useTransition } from 'react';
 import Link from 'next/link';
 import {
-  ChevronRight, AlertTriangle, CalendarClock, Loader2, ExternalLink, Phone,
+  ChevronRight, AlertTriangle, CalendarClock, Loader2, ExternalLink, Phone, Eye, EyeOff,
 } from 'lucide-react';
 import { startNav } from '@/components/ui/NavProgress';
+import { runAction } from '../requests/runAction';
+import { setStoreTracked } from './actions';
 import {
   STAGES, STAGE_LABEL, STAGE_TONE, TONE_BAR, TONE_CHIP,
   humanHours, pct, shortDate, dateTime, statusLabel, type Stage,
@@ -22,7 +24,7 @@ import type { StoreRow, OrderRow } from '@/lib/storeOrders';
  * for the list however many stores are on it, and a second only when somebody
  * actually wants to look inside.
  */
-export function StoreList({ rows }: { rows: StoreRow[] }) {
+export function StoreList({ rows, canEdit }: { rows: StoreRow[]; canEdit: boolean }) {
   const [open, setOpen] = useState<number | null>(null);
 
   return (
@@ -34,11 +36,17 @@ export function StoreList({ rows }: { rows: StoreRow[] }) {
                       uppercase tracking-wide text-ink-400 border-b border-ink-150">
         <span className="w-5" />
         <span className="flex-1 min-w-0">Store</span>
-        <span className="w-[260px]">Orders by stage</span>
+        {/* The two operational numbers first: they are what somebody opens
+            this page in the morning to see, and everything to their right is
+            how the partner is doing rather than what needs doing. */}
+        <span className="w-[86px] text-right">Needs a lab</span>
+        <span className="w-[92px] text-right">Pickup today</span>
+        <span className="w-[210px]">Orders by stage</span>
         <span className="w-16 text-right">Orders</span>
         <span className="w-20 text-right">Turnaround</span>
-        <span className="w-20 text-right">Cancelled</span>
-        <span className="w-24 text-right">Last order</span>
+        <span className="hidden 2xl:inline w-20 text-right">Cancelled</span>
+        <span className="hidden 2xl:inline w-24 text-right">Last order</span>
+        <span className="w-8" />
       </div>
 
       <ul>
@@ -46,6 +54,7 @@ export function StoreList({ rows }: { rows: StoreRow[] }) {
           <StorePanel
             key={s.store_id}
             store={s}
+            canEdit={canEdit}
             open={open === s.store_id}
             onToggle={() => setOpen((cur) => (cur === s.store_id ? null : s.store_id))}
           />
@@ -56,10 +65,17 @@ export function StoreList({ rows }: { rows: StoreRow[] }) {
 }
 
 function StorePanel({
-  store: s, open, onToggle,
-}: { store: StoreRow; open: boolean; onToggle: () => void }) {
+  store: s, open, onToggle, canEdit,
+}: { store: StoreRow; open: boolean; onToggle: () => void; canEdit: boolean }) {
   const panelId = `store-orders-${s.store_id}`;
   const needsAttention = s.delayed > 0 || s.flagged > 0 || s.pending_over_limit;
+  const [pending, start] = useTransition();
+  const [err, setErr] = useState<string | null>(null);
+
+  const toggleTracked = () => start(async () => {
+    const r = await runAction(() => setStoreTracked(s.store_id, !s.in_tracking));
+    setErr(r.ok ? null : (r.error ?? 'That did not work'));
+  });
 
   return (
     <li className="border-b border-ink-100 last:border-0">
@@ -101,6 +117,15 @@ function StorePanel({
                 Not in the queue
               </span>
             )}
+            {s.in_tracking && (
+              <span
+                className="text-[10px] uppercase tracking-wide rounded border
+                           border-brand-100 bg-brand-50 text-brand-700 px-1.5 py-px"
+                title="Order tracking watches this store: every one of its orders is tracked."
+              >
+                Tracked
+              </span>
+            )}
           </div>
           <div className="text-[11px] text-ink-500 mt-0.5 flex items-center gap-x-2 gap-y-0.5 flex-wrap">
             <span>{[s.city, s.state].filter(Boolean).join(', ') || 'No address'}</span>
@@ -132,6 +157,38 @@ function StorePanel({
           )}
         </div>
 
+        {/* Not tracked means order tracking produces nothing for this store,
+            so a dash here is a real answer and a zero would be a lie. */}
+        <span className="w-[86px] text-right">
+          {s.in_tracking ? (
+            <>
+              <span className={`num text-sm ${s.needs_lab > 0 ? 'font-semibold text-ink-900' : 'text-ink-400'}`}>
+                {s.needs_lab || '—'}
+              </span>
+              {s.needs_lab_tomorrow > 0 && (
+                <span className="block text-[10px] text-ink-400">
+                  {s.needs_lab_tomorrow} tomorrow
+                </span>
+              )}
+            </>
+          ) : <span className="text-[11px] text-ink-300">not tracked</span>}
+        </span>
+
+        <span className="w-[92px] text-right">
+          {s.in_tracking ? (
+            <>
+              <span className={`num text-sm ${s.pickup_today > 0 ? 'font-semibold text-ink-900' : 'text-ink-400'}`}>
+                {s.pickup_today || '—'}
+              </span>
+              {s.pickup_no_lab > 0 && (
+                <span className="block text-[10px] font-semibold text-danger-500">
+                  {s.pickup_no_lab} no lab
+                </span>
+              )}
+            </>
+          ) : <span className="text-[11px] text-ink-300">—</span>}
+        </span>
+
         <StageBar store={s} />
 
         <span className="w-16 text-right num text-sm font-semibold text-ink-900">
@@ -140,14 +197,44 @@ function StorePanel({
         <span className="w-20 text-right num text-sm text-ink-700">
           {humanHours(s.avg_turnaround_hours)}
         </span>
-        <span className={`w-20 text-right num text-sm
+        <span className={`hidden 2xl:inline w-20 text-right num text-sm
           ${(s.cancellation_rate ?? 0) >= 0.2 ? 'text-danger-500 font-semibold' : 'text-ink-700'}`}>
           {pct(s.cancellation_rate)}
         </span>
-        <span className="w-24 text-right text-[11px] text-ink-500">
+        <span className="hidden 2xl:inline w-24 text-right text-[11px] text-ink-500">
           {shortDate(s.last_order_at)}
         </span>
+
+        {/* Tracking on or off. Not a delete and not hidden behind a menu — it
+            is the one switch that decides whether the two columns to the left
+            mean anything for this partner. */}
+        <span className="w-8 text-right">
+          {canEdit ? (
+            <button
+              type="button"
+              onClick={toggleTracked}
+              disabled={pending}
+              aria-pressed={s.in_tracking}
+              aria-label={s.in_tracking
+                ? `Stop tracking ${s.name}`
+                : `Start tracking ${s.name}`}
+              title={s.in_tracking
+                ? 'Stop tracking this store. Nothing is deleted — its orders stay.'
+                : 'Track this store: every one of its orders gets counted here.'}
+              className={`rounded-sm focus:outline-none focus-visible:ring-2
+                          focus-visible:ring-brand-500 disabled:opacity-50
+                          ${s.in_tracking ? 'text-brand-600 hover:text-brand-700'
+                                          : 'text-ink-300 hover:text-ink-600'}`}
+            >
+              {pending ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                : s.in_tracking ? <Eye className="w-3.5 h-3.5" />
+                  : <EyeOff className="w-3.5 h-3.5" />}
+            </button>
+          ) : null}
+        </span>
       </div>
+
+      {err && <p className="px-5 pb-2 text-[11px] text-danger-500">{err}</p>}
 
       {open && <OrderPreview storeId={s.store_id} storeName={s.name} panelId={panelId} />}
     </li>
@@ -171,14 +258,14 @@ function StageBar({ store: s }: { store: StoreRow }) {
 
   if (total === 0) {
     return (
-      <span className="w-[260px] text-[11px] text-ink-400">
+      <span className="w-[210px] text-[11px] text-ink-400">
         No orders in this window
       </span>
     );
   }
 
   return (
-    <span className="w-[260px] shrink-0">
+    <span className="w-[210px] shrink-0">
       <span className="flex h-2 rounded-full overflow-hidden bg-ink-100" role="img"
             aria-label={STAGES.filter((k) => counts[k] > 0)
               .map((k) => `${counts[k]} ${STAGE_LABEL[k].toLowerCase()}`).join(', ')}>

@@ -580,3 +580,53 @@ export async function restoreStore(id: number): Promise<R> {
   revalidatePath('/stores');
   return { ok: true };
 }
+
+// ---------------------------------------------------------------------------
+// Which stores are tracked
+// ---------------------------------------------------------------------------
+
+/**
+ * Put a store on the tracked list, or take it off.
+ *
+ * This is step one of the spec — "all the data needs to be tracked for the
+ * following stores" — and the two queues on this screen derive from it. A
+ * store that is not on the list shows a dash rather than a zero, because
+ * nothing is being counted for it and a zero would claim otherwise.
+ *
+ * Nothing is deleted by taking one off: its orders are untouched, its ledger
+ * is unchanged, and putting it back brings the counts straight back. So this
+ * needs manage on storeOrders rather than admin — it is a change to what the
+ * desk is watching, not to what exists.
+ */
+export async function setStoreTracked(id: number, tracked: boolean): Promise<R> {
+  const a = await actor();
+  if ('error' in a) return { ok: false, error: a.error };
+  const sid = storeId(id);
+  if (!sid) return { ok: false, error: 'Bad store' };
+
+  // Checked against the directory, so a crafted id cannot put a row on the
+  // list for a store that does not exist — which would then render as
+  // "Store 41207" with counts nobody can explain.
+  const exists = await queryOne<{ id: number; store_name: string }>(
+    `SELECT id, store_name FROM analytics.v_store_directory WHERE id = $1`, [sid]);
+  if (!exists) return { ok: false, error: 'No such store' };
+
+  if (tracked) {
+    await query(`
+      INSERT INTO atlas.store_group_member (group_code, store_id, added_by)
+      VALUES ('TRACKED', $1, $2)
+      ON CONFLICT (group_code, store_id) DO NOTHING
+    `, [sid, a.me.id]);
+  } else {
+    await query(
+      `DELETE FROM atlas.store_group_member WHERE group_code = 'TRACKED' AND store_id = $1`,
+      [sid]);
+  }
+
+  await logChange(sid, a.me.id, tracked ? 'tracking_on' : 'tracking_off',
+    tracked ? `Started tracking ${exists.store_name}`
+            : `Stopped tracking ${exists.store_name} — nothing was deleted`);
+
+  refresh(sid);
+  return { ok: true };
+}

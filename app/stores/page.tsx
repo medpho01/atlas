@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { AlertTriangle, Plus } from 'lucide-react';
 import { requireView } from '@/lib/guard';
+import { canManage } from '@/lib/access';
 import { getSessionUser } from '@/lib/auth';
 import { RoleBlocked } from '@/components/RoleBlocked';
 import { Card, CardBody } from '@/components/ui/Card';
@@ -47,7 +48,7 @@ function isoDaysAgo(days: number): string {
 
 type SP = {
   q?: string; window?: string; from?: string; to?: string;
-  active?: string; tracked?: string; attention?: string;
+  active?: string; tracked?: string; tracking?: string; attention?: string;
   sort?: string; page?: string;
 };
 
@@ -57,6 +58,7 @@ export default async function StoresPage({ searchParams }: { searchParams: SP })
     return <RoleBlocked area="Stores & Orders" detail="accounts, network, operations and admin" />;
   }
   const isAdmin = (await getSessionUser())?.role === 'admin';
+  const canEdit = canManage(gate.user, 'storeOrders');
 
   const win = WINDOWS.find((w) => w.key === searchParams.window)
     ?? WINDOWS.find((w) => w.key === DEFAULT_WINDOW)!;
@@ -67,13 +69,14 @@ export default async function StoresPage({ searchParams }: { searchParams: SP })
 
   const activeOnly = searchParams.active !== '0';
   const trackedOnly = searchParams.tracked === '1';
+  const inTrackingOnly = searchParams.tracking === '1';
   const needsAttention = searchParams.attention === '1';
   const sort: StoreSort = (STORE_SORTS as readonly string[]).includes(searchParams.sort ?? '')
     ? (searchParams.sort as StoreSort) : 'orders';
   const requestedPage = Math.max(1, Math.floor(Number(searchParams.page)) || 1);
 
   const f = { q: searchParams.q?.trim() || undefined, from, to, activeOnly, trackedOnly,
-              needsAttention, sort };
+              inTrackingOnly, needsAttention, sort };
 
   // Counted first so the page can be clamped to one that exists — see the note
   // on the same pattern in [id]/page.tsx.
@@ -101,6 +104,7 @@ export default async function StoresPage({ searchParams }: { searchParams: SP })
       from: searchParams.from, to: searchParams.to,
       active: activeOnly ? undefined : '0',
       tracked: trackedOnly ? '1' : undefined,
+      tracking: inTrackingOnly ? '1' : undefined,
       attention: needsAttention ? '1' : undefined,
       sort: sort === 'orders' ? undefined : sort,
       ...patch,
@@ -229,6 +233,10 @@ export default async function StoresPage({ searchParams }: { searchParams: SP })
           <ChipButton href={link({ active: activeOnly ? '0' : undefined })} active={activeOnly}>
             Active only
           </ChipButton>
+          <ChipButton href={link({ tracking: inTrackingOnly ? undefined : '1' })}
+                      active={inTrackingOnly}>
+            Tracked only
+          </ChipButton>
           <ChipButton href={link({ tracked: trackedOnly ? undefined : '1' })} active={trackedOnly}>
             In the requests queue
           </ChipButton>
@@ -244,7 +252,8 @@ export default async function StoresPage({ searchParams }: { searchParams: SP })
 
         <div className="flex items-center gap-1.5">
           <span className="text-[11px] uppercase tracking-wide text-ink-400 mr-0.5">Sort</span>
-          {([['orders', 'Busiest'], ['delayed', 'Most delayed'],
+          {([['orders', 'Busiest'], ['today', "Today's pile"],
+             ['delayed', 'Most delayed'],
              ['cancelled', 'Most cancelled'], ['turnaround', 'Slowest'],
              ['name', 'A–Z']] as const).map(([k, label]) => (
             <ChipButton key={k} href={link({ sort: k === 'orders' ? undefined : k })}
@@ -277,7 +286,7 @@ export default async function StoresPage({ searchParams }: { searchParams: SP })
               </Link>
             </p>
           ) : (
-            <StoreList rows={rows} />
+            <StoreList rows={rows} canEdit={canEdit} />
           )}
           <Pager
             page={page}

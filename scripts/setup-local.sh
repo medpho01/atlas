@@ -138,23 +138,13 @@ for f in "$ROOT"/sql/init/*.sql; do
   psqlq < "$f" || fail "$base failed"
 done
 
-# Two ordering problems the filename sequence cannot express.
-#
-# 26 drops analytics.v_lab_order_history CASCADE, which takes the order views
-# built by 25 with it — and 26 sorts after 25, so the loop above always left
-# /order-tracking with no views at all on a fresh machine. 26 says in its own
-# header that it must run before 25 and that re-running the pair is safe.
-#
-# 30 then replaces v_order_task with the tracked-store version and adds
-# v_store_queue on top of it. So 25 has to run again for v_request_order, then
-# 30 again to take v_order_task back — and v_store_queue has to go first,
-# because 25 cannot drop a view something else depends on and would abort the
-# whole setup trying.
-psqlq -c "DROP VIEW IF EXISTS analytics.v_store_queue;" >/dev/null
+# 26 drops analytics.v_lab_order_history CASCADE, which takes the two order
+# views built by 25 with it — and 26 sorts after 25, so the loop above always
+# left /order-tracking with no views at all on a fresh machine. 26 says in its
+# own header that it must run before 25 and that re-running the pair is safe;
+# this is the line that makes the filename order stop mattering.
 printf '  %s (again, after 26 cascaded it away)\n' "25_request_orders.sql"
 psqlq < "$ROOT/sql/init/25_request_orders.sql" || fail "25_request_orders.sql failed"
-printf '  %s (again, so it owns v_order_task)\n' "30_store_groups.sql"
-psqlq < "$ROOT/sql/init/30_store_groups.sql" || fail "30_store_groups.sql failed"
 ok "Atlas schema built"
 
 say "Building the analytics views (the ones that read Atlas's own tables)"

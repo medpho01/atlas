@@ -84,6 +84,58 @@ change log.
 
 ---
 
+## The tracked stores, and the two queues
+
+Step one of the spec: *all the data needs to be tracked for the following
+stores*. That list is `atlas.store_group_member` for the group `TRACKED`, and
+the two operational columns on this screen derive from it. A store that is not
+on the list shows a **dash, not a zero** — nothing is being counted for it, and
+a zero would claim otherwise.
+
+The list is managed here. The eye on each row turns tracking on and off, and
+the store's own page has the same control with the counts beside it. Taking a
+store off deletes nothing: its orders, its ledger and its history are
+untouched, and putting it back brings the counts straight back.
+
+### The two queues
+
+S1, S2 … in the spec are the **stores themselves** — "all orders originating
+from S1" means one partner's orders — so both of these are read store by store,
+and every count belongs to a store.
+
+| | |
+|---|---|
+| **Needs a lab** | Appointment from **tomorrow onward**, still on the LabStack placeholder lab (`placeholder_lab_id`, or no lab at all). Nobody has said where it is happening. |
+| **Pickup today** | **Every** appointment today, whichever lab it is at. No history filter — the question today is simply whether each one is happening. |
+
+Cancelled and patient-missed fall out of both: closed is closed.
+
+Within a tracked store this counts **every** order, not only the ones a request
+turned into. A partner's direct orders are still that partner's orders, and on
+the sample data the request-born ones are 15 of 1,085.
+
+`Today's pile` sorts by the appointments today that still have no lab named,
+which is the worst number on the page: it is happening in hours and nobody has
+said where.
+
+### This is not /order-tracking
+
+`/order-tracking` is a different screen with its own three queues, its own
+rules and its own `analytics.v_order_task`. **Nothing in this feature touches
+it.** The views here are separate:
+
+```
+atlas.store_group / store_group_member        which stores are tracked
+  └─ analytics.v_store_tracked_order          their orders, tagged by queue
+       └─ analytics.v_store_queue             one row per store, counts beside it
+```
+
+`atlas.store_tracking` is a third thing again and stays as it is: which
+partners the **requests** queue is for. A store can be tracked here and not
+there.
+
+---
+
 ## Adding and removing a store
 
 ### Why a store added here does not reach the console
@@ -150,11 +202,9 @@ for f in 28_store_orders 29_store_registry 30_store_groups; do
 done
 ```
 
-`30_store_groups.sql` rebuilds `analytics.v_order_task` around the tracked
-stores, so it must be the **last** of the three and must run after
-`25_request_orders.sql` — otherwise the old request-only definition wins and
-order tracking quietly goes back to showing 1.4% of the work. `setup-local.sh`
-encodes the same order.
+`30_store_groups.sql` deliberately does not touch `analytics.v_order_task`, so
+it has no ordering relationship with `25_request_orders.sql` and
+`/order-tracking` is unaffected by any of this.
 
 Idempotent throughout — safe to run twice, and verified over three
 consecutive runs. Between them they create `atlas.order_stage()`, seven

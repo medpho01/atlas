@@ -12,29 +12,27 @@ import { query, queryOne } from './db';
  * what the lab said when somebody called.
  */
 
-export const TASK_KINDS = ['needs_lab', 'pickup_today', 'chase_report'] as const;
+export const TASK_KINDS = ['needs_lab', 'confirm_pickup', 'chase_report'] as const;
 export type TaskKind = (typeof TASK_KINDS)[number];
 
 export const TASK_LABEL: Record<TaskKind, string> = {
   needs_lab: 'Needs a lab',
-  pickup_today: 'Pickup today',
+  confirm_pickup: 'Pickup today',
   chase_report: 'Report outstanding',
 };
 
 /** Why each queue exists, in the words the page uses above the table. */
 export const TASK_BLURB: Record<TaskKind, string> = {
   needs_lab:
-    'Appointments from tomorrow onward that are still on the LabStack placeholder lab — no '
-    + 'real lab has been named. The deadline is the day before the appointment: no lab by '
-    + 'then and the appointment has nobody behind it.',
-  pickup_today:
-    'Every appointment happening today, whichever lab it is at. Not a filtered selection — '
-    + 'the question today is simply whether each one is happening, and it is asked of all '
-    + 'of them.',
+    'Orders still sitting on the placeholder lab. The deadline is the day before the '
+    + 'appointment — no lab by then and the appointment has nobody behind it.',
+  confirm_pickup:
+    'Appointments today at labs with barely any history. Call the centre and confirm the '
+    + 'sample was actually collected — a new lab missing a pickup is how an order fails silently.',
   chase_report:
-    'The appointment has been and gone and no report has come back, whatever state it '
-    + 'stopped in. The clock is 48 hours from the appointment or the last update, whichever '
-    + 'is later. This is the one the customer feels.',
+    'The appointment has been and gone and no report has come back, at labs with barely any '
+    + 'history — whatever state it stopped in. The clock is 48 hours from the appointment or '
+    + 'the last update, whichever is later. This is the one the customer feels.',
 };
 
 export type TaskRow = {
@@ -62,11 +60,6 @@ export type TaskRow = {
   lab_failed: number;
   store_id: number | null;
   store_name: string | null;
-  /** Six-stage grouping, so a pickup row can say whether it is already collected. */
-  stage: string | null;
-  reference_id: string | null;
-  phlebo_name: string | null;
-  phlebo_number: string | null;
   request_id: number | null;
   request_pincode: string | null;
   request_city: string | null;
@@ -107,21 +100,8 @@ export type TaskFilters = {
 
 export type QueueCounts = Record<TaskKind, { total: number; urgent: number; unassigned: number }>;
 
-/**
- * How many tasks are in each queue, and how many of those are pressing.
- *
- * Takes the store selection, because the tab badges sit directly above a table
- * that honours it. Without that they read the whole book while the rows read
- * one partner — and on a screen whose organising idea is "orders originating
- * from store X", the badge is the number somebody would quote.
- */
-export async function getQueueCounts(stores: number[] = []): Promise<QueueCounts> {
-  const params: unknown[] = [];
-  let where = '';
-  if (stores.length) {
-    params.push(stores);
-    where = `WHERE store_id = ANY($${params.length})`;
-  }
+/** How many tasks are in each queue, and how many of those are pressing. */
+export async function getQueueCounts(): Promise<QueueCounts> {
   const rows = await query<{
     kind: TaskKind; total: number; urgent: number; unassigned: number;
   }>(`
@@ -130,13 +110,12 @@ export async function getQueueCounts(stores: number[] = []): Promise<QueueCounts
            count(*) FILTER (WHERE overdue OR days_left <= 0)::int AS urgent,
            count(*) FILTER (WHERE assignee_id IS NULL)::int AS unassigned
     FROM analytics.v_order_task
-    ${where}
     GROUP BY 1
-  `, params);
+  `);
   const empty = { total: 0, urgent: 0, unassigned: 0 };
   return {
     needs_lab: rows.find((r) => r.kind === 'needs_lab') ?? { kind: 'needs_lab', ...empty } as never,
-    pickup_today: rows.find((r) => r.kind === 'pickup_today') ?? { kind: 'pickup_today', ...empty } as never,
+    confirm_pickup: rows.find((r) => r.kind === 'confirm_pickup') ?? { kind: 'confirm_pickup', ...empty } as never,
     chase_report: rows.find((r) => r.kind === 'chase_report') ?? { kind: 'chase_report', ...empty } as never,
   } as QueueCounts;
 }
@@ -262,72 +241,4 @@ export async function getOrderTimeline(orderId: number) {
     LEFT JOIN atlas.order_watch w ON w.order_id = o.id
     WHERE o.id = $1
   `, [orderId]);
-}
-
-// ---------------------------------------------------------------------------
-// The stores being tracked
-// ---------------------------------------------------------------------------
-
-export const TRACKED_GROUP = 'TRACKED';
-
-export type StoreQueue = {
-  store_id: number;
-  store_name: string;
-  city: string | null;
-  active: boolean;
-  added_at: string;
-  added_by: string | null;
-  needs_lab: number;
-  needs_lab_tomorrow: number;
-  needs_lab_overdue: number;
-  pickup_today: number;
-  pickup_no_lab: number;
-  pickup_collected: number;
-  chase_report: number;
-  chase_report_late: number;
-  unassigned: number;
-};
-
-/**
- * One row per tracked store, with its queues beside it.
- *
- * The shape the spec is written in: "all orders originating from store X with
- * appointment today" is a question about one partner, and the first thing
- * somebody needs is which partner has the pile — not a flat list of two
- * hundred orders that happens to be sorted by date.
- */
-export async function getStoreQueues(): Promise<StoreQueue[]> {
-  return query<StoreQueue>(`
-    SELECT store_id, store_name, city, active,
-           added_at::text, added_by,
-           needs_lab, needs_lab_tomorrow, needs_lab_overdue,
-           pickup_today, pickup_no_lab, pickup_collected,
-           chase_report, chase_report_late, unassigned
-    FROM analytics.v_store_queue
-    ORDER BY (pickup_no_lab + needs_lab_overdue) DESC,
-             (needs_lab + pickup_today) DESC,
-             store_name
-  `);
-}
-
-/** How many stores are being tracked, for the empty state. */
-export async function getTrackedStoreCount(): Promise<number> {
-  const row = await queryOne<{ n: number }>(
-    `SELECT atlas.store_group_size($1) AS n`, [TRACKED_GROUP]);
-  return row?.n ?? 0;
-}
-
-/** Every store, with whether it is tracked — for the picker that adds one. */
-export async function getStoreTrackingOptions() {
-  return query<{
-    store_id: number; name: string; city: string | null;
-    tracked: boolean; orders: number;
-  }>(`
-    SELECT d.id AS store_id, d.store_name AS name, d.city,
-           atlas.store_in_group($1, d.id) AS tracked,
-           (SELECT count(*)::int FROM src_local."Order" o WHERE o."storeId" = d.id) AS orders
-    FROM analytics.v_store_directory d
-    WHERE d.active
-    ORDER BY atlas.store_in_group($1, d.id) DESC, d.store_name
-  `, [TRACKED_GROUP]);
 }

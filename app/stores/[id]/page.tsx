@@ -22,6 +22,7 @@ import {
 import { OrdersTable } from './OrdersTable';
 import { StoreProfileForm } from './StoreProfileForm';
 import { RemoveStore } from './RemoveStore';
+import { TrackToggle } from './TrackToggle';
 
 export const dynamic = 'force-dynamic';
 
@@ -292,6 +293,53 @@ export default async function StorePage({
             {trend.length > 1 && <Trend rows={trend} />}
           </CardBody>
         </Card>
+      </div>
+
+      {/* Today's work, before the whole book. These are the two queues from
+          the spec, and they are the only numbers on this page that are about
+          right now rather than about how the partner has been doing. */}
+      <div className="mt-6 rounded-xl border border-ink-150 bg-surface shadow-card
+                      px-5 py-4 flex flex-wrap items-center gap-x-10 gap-y-4">
+        {store.in_tracking ? (
+          <>
+            <div>
+              <div className={`text-2xl font-bold num
+                ${store.needs_lab > 0 ? 'text-ink-900' : 'text-ink-300'}`}>
+                {store.needs_lab}
+              </div>
+              <div className="text-[11px] text-ink-500 mt-0.5">
+                need a lab
+                {store.needs_lab_tomorrow > 0 && ` · ${store.needs_lab_tomorrow} tomorrow`}
+              </div>
+            </div>
+            <div>
+              <div className={`text-2xl font-bold num
+                ${store.pickup_today > 0 ? 'text-ink-900' : 'text-ink-300'}`}>
+                {store.pickup_today}
+              </div>
+              <div className="text-[11px] text-ink-500 mt-0.5">appointments today</div>
+            </div>
+            {store.pickup_no_lab > 0 && (
+              <div>
+                <div className="text-2xl font-bold num text-danger-500">
+                  {store.pickup_no_lab}
+                </div>
+                <div className="text-[11px] text-danger-500 mt-0.5">
+                  today with no lab named
+                </div>
+              </div>
+            )}
+          </>
+        ) : (
+          <p className="text-[13px] text-ink-500 max-w-xl">
+            This store is not tracked, so nothing is being counted for it. Tracking it counts
+            every one of its orders — the ones still without a lab, and the ones happening
+            today.
+          </p>
+        )}
+        <div className="ml-auto">
+          <TrackToggle storeId={id} tracked={store.in_tracking} canEdit={canEdit} />
+        </div>
       </div>
 
       {/* Stage tabs. The counts ignore the stage filter and respect every
