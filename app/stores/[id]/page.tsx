@@ -21,6 +21,7 @@ import {
 } from '@/lib/storeOrders';
 import { OrdersTable } from './OrdersTable';
 import { StoreProfileForm } from './StoreProfileForm';
+import { RemoveStore } from './RemoveStore';
 
 export const dynamic = 'force-dynamic';
 
@@ -129,7 +130,16 @@ export default async function StorePage({
         ]}
         actions={
           <>
-            {!store.active && (
+            {store.source === 'atlas' && (
+              <span
+                className="text-[11px] uppercase tracking-wide rounded border
+                           border-brand-100 bg-brand-50 text-brand-700 px-2 py-1"
+                title="Added in Atlas. LabStack does not know about this partner yet, so the console cannot take an order for them."
+              >
+                Atlas-side
+              </span>
+            )}
+            {!store.active && store.source === 'labstack' && (
               <span className="text-[11px] uppercase tracking-wide rounded border
                                border-ink-200 bg-ink-100 text-ink-500 px-2 py-1">
                 Closed in LabStack
@@ -207,6 +217,21 @@ export default async function StorePage({
                 {store.tracked ? 'Yes' : <span className="text-warn-600">No — its requests are hidden</span>}
               </Field>
               <Field label="On the API">{store.api_enabled ? 'Yes' : 'No'}</Field>
+              {store.source === 'atlas' && store.service_pincodes?.length ? (
+                <Field label="Service coverage">
+                  <span className="num">{store.service_pincodes.slice(0, 12).join(', ')}</span>
+                  {store.service_pincodes.length > 12
+                    && <span className="text-ink-400"> +{store.service_pincodes.length - 12} more</span>}
+                </Field>
+              ) : null}
+              {store.store_note && (
+                <div className="sm:col-span-2">
+                  <dt className="text-[11px] uppercase tracking-wide text-ink-400">
+                    About this partner
+                  </dt>
+                  <dd className="text-ink-700 mt-0.5 whitespace-pre-wrap">{store.store_note}</dd>
+                </div>
+              )}
               {store.coverage_note && (
                 <div className="sm:col-span-2">
                   <dt className="text-[11px] uppercase tracking-wide text-ink-400">Note</dt>
@@ -439,6 +464,15 @@ export default async function StorePage({
           </CardBody>
         </Card>
       </div>
+
+      {isAdmin && (
+        <div className="mt-6">
+          <p className="text-[11px] uppercase tracking-wide text-ink-400 mb-2">
+            Removing this store
+          </p>
+          <RemoveStore storeId={id} storeName={store.name} />
+        </div>
+      )}
 
       <p className="text-[11px] text-ink-400 mt-4 flex items-start gap-1.5 max-w-3xl">
         <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-px" />

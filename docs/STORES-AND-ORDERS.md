@@ -25,9 +25,11 @@ there. So:
 
 | | Where it happens |
 |---|---|
-| Add a store, change its name, address, GST, serviceability | **Console.** Atlas cannot. |
-| Close a partner | **Console.** Atlas cannot. |
+| Change a **console** store's name, address, GST, serviceability | **Console.** Atlas cannot. |
+| Close a partner in LabStack | **Console.** Atlas cannot. |
 | Move an appointment, cancel an order, assign a phlebo | **Console.** Atlas cannot. |
+| Add a store **to Atlas** | Atlas — `atlas.store` |
+| Remove a store from this screen | Atlas — delete (`atlas.store`) or archive (`atlas.store_archive`) |
 | Who runs the account on our side, who to ring, alert thresholds, notes | Atlas — `atlas.store_profile` |
 | Whether the requests queue includes this partner | Atlas — `atlas.store_tracking` |
 | Which orders somebody has decided need a new date | Atlas — `atlas.order_reschedule_flag` |
@@ -82,6 +84,57 @@ change log.
 
 ---
 
+## Adding and removing a store
+
+### Why a store added here does not reach the console
+
+`src_local."Store"` is a **mirror**. `scripts/refresh-data.sh` TRUNCATEs it at
+3 AM and refills it from LabStack. A row inserted there would work all
+afternoon and be gone by morning with nothing to explain it — a partner
+onboarded, worked, and silently lost.
+
+So **Add a store** writes to `atlas.store`, which survives the refresh. The
+store gets an id from 900000 up (LabStack's are a low serial; sharing a
+namespace would eventually put one store's orders under another's name), it
+appears in the list immediately, and it is badged **Atlas-side** everywhere it
+shows. The form says the same thing in as many words: the console cannot take
+an order for that partner until somebody adds them there too.
+
+It captures what the brief asked for — name, location, contact, service
+coverage — plus a note. Duplicate name-and-city is refused and the message
+names the store that already exists.
+
+### Removing means one of two different things
+
+Which one is decided by the data, not by the button, and the confirmation is
+fetched before it is shown:
+
+| | |
+|---|---|
+| Atlas owns it **and** nothing is behind it | **Deleted.** Cannot be undone, so the confirmation asks you to type the store's name. |
+| Anything else — LabStack's, or it has orders | **Archived.** Hidden from this screen; the record and its history are untouched. |
+
+Archiving is the honest form of "remove" for a record Atlas does not own.
+Deleting a store with an order book behind it is not a removal, it is a hole in
+the ledger — `atlas.store_dependencies()` counts what is there and the dialog
+says so ("Behind it: 155 orders, 15 requests").
+
+`removeStore` re-derives the plan on the server rather than trusting what the
+browser was shown: the dialog may have been open a while, and an order can
+arrive in that time.
+
+### Archiving is reversible, and does not break a sync
+
+Archived stores are listed under the table with who archived them, why, and how
+many orders were kept; an admin can put one back.
+
+The API keeps serving an archived store's orders and reports `archived: true`
+rather than 404ing. Archiving is a decision about one screen — an integration
+syncing a partner's book should not break because somebody tidied a list in
+Atlas. A store id that does not exist at all still 404s.
+
+---
+
 ## Deploying this
 
 **`sql/init/` runs once, on a database's first boot.** A host that already
@@ -93,12 +146,14 @@ applied by hand — the same step `20_lab_discovery_ranking.sql` and
 ```bash
 cd ~/atlas && git pull
 docker exec -i atlas-db psql -U atlas -d atlas -v ON_ERROR_STOP=1 -f -   < sql/init/28_store_orders.sql
+docker exec -i atlas-db psql -U atlas -d atlas -v ON_ERROR_STOP=1 -f -   < sql/init/29_store_registry.sql
 ```
 
-Idempotent throughout — safe to run twice. It creates `atlas.order_stage()`,
-three Atlas-owned tables (`store_profile`, `store_change_log`,
-`order_reschedule_flag`), the view `analytics.v_store_order`, and four indexes
-on `src_local."Order"`.
+Idempotent throughout — safe to run twice. Between them they create
+`atlas.order_stage()`, five Atlas-owned tables (`store_profile`,
+`store_change_log`, `order_reschedule_flag`, `store`, `store_archive`), the
+views `analytics.v_store_order` and `analytics.v_store_directory`,
+`atlas.store_dependencies()`, and four indexes on `src_local."Order"`.
 
 Two things it does **not** do, deliberately:
 
@@ -177,21 +232,21 @@ and one global number made both wrong.
 
 Feature key `storeOrders` in `lib/access.ts`.
 
-| Role | Sees it | Can edit the overlay | Can take a store out of the queue |
-|---|---|---|---|
-| admin | yes | yes | **yes** |
-| network_lead | yes | yes | no |
-| accounts | yes | yes | no |
-| network | yes | no | no |
-| operations | yes | no | no |
-| viewer | **no** | no | no |
+| Role | Sees it | Edit the overlay | Flag orders | Add / remove a store | Queue on-off |
+|---|---|---|---|---|---|
+| admin | yes | yes | yes | **yes** | **yes** |
+| network_lead | yes | yes | yes | no | no |
+| accounts | yes | yes | yes | no | no |
+| network | yes | no | no | no | no |
+| operations | yes | no | no | no | no |
+| viewer | **no** | no | no | no | no |
 
 Accounts gets `manage` because the partner relationship is theirs, and the
 writable part of this screen is the account overlay rather than the store
 record. Operations reads it because they answer the calls it is about.
 
-Taking a store out of the requests queue is **admin only**, stricter than the
-rest. It is the one action here that changes what other people see on a screen
+Adding a store, removing one, and taking a store out of the requests queue are
+all **admin only**, stricter than the rest. It is the one action here that changes what other people see on a screen
 they are working, and a wrong click is invisible to the person it affects. It
 is also not a delete: nothing is removed, the orders stay on this page, and the
 queue keeps saying how many requests are hidden.
@@ -248,7 +303,7 @@ GET /api/stores
 
 GET /api/stores/[id]/orders
     ?q= &stage= &from= &to= &delayed=1 &flagged=1 &limit= &offset=
-    → { store_id, rows, total, limit, offset, window: { from, to } }
+    → { store_id, rows, total, limit, offset, archived, window: { from, to } }
 
 GET /api/stores/[id]/export      (same filters; CSV, UTF-8 BOM, max 20,000 rows)
 ```
@@ -265,6 +320,10 @@ GET /api/stores/[id]/export      (same filters; CSV, UTF-8 BOM, max 20,000 rows)
 - A missing store is **404** on both `orders` and `export`. An empty list would
   be indistinguishable from a real store having no orders, which is the
   difference between a quiet day and a broken integration.
+- An **archived** store is not missing. Its orders keep being served and the
+  response carries `archived: true`, because archiving hides a store from one
+  screen and changes nothing about its data — a sync should not break because
+  somebody tidied a list.
 - Bad input is **400** with a sentence: `stage=nonsense` and
   `from=last week` are refused rather than ignored. Silently dropping an
   unknown filter answers a question nobody asked with a full, confident list.

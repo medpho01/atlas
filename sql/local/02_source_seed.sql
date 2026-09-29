@@ -153,35 +153,32 @@ CROSS JOIN LATERAL (SELECT * FROM city_anchor ORDER BY (g * 17) % 10 LIMIT 1 OFF
 -- ---------------------------------------------------------------------------
 -- Stores: the B2B partners orders arrive from.
 -- ---------------------------------------------------------------------------
--- Ten, not eight, and the last two earn their place: store 9 is active with no
--- orders at all and store 10 is closed. Both are states the stores screen has
--- to render — an empty partner must not look like a broken query, and a closed
--- one must stay reachable for the orders it left behind — and with eight
--- identical busy stores neither was ever exercised.
+-- The eight partners the team actually works. The empty-store and
+-- archived-store cases the screen has to render are covered by adding and
+-- removing one on /stores, which is the real path anyway — a fabricated ninth
+-- partner sitting in the list forever was a worse way to test it.
 INSERT INTO "Store" (id, "storeName", "legalName", "storeType", address, locality, city, state,
                      pincode, active, "apiEnabled", "createdAt", "updatedAt", "isDoctor", pocs)
 SELECT g,
        (ARRAY['Riverbend Clinic','Parkview Polyclinic','Trailhead Wellness','Stonegate Care',
-              'Maple Health','Eastfield Clinic','Fernway Medical','Harbourside Care',
-              'Willowmere Health','Oldgate Clinic'])[g],
-       (ARRAY['Riverbend','Parkview','Trailhead','Stonegate','Maple','Eastfield','Fernway',
-              'Harbourside','Willowmere','Oldgate'])[g] || ' Pvt Ltd',
+              'Maple Health','Eastfield Clinic','Fernway Medical','Harbourside Care'])[g],
+       (ARRAY['Riverbend','Parkview','Trailhead','Stonegate','Maple','Eastfield',
+              'Fernway','Harbourside'])[g] || ' Pvt Ltd',
        CASE WHEN g % 3 = 0 THEN 'CLINIC' ELSE 'CORPORATE' END,
        g || ', Partner Avenue', 'Phase ' || g, a.city, a.state,
        lpad((a.pin_base + (g % 8))::text, 6, '0'),
-       (g <> 10), (g % 2 = 0), now() - ((g * 40) || ' days')::interval, now(), (g % 3 = 0),
+       true, (g % 2 = 0), now() - ((g * 40) || ' days')::interval, now(), (g % 3 = 0),
        -- One point of contact each. The console stores these as an array of
        -- objects; the stores screen reads the first.
        ARRAY[jsonb_build_object(
-         'name',  (ARRAY['Asha','Vikram','Meera','Joseph','Nandini','Rahul','Farah','Dev',
-                         'Ila','Samir'])[g] || ' ' ||
-                  (ARRAY['Rao','Nair','Sen','Mathew','Kulkarni','Bose','Sheikh','Menon',
-                         'Chawla','Iyer'])[g],
+         'name',  (ARRAY['Asha','Vikram','Meera','Joseph','Nandini','Rahul','Farah','Dev'])[g]
+                  || ' ' ||
+                  (ARRAY['Rao','Nair','Sen','Mathew','Kulkarni','Bose','Sheikh','Menon'])[g],
          'phone', '98' || lpad((1000000 + g * 37)::text, 8, '0'),
-         'email', 'ops@' || lower((ARRAY['riverbend','parkview','trailhead','stonegate','maple',
-                                         'eastfield','fernway','harbourside','willowmere',
-                                         'oldgate'])[g]) || '.example.test')]
-FROM generate_series(1, 10) g
+         'email', 'ops@' || lower((ARRAY['riverbend','parkview','trailhead','stonegate',
+                                         'maple','eastfield','fernway',
+                                         'harbourside'])[g]) || '.example.test')]
+FROM generate_series(1, 8) g
 CROSS JOIN LATERAL (SELECT * FROM city_anchor ORDER BY (g * 23) % 10 LIMIT 1 OFFSET (g % 10)) a;
 
 -- ---------------------------------------------------------------------------

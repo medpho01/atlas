@@ -2,7 +2,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSessionUser } from '@/lib/auth';
 import { canView } from '@/lib/access';
 import { isStage } from '@/lib/stores';
-import { getStoreOrders, countStoreOrders, storeExists } from '@/lib/storeOrders';
+import {
+  getStoreOrders, countStoreOrders, storeExists, storeIsArchived,
+} from '@/lib/storeOrders';
 import { clamp, badDate, idParam } from '../../params';
 
 export const dynamic = 'force-dynamic';
@@ -57,8 +59,9 @@ export async function GET(
   const limit = clamp(sp.get('limit'), 50, 1, 500);
   const offset = clamp(sp.get('offset'), 0, 0, 1_000_000);
 
-  const [exists, rows, total] = await Promise.all([
+  const [exists, archived, rows, total] = await Promise.all([
     storeExists(storeId),
+    storeIsArchived(storeId),
     getStoreOrders(storeId, { ...f, limit, offset }),
     countStoreOrders(storeId, f),
   ]);
@@ -72,6 +75,10 @@ export async function GET(
 
   return NextResponse.json({
     store_id: storeId, rows, total, limit, offset,
+    // Archiving hides a store from the screen and changes nothing about its
+    // data, so the orders keep being served and the state is reported instead.
+    // A sync that broke because somebody tidied a list would be a bad trade.
+    archived,
     window: { from: f.from ?? null, to: f.to ?? null },
   });
 }

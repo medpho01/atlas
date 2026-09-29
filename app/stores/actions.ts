@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache';
 import { getSessionUser, type User } from '@/lib/auth';
 import { query, queryOne } from '@/lib/db';
 import { canManage } from '@/lib/access';
+import { getStoreDependencies, getStoreSource } from '@/lib/storeOrders';
 
 /**
  * Everything this screen can write.
@@ -338,4 +339,244 @@ export async function clearRescheduleFlags(id: number, ids: number[]): Promise<R
 
   refresh(sid);
   return { ok: true, cleared: done.length };
+}
+
+// ---------------------------------------------------------------------------
+// Adding and removing a store
+// ---------------------------------------------------------------------------
+
+/**
+ * Admin only, both of them.
+ *
+ * Adding a partner and taking one off the screen are the two actions here that
+ * change what everybody else sees, and a wrong one is invisible to the people
+ * it affects. Same bar as taking a store out of the requests queue.
+ */
+async function admin(): Promise<{ me: User } | { error: string }> {
+  const me = await getSessionUser();
+  if (!me) return { error: 'Session expired. Sign in again.' };
+  if (me.role !== 'admin') return { error: 'Only an admin can add or remove a store' };
+  return { me };
+}
+
+export type NewStore = {
+  store_name: string;
+  legal_name: string;
+  store_type: string;
+  address: string;
+  locality: string;
+  city: string;
+  state: string;
+  pincode: string;
+  contact_name: string;
+  contact_phone: string;
+  contact_email: string;
+  /** Comma or space separated on the way in; an array on the way to the table. */
+  service_pincodes: string;
+  note: string;
+};
+
+/** Six digits, not starting with zero. The same rule the column CHECKs. */
+const PINCODE = /^[1-9][0-9]{5}$/;
+
+function pincodeList(raw: string): { ok: string[] } | { bad: string } {
+  const parts = (raw ?? '').split(/[\s,;]+/).map((x) => x.trim()).filter(Boolean);
+  const seen = new Set<string>();
+  for (const p of parts) {
+    if (!PINCODE.test(p)) return { bad: p };
+    seen.add(p);
+  }
+  // A coverage list of four hundred pincodes is a paste that went wrong.
+  if (seen.size > 200) return { bad: `${seen.size} pincodes, which is more than a store serves` };
+  return { ok: [...seen] };
+}
+
+/**
+ * Add a store.
+ *
+ * It goes in atlas.store, not in src_local."Store". The mirror is TRUNCATEd
+ * and refilled from LabStack every night, so a row written there would work
+ * all afternoon and be gone by morning with nothing to explain it — a partner
+ * onboarded, worked, and silently lost. This table survives the refresh, and
+ * the screen marks the store as Atlas-side until the console has it too.
+ */
+export async function createStore(input: NewStore): Promise<R & { id?: number }> {
+  const a = await admin();
+  if ('error' in a) return { ok: false, error: a.error };
+
+  const name = trimOrNull(input.store_name, 160);
+  if (!name) return { ok: false, error: 'A store needs a name' };
+
+  const pincode = trimOrNull(input.pincode, 10);
+  if (pincode && !PINCODE.test(pincode)) {
+    return { ok: false, error: `"${pincode}" is not a pincode` };
+  }
+
+  const email = trimOrNull(input.contact_email, 200);
+  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return { ok: false, error: 'That email address does not look right' };
+  }
+
+  const cover = pincodeList(input.service_pincodes ?? '');
+  if ('bad' in cover) {
+    return { ok: false, error: `Service coverage: ${cover.bad} is not a pincode` };
+  }
+
+  const city = trimOrNull(input.city, 80);
+
+  // Checked before inserting so the answer is a sentence rather than a unique
+  // violation, and so it can name the store that is already there.
+  const clash = await queryOne<{ id: number; source: string }>(`
+    SELECT id, source FROM analytics.v_store_directory
+     WHERE lower(btrim(store_name)) = lower($1)
+       AND lower(COALESCE(btrim(city), '')) = lower(COALESCE($2, ''))
+     LIMIT 1
+  `, [name, city]);
+  if (clash) {
+    return {
+      ok: false,
+      error: `${name}${city ? ` in ${city}` : ''} is already here as store ${clash.id}`
+        + `${clash.source === 'labstack' ? ' (from the console)' : ''}`,
+    };
+  }
+
+  const row = await queryOne<{ id: number }>(`
+    INSERT INTO atlas.store
+      (store_name, legal_name, store_type, address, locality, city, state, pincode,
+       contact_name, contact_phone, contact_email, service_pincodes, note,
+       created_by, updated_by)
+    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$14)
+    RETURNING id
+  `, [
+    name,
+    trimOrNull(input.legal_name, 160),
+    trimOrNull(input.store_type, 40),
+    trimOrNull(input.address, 300),
+    trimOrNull(input.locality, 120),
+    city,
+    trimOrNull(input.state, 80),
+    pincode,
+    trimOrNull(input.contact_name, 120),
+    trimOrNull(input.contact_phone, 40),
+    email,
+    cover.ok.length ? cover.ok : null,
+    trimOrNull(input.note, 2000),
+    a.me.id,
+  ]);
+
+  if (!row) return { ok: false, error: 'The store was not created' };
+
+  await logChange(row.id, a.me.id, 'store_added',
+    `Added ${name}${city ? ` (${city})` : ''}`,
+    { name, city, pincode, service_pincodes: cover.ok, source: 'atlas' });
+
+  revalidatePath('/stores');
+  return { ok: true, id: row.id };
+}
+
+export type RemovalPlan = {
+  /** What removing would actually do, decided by the data and not by the click. */
+  mode: 'delete' | 'archive';
+  name: string;
+  atlasOwned: boolean;
+  orders: number;
+  requests: number;
+  flags: number;
+};
+
+/**
+ * What would happen if this store were removed, without removing it.
+ *
+ * The screen asks first so the confirmation can state the true consequence. A
+ * store Atlas owns with nothing behind it really is deleted; anything else is
+ * archived, because Atlas cannot delete a LabStack record, and deleting one
+ * with orders behind it would leave the ledger pointing at nothing.
+ */
+export async function planStoreRemoval(
+  id: number,
+): Promise<{ ok: true; plan: RemovalPlan } | { ok: false; error: string }> {
+  const a = await admin();
+  if ('error' in a) return { ok: false, error: a.error };
+  const sid = storeId(id);
+  if (!sid) return { ok: false, error: 'Bad store' };
+
+  const src = await getStoreSource(sid);
+  if (!src) return { ok: false, error: 'No such store' };
+  const dep = await getStoreDependencies(sid);
+
+  const clean = dep.orders === 0 && dep.requests === 0 && dep.flags === 0;
+  return {
+    ok: true,
+    plan: {
+      mode: src.atlas_owned && clean ? 'delete' : 'archive',
+      name: src.name,
+      atlasOwned: src.atlas_owned,
+      orders: dep.orders,
+      requests: dep.requests,
+      flags: dep.flags,
+    },
+  };
+}
+
+/**
+ * Remove a store.
+ *
+ * Re-derives the plan rather than trusting the one the browser was shown: the
+ * confirmation may have been on screen for a while, and an order can arrive in
+ * that time. Deleting a store that acquired one between the dialog and the
+ * click is exactly the race worth closing.
+ */
+export async function removeStore(id: number, reason: string): Promise<R & { mode?: string }> {
+  const a = await admin();
+  if ('error' in a) return { ok: false, error: a.error };
+  const sid = storeId(id);
+  if (!sid) return { ok: false, error: 'Bad store' };
+
+  const src = await getStoreSource(sid);
+  if (!src) return { ok: false, error: 'No such store' };
+
+  const why = trimOrNull(reason, 400);
+  if (!why) return { ok: false, error: 'Say why this store is being removed' };
+
+  const dep = await getStoreDependencies(sid);
+  const clean = dep.orders === 0 && dep.requests === 0 && dep.flags === 0;
+
+  if (src.atlas_owned && clean) {
+    await query(`DELETE FROM atlas.store WHERE id = $1`, [sid]);
+    await logChange(sid, a.me.id, 'store_deleted',
+      `Deleted ${src.name} — nothing was behind it`, { name: src.name, reason: why });
+    revalidatePath('/stores');
+    return { ok: true, mode: 'delete' };
+  }
+
+  await query(`
+    INSERT INTO atlas.store_archive (store_id, reason, archived_by)
+    VALUES ($1, $2, $3)
+    ON CONFLICT (store_id) DO UPDATE
+      SET reason = EXCLUDED.reason, archived_by = EXCLUDED.archived_by, archived_at = now()
+  `, [sid, why, a.me.id]);
+
+  await logChange(sid, a.me.id, 'store_archived',
+    `Archived ${src.name} — ${dep.orders} order(s) and ${dep.requests} request(s) stay in the ledger`,
+    { name: src.name, reason: why, ...dep, source: src.source });
+
+  revalidatePath('/stores');
+  revalidatePath(`/stores/${sid}`);
+  return { ok: true, mode: 'archive' };
+}
+
+/** Put an archived store back on the screen. */
+export async function restoreStore(id: number): Promise<R> {
+  const a = await admin();
+  if ('error' in a) return { ok: false, error: a.error };
+  const sid = storeId(id);
+  if (!sid) return { ok: false, error: 'Bad store' };
+
+  const gone = await query(
+    `DELETE FROM atlas.store_archive WHERE store_id = $1 RETURNING store_id`, [sid]);
+  if (gone.length === 0) return { ok: false, error: 'That store is not archived' };
+
+  await logChange(sid, a.me.id, 'store_restored', 'Put back on Stores & Orders');
+  revalidatePath('/stores');
+  return { ok: true };
 }

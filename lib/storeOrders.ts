@@ -106,6 +106,9 @@ export type StoreRow = {
   active: boolean;
   tracked: boolean;
   api_enabled: boolean;
+  /** 'labstack' (the console's, read-only here) or 'atlas' (added on this screen). */
+  source: 'labstack' | 'atlas';
+  atlas_owned: boolean;
   poc_name: string | null;
   poc_phone: string | null;
   poc_email: string | null;
@@ -130,8 +133,8 @@ export type StoreRow = {
 };
 
 const STORE_ORDER_BY: Record<StoreSort, string> = {
-  orders: 'o.total DESC NULLS LAST, s."storeName"',
-  name: 's."storeName"',
+  orders: 'o.total DESC NULLS LAST, s.store_name',
+  name: 's.store_name',
   delayed: 'o.delayed DESC NULLS LAST, o.total DESC NULLS LAST',
   cancelled: 'o.cancellation_rate DESC NULLS LAST, o.total DESC NULLS LAST',
   turnaround: 'o.avg_turnaround_hours DESC NULLS LAST, o.total DESC NULLS LAST',
@@ -143,9 +146,9 @@ function storeWhere(f: StoreFilters, params: unknown[]): string {
   if (f.q) {
     params.push(`%${f.q}%`);
     const p = `$${params.length}`;
-    where.push(`(s."storeName" ILIKE ${p} OR s.city ILIKE ${p}
+    where.push(`(s.store_name ILIKE ${p} OR s.city ILIKE ${p}
                  OR s.state ILIKE ${p} OR s.pincode ILIKE ${p}
-                 OR s."legalName" ILIKE ${p})`);
+                 OR s.legal_name ILIKE ${p})`);
   }
   if (f.activeOnly) where.push('s.active');
   if (f.trackedOnly) where.push('atlas.store_is_tracked(s.id)');
@@ -205,18 +208,16 @@ export async function getStoreRows(f: StoreFilters = {}): Promise<StoreRow[]> {
 
   return query<StoreRow>(`
     SELECT s.id                       AS store_id,
-           COALESCE(NULLIF(btrim(s."storeName"), ''), 'Store ' || s.id) AS name,
-           s."legalName"              AS legal_name,
-           s."storeType"              AS store_type,
+           s.store_name               AS name,
+           s.legal_name, s.store_type,
            s.city, s.state, s.pincode, s.address,
-           COALESCE(s.active, false)      AS active,
+           s.active,
            atlas.store_is_tracked(s.id)   AS tracked,
-           COALESCE(s."apiEnabled", false) AS api_enabled,
-           -- The console keeps contacts as an array of objects and the first
-           -- is the one it shows, so that is the one we show.
-           s.pocs[1] ->> 'name'       AS poc_name,
-           s.pocs[1] ->> 'phone'      AS poc_phone,
-           s.pocs[1] ->> 'email'      AS poc_email,
+           s.api_enabled,
+           s.source, s.atlas_owned,
+           s.contact_name             AS poc_name,
+           s.contact_phone            AS poc_phone,
+           s.contact_email            AS poc_email,
            ou.name                    AS ops_owner_name,
            COALESCE(o.total, 0)       AS total,
            COALESCE(o.pending, 0)     AS pending,
@@ -232,7 +233,7 @@ export async function getStoreRows(f: StoreFilters = {}): Promise<StoreRow[]> {
            o.cancellation_rate::float8       AS cancellation_rate,
            o.last_order_at,
            COALESCE(o.pending, 0) >= atlas.store_pending_limit(s.id) AS pending_over_limit
-    FROM src_local."Store" s
+    FROM analytics.v_store_directory s
     LEFT JOIN atlas.store_profile sp ON sp.store_id = s.id
     LEFT JOIN atlas.users ou ON ou.id = sp.ops_owner_id
     ${stats}
@@ -250,14 +251,14 @@ export async function countStores(f: StoreFilters = {}): Promise<number> {
   if (!f.needsAttention) {
     const where = storeWhere(f, params);
     const row = await queryOne<{ n: number }>(
-      `SELECT count(*)::int AS n FROM src_local."Store" s WHERE ${where}`, params);
+      `SELECT count(*)::int AS n FROM analytics.v_store_directory s WHERE ${where}`, params);
     return row?.n ?? 0;
   }
   const stats = storeStatsSql(params, f);
   const where = storeWhere(f, params);
   const row = await queryOne<{ n: number }>(`
     SELECT count(*)::int AS n
-    FROM src_local."Store" s
+    FROM analytics.v_store_directory s
     ${stats}
     WHERE ${where} AND (COALESCE(o.delayed, 0) > 0 OR COALESCE(o.flagged, 0) > 0)
   `, params);
@@ -274,12 +275,12 @@ export async function getStoreOverview(f: StoreFilters = {}) {
     pending: number; cancelled: number;
     avg_turnaround_hours: number | null;
   }>(`
-    SELECT (SELECT count(*)::int FROM src_local."Store")                    AS stores,
-           (SELECT count(*)::int FROM src_local."Store" WHERE active)       AS active_stores,
+    SELECT (SELECT count(*)::int FROM analytics.v_store_directory)          AS stores,
+           (SELECT count(*)::int FROM analytics.v_store_directory WHERE active) AS active_stores,
            -- Active, tracked, and nothing at all in the window. The one thing
            -- an orders table can never show you is the partner who stopped
            -- sending any.
-           (SELECT count(*)::int FROM src_local."Store" s
+           (SELECT count(*)::int FROM analytics.v_store_directory s
              WHERE s.active AND atlas.store_is_tracked(s.id)
                AND NOT EXISTS (SELECT 1 FROM analytics.v_store_order v
                                 WHERE v.store_id = s.id${win}))            AS quiet_stores,
@@ -437,6 +438,8 @@ export type StoreDetail = StoreRow & {
   profile_updated_by: string | null;
   mou_end_date: string | null;
   created_at: string | null;
+  service_pincodes: string[] | null;
+  store_note: string | null;
 };
 
 export async function getStoreDetail(
@@ -447,18 +450,18 @@ export async function getStoreDetail(
   params.push(storeId);
   return queryOne<StoreDetail>(`
     SELECT s.id                       AS store_id,
-           COALESCE(NULLIF(btrim(s."storeName"), ''), 'Store ' || s.id) AS name,
-           s."legalName"              AS legal_name,
-           s."storeType"              AS store_type,
+           s.store_name               AS name,
+           s.legal_name, s.store_type,
            s.city, s.state, s.pincode, s.address,
-           COALESCE(s.active, false)      AS active,
+           s.active,
            atlas.store_is_tracked(s.id)   AS tracked,
-           COALESCE(s."apiEnabled", false) AS api_enabled,
-           s.pocs[1] ->> 'name'       AS poc_name,
-           s.pocs[1] ->> 'phone'      AS poc_phone,
-           s.pocs[1] ->> 'email'      AS poc_email,
-           (s."mouEndDate" AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata')::text AS mou_end_date,
-           (s."createdAt"  AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata')::text AS created_at,
+           s.api_enabled,
+           s.source, s.atlas_owned, s.service_pincodes, s.note AS store_note,
+           s.contact_name             AS poc_name,
+           s.contact_phone            AS poc_phone,
+           s.contact_email            AS poc_email,
+           NULL::text                 AS mou_end_date,
+           s.created_at::text         AS created_at,
            sp.ops_owner_id,
            ou.name                    AS ops_owner_name,
            sp.ops_contact_name, sp.ops_contact_phone, sp.ops_contact_email,
@@ -481,7 +484,7 @@ export async function getStoreDetail(
            o.cancellation_rate::float8       AS cancellation_rate,
            o.last_order_at,
            COALESCE(o.pending, 0) >= atlas.store_pending_limit(s.id) AS pending_over_limit
-    FROM src_local."Store" s
+    FROM analytics.v_store_directory s
     LEFT JOIN atlas.store_profile sp ON sp.store_id = s.id
     LEFT JOIN atlas.users ou ON ou.id = sp.ops_owner_id
     LEFT JOIN atlas.users pu ON pu.id = sp.updated_by
@@ -490,10 +493,29 @@ export async function getStoreDetail(
   `, params);
 }
 
-/** Whether a store id is real, so "no orders" and "no store" can be told apart. */
+/**
+ * Whether a store id is real, so "no orders" and "no store" can be told apart.
+ *
+ * Deliberately NOT read from analytics.v_store_directory, which excludes
+ * archived stores. Archiving is a decision about one screen; the store and its
+ * orders are untouched, and an integration syncing a partner's book should not
+ * start 404ing because somebody tidied the list in Atlas. The endpoint reports
+ * the archived state instead and keeps serving the data.
+ */
 export async function storeExists(storeId: number): Promise<boolean> {
-  const row = await queryOne<{ id: number }>(
-    `SELECT id FROM src_local."Store" WHERE id = $1`, [storeId]);
+  const row = await queryOne<{ id: number }>(`
+    SELECT id FROM src_local."Store" WHERE id = $1
+    UNION ALL
+    SELECT id FROM atlas.store WHERE id = $1
+    LIMIT 1
+  `, [storeId]);
+  return row != null;
+}
+
+/** Whether a store has been taken off Stores & Orders. */
+export async function storeIsArchived(storeId: number): Promise<boolean> {
+  const row = await queryOne<{ store_id: number }>(
+    `SELECT store_id FROM atlas.store_archive WHERE store_id = $1`, [storeId]);
   return row != null;
 }
 
@@ -537,5 +559,66 @@ export async function getOpsOwners() {
     SELECT id, name, role FROM atlas.users
     WHERE active AND role IN ('admin', 'network_lead', 'network', 'accounts', 'operations')
     ORDER BY name
+  `);
+}
+
+// ---------------------------------------------------------------------------
+// Adding and removing
+// ---------------------------------------------------------------------------
+
+export type StoreDependencies = {
+  orders: number; requests: number; flags: number; has_profile: boolean;
+};
+
+/**
+ * What sits behind a store, asked before offering to remove it.
+ *
+ * "Remove store" with an order book behind it is not a removal, it is a hole
+ * in the ledger — so the screen shows the counts and offers to archive
+ * instead, rather than discovering the problem through a foreign key.
+ */
+export async function getStoreDependencies(storeId: number): Promise<StoreDependencies> {
+  const row = await queryOne<{ orders: string; requests: string; flags: string; has_profile: boolean }>(
+    `SELECT * FROM atlas.store_dependencies($1)`, [storeId]);
+  return {
+    orders: Number(row?.orders ?? 0),
+    requests: Number(row?.requests ?? 0),
+    flags: Number(row?.flags ?? 0),
+    has_profile: row?.has_profile ?? false,
+  };
+}
+
+/** Where a store came from, which decides what may be done to it. */
+export async function getStoreSource(
+  storeId: number,
+): Promise<{ source: 'labstack' | 'atlas'; atlas_owned: boolean; name: string } | null> {
+  return queryOne(
+    `SELECT source, atlas_owned, store_name AS name
+       FROM analytics.v_store_directory WHERE id = $1`, [storeId]);
+}
+
+/**
+ * Stores hidden from the screen, so removing one is a door that opens both
+ * ways. Reads the archive directly rather than the directory view, which by
+ * definition excludes them.
+ */
+export async function getArchivedStores() {
+  return query<{
+    store_id: number; name: string; city: string | null; source: string;
+    reason: string | null; archived_at: string; archived_by: string | null;
+    orders: number;
+  }>(`
+    SELECT a.store_id,
+           COALESCE(NULLIF(btrim(ls."storeName"), ''), ats.store_name, 'Store ' || a.store_id) AS name,
+           COALESCE(ls.city, ats.city)                    AS city,
+           CASE WHEN ats.id IS NOT NULL THEN 'atlas' ELSE 'labstack' END AS source,
+           a.reason, a.archived_at::text, u.name AS archived_by,
+           (SELECT count(*)::int FROM analytics.v_store_order v
+             WHERE v.store_id = a.store_id)               AS orders
+    FROM atlas.store_archive a
+    LEFT JOIN src_local."Store" ls ON ls.id = a.store_id
+    LEFT JOIN atlas.store       ats ON ats.id = a.store_id
+    LEFT JOIN atlas.users       u   ON u.id = a.archived_by
+    ORDER BY a.archived_at DESC
   `);
 }

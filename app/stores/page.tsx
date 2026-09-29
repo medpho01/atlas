@@ -1,6 +1,7 @@
 import Link from 'next/link';
-import { AlertTriangle } from 'lucide-react';
+import { AlertTriangle, Plus } from 'lucide-react';
 import { requireView } from '@/lib/guard';
+import { getSessionUser } from '@/lib/auth';
 import { RoleBlocked } from '@/components/RoleBlocked';
 import { Card, CardBody } from '@/components/ui/Card';
 import { PageHeader } from '@/components/ui/PageHeader';
@@ -9,9 +10,11 @@ import { ChipButton } from '@/components/ui/Toggle';
 import { Pager } from '@/components/ui/Pager';
 import { humanHours } from '@/lib/stores';
 import {
-  getStoreRows, countStores, getStoreOverview, STORE_SORTS, type StoreSort,
+  getStoreRows, countStores, getStoreOverview, getArchivedStores,
+  STORE_SORTS, type StoreSort,
 } from '@/lib/storeOrders';
 import { StoreList } from './StoreList';
+import { ArchivedStores } from './ArchivedStores';
 import { StoreSearch } from './StoreSearch';
 
 export const dynamic = 'force-dynamic';
@@ -53,6 +56,7 @@ export default async function StoresPage({ searchParams }: { searchParams: SP })
   if (gate.blocked) {
     return <RoleBlocked area="Stores & Orders" detail="accounts, network, operations and admin" />;
   }
+  const isAdmin = (await getSessionUser())?.role === 'admin';
 
   const win = WINDOWS.find((w) => w.key === searchParams.window)
     ?? WINDOWS.find((w) => w.key === DEFAULT_WINDOW)!;
@@ -77,9 +81,10 @@ export default async function StoresPage({ searchParams }: { searchParams: SP })
   const lastPage = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const page = Math.min(requestedPage, lastPage);
 
-  const [rows, overview] = await Promise.all([
+  const [rows, overview, archived] = await Promise.all([
     getStoreRows({ ...f, limit: PAGE_SIZE, offset: (page - 1) * PAGE_SIZE }),
     getStoreOverview({ from, to }),
+    getArchivedStores(),
   ]);
 
   /**
@@ -122,6 +127,17 @@ export default async function StoresPage({ searchParams }: { searchParams: SP })
         title="Stores & Orders"
         subtitle="Every partner, and the whole book of orders behind each one."
         actions={
+          <>
+          {isAdmin && (
+            <Link
+              href="/stores/new"
+              className="inline-flex items-center gap-1.5 rounded-md bg-brand-600 px-3 py-1.5
+                         text-xs font-medium text-white hover:bg-brand-700"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              Add a store
+            </Link>
+          )}
           <InfoTip
             title="Stores & Orders"
             width={380}
@@ -143,11 +159,13 @@ export default async function StoresPage({ searchParams }: { searchParams: SP })
             drives="Answer a partner's call without opening the console, and notice the store whose orders are quietly stalling before they do."
             notes={
               <>
-                Read-only on LabStack. Atlas never writes a store or an order — what it owns
-                here is the account overlay, the reschedule flags and the change log.
+                Read-only on LabStack. A store added here is Atlas&apos;s own and is marked as
+                such; removing one deletes it only if Atlas owns it and nothing is behind it,
+                and otherwise archives it.
               </>
             }
           />
+          </>
         }
       />
 
@@ -272,13 +290,16 @@ export default async function StoresPage({ searchParams }: { searchParams: SP })
         </CardBody>
       </Card>
 
+      <ArchivedStores rows={archived} canRestore={isAdmin} />
+
       <p className="text-[11px] text-ink-400 mt-3 flex items-start gap-1.5 max-w-3xl">
         <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-px" />
         <span>
-          Store records and appointments belong to LabStack and Atlas reads them without
-          writing. Adding, editing or closing a store, and moving an appointment, are console
-          operations — what can be changed here is who runs the account, when it raises an
-          alert, and which orders somebody has marked as needing a new date.
+          Orders and the console&apos;s own store records belong to LabStack, and Atlas reads
+          them without writing — editing a partner&apos;s address or moving an appointment
+          happens there. A store added here is Atlas&apos;s own and is marked as such; removing
+          one deletes it only if Atlas owns it and nothing is behind it, and otherwise archives
+          it so the orders stay in the ledger.
         </span>
       </p>
     </div>
