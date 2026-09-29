@@ -4,6 +4,33 @@ import { SortableTable, SortableColumn } from '@/components/ui/SortableTable';
 import { Pill } from '@/components/ui/Toggle';
 import { HealthBadge } from '@/components/HealthBadge';
 
+/**
+ * An MOU end date, formatted the same on both sides of hydration.
+ *
+ * `toLocaleDateString()` with no arguments uses the runtime's locale, and the
+ * server's is not the browser's — Node rendered 29/9/2027 while Chrome rendered
+ * 9/29/2027, React saw the mismatch and threw away the server HTML for the
+ * whole table. Naming the locale and the fields fixes it, and matches how every
+ * other date in Atlas is written.
+ *
+ * Only the date part is parsed. These are timestamps, and letting the browser
+ * apply its own offset to one moves it across midnight for anyone west of the
+ * server — a contract that ends on the 1st reading as the 30th.
+ */
+function mouDate(v: string | Date | null | undefined): string {
+  if (!v) return '—';
+  // Either shape. The query sends text, but a Date survives the boundary if a
+  // caller forgets the cast, and rendering a dash over a real contract date is
+  // worse than the formatting problem this function exists to solve.
+  const iso = v instanceof Date
+    ? `${v.getFullYear()}-${String(v.getMonth() + 1).padStart(2, '0')}-${String(v.getDate()).padStart(2, '0')}`
+    : String(v).slice(0, 10);
+  const d = new Date(`${iso}T00:00:00`);
+  return Number.isNaN(d.getTime())
+    ? '—'
+    : d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
+}
+
 type LabRow = any;
 type ProvRow = any;
 
@@ -52,7 +79,7 @@ export function LabsDirTable({ rows }: { rows: LabRow[] }) {
           <td className="num">{l.orders_l30d}</td>
           <td className="num">{l.cancel_pct}%</td>
           <td><HealthBadge score={l.health_score} /></td>
-          <td className="text-[11px] text-ink-500">{l.mou_end_date ? new Date(l.mou_end_date).toLocaleDateString() : '—'}</td>
+          <td className="text-[11px] text-ink-500">{mouDate(l.mou_end_date)}</td>
           <td>{l.active ? <Pill tone="good">Active</Pill> : <Pill tone="neutral">Inactive</Pill>}</td>
         </tr>
       )}

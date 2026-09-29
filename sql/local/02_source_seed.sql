@@ -26,7 +26,8 @@ TRUNCATE "Lab", "Chain", "Provider", "ProviderType", "Pharmacy", "Store",
          "PincodeToLatLong", "User", "Profile", "Order", "Request",
          "Master", "Package", "PackagesOnLab", "DOS", "_MasterToPackage",
          "_MasterToRequest", "_PackageToRequest", "PackagesOnStore",
-         "LabsOnStore", "Appointment", "PharmaOrder";
+         "LabsOnStore", "Appointment", "PharmaOrder",
+         "LabDepartment", "SampleType";
 
 -- ---------------------------------------------------------------------------
 -- Geography. Ten real cities, a made-up block of pincodes around each.
@@ -416,6 +417,42 @@ SELECT g, 'LS-M-' || lpad(g::text, 4, '0'),
        CASE WHEN g % 5 = 0 THEN ARRAY['Sub A', 'Sub B'] ELSE NULL END,
        now() - interval '2 years', now()
 FROM generate_series(1, 60) g;
+
+-- ---------------------------------------------------------------------------
+-- Departments and sample types.
+--
+-- Neither table was seeded and neither id was set on Master, so the department
+-- and sample columns on /catalogue/tests were blank on every machine and the
+-- department filter had nothing to filter. That is how a query asking for a
+-- column that does not exist — LabDepartment has `name`, not `department` —
+-- survived: the only page that would have thrown was the one nobody could see
+-- working.
+--
+-- Same shape as the request-item and store-order gaps: the rows existed and
+-- the link between them did not.
+-- ---------------------------------------------------------------------------
+INSERT INTO "LabDepartment" (id, name) VALUES
+  (1, 'Biochemistry'), (2, 'Haematology'), (3, 'Microbiology'),
+  (4, 'Serology'), (5, 'Clinical Pathology'), (6, 'Immunology');
+
+INSERT INTO "SampleType" (id, "sampleType") VALUES
+  (1, 'Serum'), (2, 'Plasma'), (3, 'Whole Blood'),
+  (4, 'Urine'), (5, 'Stool'), (6, 'Swab');
+
+-- Assigned by name where the name implies one, and spread deterministically
+-- otherwise, so two developers get the same counts.
+UPDATE "Master" m SET
+  "labDepartment_id" = CASE
+    WHEN m.name LIKE 'Complete Blood Count%' THEN 2
+    WHEN m.name LIKE 'Urine Routine%'        THEN 5
+    WHEN m.name LIKE 'CRP%'                  THEN 4
+    ELSE 1 + (m.id % 6)
+  END,
+  "sampleType_id" = CASE
+    WHEN m.name LIKE 'Urine Routine%'        THEN 4
+    WHEN m.name LIKE 'Complete Blood Count%' THEN 3
+    ELSE 1 + (m.id % 3)
+  END;
 
 INSERT INTO "Package" (id, "lsId", "packageName", active, "isCustom", "orderTypes",
                        "defaultTat", "createdAt", "updatedAt")
