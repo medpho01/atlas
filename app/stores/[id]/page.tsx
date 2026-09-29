@@ -23,6 +23,7 @@ import { OrdersTable } from './OrdersTable';
 import { StoreProfileForm } from './StoreProfileForm';
 import { RemoveStore } from './RemoveStore';
 import { TrackToggle } from './TrackToggle';
+import { MissingSchema, missingRelation } from '../MissingSchema';
 
 export const dynamic = 'force-dynamic';
 
@@ -68,18 +69,33 @@ export default async function StorePage({
   // "Page 9999 of 23" — which says the filter found nothing, when what happened
   // is that the URL was stale or somebody typed it. It costs one extra round
   // trip on a query that runs in two milliseconds.
-  const matching = await countStoreOrders(id, f);
-  const lastPage = Math.max(1, Math.ceil(matching / PAGE_SIZE));
-  const page = Math.min(requestedPage, lastPage);
-
-  const [store, rows, facets, trend, log, owners] = await Promise.all([
-    getStoreDetail(id),
-    getStoreOrders(id, { ...f, limit: PAGE_SIZE, offset: (page - 1) * PAGE_SIZE }),
-    getStageFacets(id, f),
-    getStoreTrend(id, 6),
-    showLog ? getStoreChangeLog(id) : Promise.resolve([]),
-    getOpsOwners(),
-  ]);
+  // See the note in ../page.tsx: without this feature's SQL these all throw and
+  // the page renders blank, which is the worst thing it could do.
+  let matching: number;
+  let page: number;
+  let store: Awaited<ReturnType<typeof getStoreDetail>>;
+  let rows: Awaited<ReturnType<typeof getStoreOrders>>;
+  let facets: Awaited<ReturnType<typeof getStageFacets>>;
+  let trend: Awaited<ReturnType<typeof getStoreTrend>>;
+  let log: Awaited<ReturnType<typeof getStoreChangeLog>>;
+  let owners: Awaited<ReturnType<typeof getOpsOwners>>;
+  try {
+    matching = await countStoreOrders(id, f);
+    const lastPage = Math.max(1, Math.ceil(matching / PAGE_SIZE));
+    page = Math.min(requestedPage, lastPage);
+    [store, rows, facets, trend, log, owners] = await Promise.all([
+      getStoreDetail(id),
+      getStoreOrders(id, { ...f, limit: PAGE_SIZE, offset: (page - 1) * PAGE_SIZE }),
+      getStageFacets(id, f),
+      getStoreTrend(id, 6),
+      showLog ? getStoreChangeLog(id) : Promise.resolve([]),
+      getOpsOwners(),
+    ]);
+  } catch (err) {
+    const relation = missingRelation(err);
+    if (relation) return <MissingSchema relation={relation} />;
+    throw err;
+  }
   const total = matching;
 
   if (!store) notFound();

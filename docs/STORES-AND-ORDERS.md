@@ -226,6 +226,25 @@ Two things it does **not** do, deliberately:
 Then confirm:
 
 ```bash
+docker exec -i atlas-db psql -U atlas -d atlas -f - < scripts/check-stores-feature.sql
+```
+
+Every row should read **PASS**. It checks that all twenty objects exist, that
+`/order-tracking` still owns its own view and reads none of this feature's,
+that the stage map agrees between SQL and `lib/stores.ts`, and that the two
+tracked queues match a recomputation done straight off `src_local."Order"`.
+Anything reading FAIL names the file to apply. It writes nothing.
+
+**If you forget this step the page tells you.** Without the SQL every query
+here throws, and Next renders a blank page — HTTP 200, no heading, no text,
+nothing in the console, which is the most expensive way a feature can fail.
+Both pages catch the `42P01` and show what is missing and the command above
+instead. Requests and Order tracking are unaffected either way; they read none
+of this.
+
+The stage map alone can also be checked with:
+
+```bash
 docker exec -i atlas-db psql -U atlas -d atlas -f - < scripts/check-stage-map.sql
 ```
 

@@ -15,6 +15,7 @@ import {
   STORE_SORTS, type StoreSort,
 } from '@/lib/storeOrders';
 import { StoreList } from './StoreList';
+import { MissingSchema, missingRelation } from './MissingSchema';
 import { ArchivedStores } from './ArchivedStores';
 import { StoreSearch } from './StoreSearch';
 
@@ -80,15 +81,31 @@ export default async function StoresPage({ searchParams }: { searchParams: SP })
 
   // Counted first so the page can be clamped to one that exists — see the note
   // on the same pattern in [id]/page.tsx.
-  const total = await countStores(f);
-  const lastPage = Math.max(1, Math.ceil(total / PAGE_SIZE));
-  const page = Math.min(requestedPage, lastPage);
-
-  const [rows, overview, archived] = await Promise.all([
-    getStoreRows({ ...f, limit: PAGE_SIZE, offset: (page - 1) * PAGE_SIZE }),
-    getStoreOverview({ from, to }),
-    getArchivedStores(),
-  ]);
+  //
+  // Wrapped because sql/init/ runs once, on a database's first boot: an
+  // existing host does not get this feature's files from a deploy, and without
+  // them every query here throws and Next renders a blank page. A blank page
+  // after a deploy is the most expensive failure there is — it tells whoever
+  // is looking at it nothing at all.
+  let total: number;
+  let page: number;
+  let rows: Awaited<ReturnType<typeof getStoreRows>>;
+  let overview: Awaited<ReturnType<typeof getStoreOverview>>;
+  let archived: Awaited<ReturnType<typeof getArchivedStores>>;
+  try {
+    total = await countStores(f);
+    const lastPage = Math.max(1, Math.ceil(total / PAGE_SIZE));
+    page = Math.min(requestedPage, lastPage);
+    [rows, overview, archived] = await Promise.all([
+      getStoreRows({ ...f, limit: PAGE_SIZE, offset: (page - 1) * PAGE_SIZE }),
+      getStoreOverview({ from, to }),
+      getArchivedStores(),
+    ]);
+  } catch (err) {
+    const relation = missingRelation(err);
+    if (relation) return <MissingSchema relation={relation} />;
+    throw err;
+  }
 
   /**
    * Every link on this page except the pager drops `page`.
