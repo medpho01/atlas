@@ -18,7 +18,8 @@
     "test:discovery-read": "tsx --conditions=react-server scripts/test-discovery-read.ts",
     "test:discovery-db": "./scripts/test-discovery-db.sh",
     "commitments:sync": "./scripts/sync-commitments.sh",
-    "check:discovery-schema": "tsx scripts/check-discovery-schema.ts"
+    "check:discovery-schema": "tsx scripts/check-discovery-schema.ts",
+    "desk": "node scripts/order-tracking/run.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.115.0",
@@ -44,6 +45,7 @@
     "@types/react-dom": "18.3.1",
     "autoprefixer": "10.4.20",
     "dotenv": "^17.4.2",
+    "playwright": "^1.63.0",
     "postcss": "8.4.49",
     "tailwindcss": "3.4.15",
     "tsx": "^4.22.3",
