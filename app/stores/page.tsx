@@ -9,7 +9,6 @@ import { PageHeader } from '@/components/ui/PageHeader';
 import { InfoTip } from '@/components/ui/InfoTip';
 import { ChipButton } from '@/components/ui/Toggle';
 import { Pager } from '@/components/ui/Pager';
-import { humanHours } from '@/lib/stores';
 import {
   getStoreRows, countStores, getStoreOverview, getArchivedStores,
   STORE_SORTS, type StoreSort,
@@ -72,8 +71,12 @@ export default async function StoresPage({ searchParams }: { searchParams: SP })
   const trackedOnly = searchParams.tracked === '1';
   const inTrackingOnly = searchParams.tracking === '1';
   const needsAttention = searchParams.attention === '1';
+  // Ordered by today's pile by default: the store with appointments happening
+  // in hours and no lab named is the one somebody should open first, and it is
+  // not usually the busiest. Still overridable through ?sort=, which the API
+  // and any bookmark keep working.
   const sort: StoreSort = (STORE_SORTS as readonly string[]).includes(searchParams.sort ?? '')
-    ? (searchParams.sort as StoreSort) : 'orders';
+    ? (searchParams.sort as StoreSort) : 'today';
   const requestedPage = Math.max(1, Math.floor(Number(searchParams.page)) || 1);
 
   const f = { q: searchParams.q?.trim() || undefined, from, to, activeOnly, trackedOnly,
@@ -123,7 +126,7 @@ export default async function StoresPage({ searchParams }: { searchParams: SP })
       tracked: trackedOnly ? '1' : undefined,
       tracking: inTrackingOnly ? '1' : undefined,
       attention: needsAttention ? '1' : undefined,
-      sort: sort === 'orders' ? undefined : sort,
+      sort: sort === 'today' ? undefined : sort,
       ...patch,
     };
     const p = new URLSearchParams();
@@ -131,6 +134,19 @@ export default async function StoresPage({ searchParams }: { searchParams: SP })
     const q = p.toString();
     return `/stores${q ? `?${q}` : ''}`;
   };
+
+  // Summed from the rows on screen rather than a seventh query: the strip and
+  // the table must agree, and the surest way for them to agree is for one to
+  // be the sum of the other.
+  const trackedCount = rows.filter((r) => r.in_tracking).length;
+  const queueTotals = rows.reduce(
+    (a, r) => ({
+      needs_lab: a.needs_lab + r.needs_lab,
+      pickup_today: a.pickup_today + r.pickup_today,
+      pickup_no_lab: a.pickup_no_lab + r.pickup_no_lab,
+    }),
+    { needs_lab: 0, pickup_today: 0, pickup_no_lab: 0 },
+  );
 
   const hrefForPage = (n: number) => {
     const base = link({});
@@ -190,37 +206,41 @@ export default async function StoresPage({ searchParams }: { searchParams: SP })
         }
       />
 
-      {/* The fleet in one line. Delayed and flagged come first because they are
-          the only two numbers here that are somebody's job today. */}
+      {/* Two numbers, not six. Turnaround, cancellation rate and the rest are
+          about how a partner has been doing; these two are what is waiting
+          right now, which is what this screen is for. The rest is on the
+          store's own page, where there is room to say what it means. */}
       <div className="flex flex-wrap items-baseline gap-x-8 gap-y-3 mt-5 mb-4">
-        <Metric n={overview?.orders ?? 0} label={`orders · ${windowLabel}`} />
-        <Metric
-          n={overview?.delayed ?? 0}
-          label="past their promise"
-          tone={(overview?.delayed ?? 0) > 0 ? 'bad' : undefined}
-          href={link({ attention: '1' })}
-        />
-        <Metric
-          n={overview?.flagged ?? 0}
-          label="waiting on a new date"
-          tone={(overview?.flagged ?? 0) > 0 ? 'warn' : undefined}
-        />
-        <Metric n={overview?.pending ?? 0} label="not scheduled yet" />
-        <Metric
-          n={overview?.active_stores ?? 0}
-          label={`active stores of ${overview?.stores ?? 0}`}
-        />
-        {/* A store that has sent nothing is the one thing a table of orders can
-            never show you, so it gets its own number. */}
-        {(overview?.quiet_stores ?? 0) > 0 && (
-          <Metric n={overview!.quiet_stores} label="sent nothing in the window" tone="warn" />
-        )}
         <div>
-          <div className="text-2xl font-bold text-ink-900 num">
-            {humanHours(overview?.avg_turnaround_hours)}
+          <div className="text-2xl font-bold num text-ink-900">
+            {(overview?.stores ?? 0).toLocaleString('en-IN')}
           </div>
-          <div className="text-[11px] text-ink-500 mt-0.5">average turnaround</div>
+          <div className="text-[11px] text-ink-500 mt-0.5">
+            stores · {trackedCount} tracked
+          </div>
         </div>
+        <div>
+          <div className={`text-2xl font-bold num
+            ${queueTotals.needs_lab > 0 ? 'text-ink-900' : 'text-ink-300'}`}>
+            {queueTotals.needs_lab.toLocaleString('en-IN')}
+          </div>
+          <div className="text-[11px] text-ink-500 mt-0.5">need a lab</div>
+        </div>
+        <div>
+          <div className={`text-2xl font-bold num
+            ${queueTotals.pickup_today > 0 ? 'text-ink-900' : 'text-ink-300'}`}>
+            {queueTotals.pickup_today.toLocaleString('en-IN')}
+          </div>
+          <div className="text-[11px] text-ink-500 mt-0.5">appointments today</div>
+        </div>
+        {queueTotals.pickup_no_lab > 0 && (
+          <div>
+            <div className="text-2xl font-bold num text-danger-500">
+              {queueTotals.pickup_no_lab.toLocaleString('en-IN')}
+            </div>
+            <div className="text-[11px] text-danger-500 mt-0.5">today with no lab</div>
+          </div>
+        )}
       </div>
 
       <div className="mb-4 flex flex-wrap items-center gap-x-4 gap-y-2 rounded-lg
@@ -229,33 +249,17 @@ export default async function StoresPage({ searchParams }: { searchParams: SP })
 
         <span className="w-px h-5 bg-ink-200" />
 
-        <div className="flex items-center gap-1.5">
-          <span className="text-[11px] uppercase tracking-wide text-ink-400 mr-0.5">Window</span>
-          {WINDOWS.map((w) => (
-            <ChipButton
-              key={w.key}
-              href={link({ window: w.key === DEFAULT_WINDOW ? undefined : w.key,
-                           from: undefined, to: undefined })}
-              active={!searchParams.from && !searchParams.to && w.key === win.key}
-            >
-              {w.label}
-            </ChipButton>
-          ))}
-        </div>
-
-        <span className="w-px h-5 bg-ink-200" />
-
+        {/* Three filters. The window, the sort and the attention chips went
+            with the columns they were sorting — none of them made sense once
+            the row stopped carrying turnaround and cancellation rate. */}
         <div className="flex items-center gap-1.5">
           <span className="text-[11px] uppercase tracking-wide text-ink-400 mr-0.5">Show</span>
-          <ChipButton href={link({ active: activeOnly ? '0' : undefined })} active={activeOnly}>
-            Active only
-          </ChipButton>
           <ChipButton href={link({ tracking: inTrackingOnly ? undefined : '1' })}
                       active={inTrackingOnly}>
             Tracked only
           </ChipButton>
-          <ChipButton href={link({ tracked: trackedOnly ? undefined : '1' })} active={trackedOnly}>
-            In the requests queue
+          <ChipButton href={link({ active: activeOnly ? '0' : undefined })} active={activeOnly}>
+            Active only
           </ChipButton>
           <ChipButton
             href={link({ attention: needsAttention ? undefined : '1' })}
@@ -263,21 +267,6 @@ export default async function StoresPage({ searchParams }: { searchParams: SP })
           >
             Needs attention
           </ChipButton>
-        </div>
-
-        <span className="w-px h-5 bg-ink-200" />
-
-        <div className="flex items-center gap-1.5">
-          <span className="text-[11px] uppercase tracking-wide text-ink-400 mr-0.5">Sort</span>
-          {([['orders', 'Busiest'], ['today', "Today's pile"],
-             ['delayed', 'Most delayed'],
-             ['cancelled', 'Most cancelled'], ['turnaround', 'Slowest'],
-             ['name', 'A–Z']] as const).map(([k, label]) => (
-            <ChipButton key={k} href={link({ sort: k === 'orders' ? undefined : k })}
-                        active={sort === k}>
-              {label}
-            </ChipButton>
-          ))}
         </div>
       </div>
 

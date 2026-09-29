@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useTransition } from 'react';
+import { useState, useEffect, useRef, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import { Loader2, Trash2, Archive, AlertTriangle } from 'lucide-react';
 import { startNav } from '@/components/ui/NavProgress';
@@ -23,7 +23,20 @@ import { planStoreRemoval, removeStore, type RemovalPlan } from '../actions';
  * before acting — the dialog may have been open a while, and an order can
  * arrive in that time.
  */
-export function RemoveStore({ storeId, storeName }: { storeId: number; storeName: string }) {
+export function RemoveStore({
+  storeId, storeName, autoOpen = false,
+}: {
+  storeId: number;
+  storeName: string;
+  /**
+   * Fetch the plan straight away instead of waiting for a click.
+   *
+   * Set from the store list, where the row's bin icon has already said
+   * "remove" — showing a second button labelled the same thing is a step that
+   * asks the same question twice.
+   */
+  autoOpen?: boolean;
+}) {
   const [plan, setPlan] = useState<RemovalPlan | null>(null);
   const [reason, setReason] = useState('');
   const [pending, start] = useTransition();
@@ -37,6 +50,14 @@ export function RemoveStore({ storeId, storeName }: { storeId: number; storeName
     if (r.ok && 'plan' in r) setPlan(r.plan as RemovalPlan);
     else setError((r as { error?: string }).error ?? 'Could not work out what removing this would do');
   });
+
+  // Once, on mount, and only when asked. A ref rather than a dependency on
+  // `open` so a re-render cannot fire a second plan request.
+  const opened = useRef(false);
+  useEffect(() => {
+    if (autoOpen && !opened.current) { opened.current = true; open(); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoOpen]);
 
   const close = () => { setPlan(null); setReason(''); setConfirmName(''); setError(null); };
 
