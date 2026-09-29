@@ -154,4 +154,16 @@ BEGIN
   WHERE t.name LIKE '[sample]%' AND tp.provider_id % 3 = 0;
 END $$;
 
+-- ---------------------------------------------------------------------------
+-- The stores order tracking watches.
+--
+-- Six of the eight, mirroring the shape of the real desk — a named handful,
+-- not the whole book — and leaving two untracked so the difference is visible
+-- on a fresh machine. In production this list is chosen on the screen; it is
+-- seeded here only so the queues have something in them to look at.
+-- ---------------------------------------------------------------------------
+INSERT INTO atlas.store_group_member (group_code, store_id)
+SELECT 'TRACKED', id FROM src_local."Store" WHERE id <= 6
+ON CONFLICT (group_code, store_id) DO NOTHING;
+
 ANALYZE;

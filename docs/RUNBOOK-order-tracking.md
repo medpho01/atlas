@@ -1,4 +1,63 @@
-# Runbook — order tracking
+# Order tracking
+
+> **Rebuilt around the tracked stores.** What follows the next section still
+> describes the mechanics correctly; the scoping and the queue rules changed.
+
+## The shape
+
+Step one is the store list. Order tracking watches a named handful of partners
+— the group `TRACKED` in `atlas.store_group_member` — and everything on the
+screen derives from it. **A store that is not on the list produces no rows at
+all.** The table at the top of the page is that list, with each store's queues
+beside it; adding and removing a store is done there, and needs `manage` on
+`orderTracking`.
+
+Written store by store because the questions arrive that way: *all orders
+originating from store X with an appointment today* is a question about one
+partner, and which partner has the pile is what somebody needs before they
+need which orders.
+
+## The queues
+
+| | |
+|---|---|
+| **Needs a lab** | Appointment from **tomorrow onward**, still on the LabStack placeholder lab (`placeholder_lab_id`, or no lab at all). Deadline is the day before the appointment. |
+| **Pickup today** | **Every** appointment today, whichever lab it is at. No history filter — the question today is simply whether each one is happening. |
+| **Report outstanding** | The appointment has been and gone and no report has come back, within the last 30 days. Clock is 48 h from the appointment or the last status change, whichever is later. |
+
+Cancelled and patient-missed are excluded from all three: closed is closed.
+
+## Two things that changed, and why they matter
+
+**Every order counts now, not only request-born ones.** The old base
+(`analytics.v_request_order`) INNER JOINed `Request`, which on the sample data
+was 15 orders out of 1,085 from tracked stores — **1.4%**. A partner's direct
+orders were invisible to the people meant to be watching them.
+
+**The lab-history filter is gone.** Restricting the pickup queue to labs with
+fewer than five lifetime orders was a good proxy for "where orders fail" when
+the queue had to be kept small against the whole book. Scoped to a named
+handful of partners it is not needed, and it was hiding today's appointments at
+established labs from a screen whose entire job is today's appointments.
+
+Between them these two make the queues considerably larger. That is the point:
+they were small because they were looking at the wrong population.
+
+## Views
+
+```
+atlas.store_group / store_group_member   which stores are watched
+  └─ analytics.v_tracked_order           every order from those stores
+       └─ analytics.v_order_task         the three queues
+            └─ analytics.v_store_queue   one row per store, counts beside it
+```
+
+`atlas.store_tracking` is a different thing and stays as it is: which partners
+the **requests** queue is for. A store can be watched here and not there.
+
+---
+
+## Mechanics (unchanged)
 
 `/order-tracking`. Three queues an order passes through after it leaves the
 request queue.

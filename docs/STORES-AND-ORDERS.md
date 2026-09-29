@@ -145,15 +145,24 @@ applied by hand — the same step `20_lab_discovery_ranking.sql` and
 
 ```bash
 cd ~/atlas && git pull
-docker exec -i atlas-db psql -U atlas -d atlas -v ON_ERROR_STOP=1 -f -   < sql/init/28_store_orders.sql
-docker exec -i atlas-db psql -U atlas -d atlas -v ON_ERROR_STOP=1 -f -   < sql/init/29_store_registry.sql
+for f in 28_store_orders 29_store_registry 30_store_groups; do
+  docker exec -i atlas-db psql -U atlas -d atlas -v ON_ERROR_STOP=1 -f -     < "sql/init/$f.sql"
+done
 ```
 
-Idempotent throughout — safe to run twice. Between them they create
-`atlas.order_stage()`, five Atlas-owned tables (`store_profile`,
-`store_change_log`, `order_reschedule_flag`, `store`, `store_archive`), the
-views `analytics.v_store_order` and `analytics.v_store_directory`,
-`atlas.store_dependencies()`, and four indexes on `src_local."Order"`.
+`30_store_groups.sql` rebuilds `analytics.v_order_task` around the tracked
+stores, so it must be the **last** of the three and must run after
+`25_request_orders.sql` — otherwise the old request-only definition wins and
+order tracking quietly goes back to showing 1.4% of the work. `setup-local.sh`
+encodes the same order.
+
+Idempotent throughout — safe to run twice, and verified over three
+consecutive runs. Between them they create `atlas.order_stage()`, seven
+Atlas-owned tables (`store_profile`, `store_change_log`,
+`order_reschedule_flag`, `store`, `store_archive`, `store_group`,
+`store_group_member`), the views `analytics.v_store_order`,
+`v_store_directory`, `v_tracked_order`, `v_order_task` and `v_store_queue`,
+`atlas.store_dependencies()`, and the indexes on `src_local."Order"`.
 
 Two things it does **not** do, deliberately:
 
