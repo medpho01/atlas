@@ -108,7 +108,7 @@ export type PackageRow = {
    * lab and ₹2,000 at another, and two packages here are quoted by 1,260
    * labs, so the full list belongs in the export, not the table.
    */
-  lab_offers: { lab: string; b2b: number }[] | null;
+  lab_offers: { id: number; lab: string; b2b: number }[] | null;
   /** How many times the package has been booked. Zero is a real signal. */
   orders: number;
   orders_l90d: number;
@@ -195,9 +195,15 @@ export async function browsePackages(f: PackageFilters = {}): Promise<PackageRow
     FROM analytics.v_package_economics e
     LEFT JOIN atlas.package_enrichment pe ON pe.package_id = e.package_id
     LEFT JOIN LATERAL (
-      SELECT jsonb_agg(jsonb_build_object('lab', x.lab, 'b2b', x.b2b) ORDER BY x.b2b) AS offers
+      -- The lab id travels with the name. Two branches of a chain in the same
+      -- city share a name, so the name is not a key — React was handed
+      -- duplicates and warned, and rows sharing a key can swap contents when
+      -- the list re-renders. mv_lab_packages is unique per (lab, package), so
+      -- the id is.
+      SELECT jsonb_agg(jsonb_build_object('id', x.lab_id, 'lab', x.lab, 'b2b', x.b2b)
+                       ORDER BY x.b2b) AS offers
       FROM (
-        SELECT l2."labName" AS lab, lp.b2b
+        SELECT lp.lab_id, l2."labName" AS lab, lp.b2b
         FROM analytics.mv_lab_packages lp
         JOIN src."Lab" l2 ON l2.id = lp.lab_id
         WHERE lp.package_id = e.package_id AND lp.b2b > 10
@@ -244,7 +250,7 @@ export type ComponentRow = {
 /** What's actually in the package, with how often each test is taken. */
 export async function getPackageComponents(id: number): Promise<ComponentRow[]> {
   return query<ComponentRow>(`
-    SELECT m.id AS master_id, m.name AS test_name, d.department,
+    SELECT m.id AS master_id, m.name AS test_name, d.name AS department,
            tc.labs_count, tc.mrp_min::text, tc.b2b_min::text,
            atlas.sample_bucket(st."sampleType") AS sample,
            te.categories, te.why_it_matters,
@@ -344,7 +350,7 @@ export async function browseTests(f: TestFilters = {}): Promise<TestRow[]> {
   }
   if (f.department) {
     params.push(f.department);
-    where.push(`d.department = $${params.length}`);
+    where.push(`d.name = $${params.length}`);
   }
 
   // With a lab filter the figures come from those labs' own rates; without
@@ -374,7 +380,7 @@ export async function browseTests(f: TestFilters = {}): Promise<TestRow[]> {
   params.push(f.limit ?? 300);
 
   return query<TestRow>(`
-    SELECT tc.master_id, tc.ls_id, tc.test_name, d.department, ${priceSource},
+    SELECT tc.master_id, tc.ls_id, tc.test_name, d.name AS department, ${priceSource},
            atlas.sample_bucket(st."sampleType") AS sample,
            st."sampleType"                      AS sample_raw,
            te.categories, te.consumer_name, te.why_it_matters
@@ -508,7 +514,7 @@ export async function getTestRatesForExport(f: TestFilters = {}): Promise<TestRa
     SELECT r.master_id, r.ls_id, r.test_name,
            dos."labTestName" AS lab_test_name,
            COALESCE(dos."dosID", r.lab_code) AS dos_id,
-           d.department,
+           d.name AS department,
            atlas.sample_bucket(st."sampleType") AS sample,
            r.lab_id, r.lab_name, r.lab_city,
            NULLIF(l."apiProvider"::text, 'NO_PROVIDER') AS api_provider,
@@ -537,11 +543,11 @@ export async function getTestRatesForExport(f: TestFilters = {}): Promise<TestRa
 /** Clinical departments with counts — the axis that exists at source. */
 export async function getDepartments(): Promise<{ department: string; tests: number }[]> {
   return query(`
-    SELECT d.department, COUNT(*)::int AS tests
+    SELECT d.name AS department, COUNT(*)::int AS tests
     FROM analytics.mv_test_catalog tc
     JOIN src."Master" m ON m.id = tc.master_id
     JOIN src."LabDepartment" d ON d.id = m."labDepartment_id"
-    GROUP BY d.department
+    GROUP BY d.name
     ORDER BY COUNT(*) DESC
   `);
 }
@@ -594,7 +600,7 @@ export async function getPackagesForExport(packageIds: number[]): Promise<Export
       e.tat_hours, e.pkg_cost::text, e.best_lab_name, e.orders,
       array_to_string(e.sample_types, ' + ') AS sample_types,
       pe.categories, pe.intent,
-      m.name AS test_name, d.department,
+      m.name AS test_name, d.name AS department,
       atlas.sample_bucket(st."sampleType") AS test_sample,
       tc.mrp_min::text, tc.labs_count AS labs_with_test
     FROM analytics.v_package_economics e

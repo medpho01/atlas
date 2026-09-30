@@ -95,7 +95,12 @@ export type TaskFilters = {
   stores?: number[];
   /** Report: only the ones already past 48 hours. */
   late?: boolean;
-  assignee?: number | 'none';
+  /**
+   * 'none' is unassigned, 'any' is everything that has an owner, a number is
+   * one person. 'any' exists so the assigned counter beside the tabs can be
+   * clicked — a count you cannot open is a number you have to trust.
+   */
+  assignee?: number | 'none' | 'any';
 };
 
 export type QueueCounts = Record<TaskKind, { total: number; urgent: number; unassigned: number }>;
@@ -147,6 +152,7 @@ export async function getTasks(kind: TaskKind, f: TaskFilters = {}): Promise<Tas
     where.push(`t.store_id = ANY($${params.length})`);
   }
   if (f.assignee === 'none') where.push('t.assignee_id IS NULL');
+  else if (f.assignee === 'any') where.push('t.assignee_id IS NOT NULL');
   else if (typeof f.assignee === 'number') {
     params.push(f.assignee);
     where.push(`t.assignee_id = $${params.length}`);

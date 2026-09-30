@@ -54,6 +54,7 @@ export type Feature =
   | 'requests'          // Fulfilment › Requests (ops: quote and date)
   | 'commitments'       // open promises — gates quoting actions on requests
   | 'orderTracking'     // Fulfilment › Order tracking (the three order queues)
+  | 'storeOrders'       // Fulfilment › Stores & Orders (a partner's whole book)
   | 'admin';            // users & roles
 
 export type Capability = 'none' | 'view' | 'manage';
@@ -76,6 +77,9 @@ const REQUIRES: Partial<Record<Feature, Feature>> = {
   commitments: 'directory',
   // Chasing an order means opening the lab you are chasing.
   orderTracking: 'directory',
+  // A store's book is read alongside the queue the same orders came from, and
+  // half the rows name a lab somebody will want to open.
+  storeOrders: 'directory',
 };
 
 const MATRIX: Record<Feature, Record<Role, Capability>> = {
@@ -93,6 +97,12 @@ const MATRIX: Record<Feature, Record<Role, Capability>> = {
   // Network works the queues; only a lead hands the work out, which is the
   // difference between 'manage' and 'view' on this one.
   orderTracking:    { admin: 'manage', network_lead: 'manage', network: 'view',   accounts: 'none',   operations: 'view',   editor: 'view',   viewer: 'none' },
+  // Accounts gets 'manage': the partner relationship is theirs, and the
+  // writable part of this screen is the account overlay — who runs it, who to
+  // ring, when it is worth an alert — not the store record, which is the
+  // console's and which nothing here can touch. Operations reads it because
+  // they answer the calls it is about.
+  storeOrders:      { admin: 'manage', network_lead: 'manage', network: 'view',   accounts: 'manage', operations: 'view',   editor: 'view',   viewer: 'none' },
   admin:            { admin: 'manage', network_lead: 'none', network: 'none',   accounts: 'none',   operations: 'none',   editor: 'none',   viewer: 'none' },
 };
 
@@ -150,6 +160,7 @@ export const FEATURE_LABEL: Record<Feature, string> = {
   requests: 'Requests',
   commitments: 'Open promises',
   orderTracking: 'Order tracking',
+  storeOrders: 'Stores & Orders',
   pricing: 'Packages & Pricing',
   providerPipeline: 'Provider onboarding',
   admin: 'Users & roles',

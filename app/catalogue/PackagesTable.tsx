@@ -17,7 +17,7 @@ type PackageRow = {
   pkg_cost: string | null;
   best_lab_name: string | null;
   labs_quoting: number;
-  lab_offers: { lab: string; b2b: number }[] | null;
+  lab_offers: { id: number; lab: string; b2b: number }[] | null;
   orders: number;
   orders_l90d: number;
   sample_types: string[] | null;
@@ -310,7 +310,7 @@ export function PackagesTable({ packages }: { packages: PackageRow[] }) {
             {p.lab_offers?.length ? (
               <>
                 {p.lab_offers.map((o) => (
-                  <div key={o.lab} className="flex items-baseline gap-1.5 leading-snug">
+                  <div key={o.id} className="flex items-baseline gap-1.5 leading-snug">
                     <span className="text-ink-700 truncate" title={o.lab}>{o.lab}</span>
                     <span className="text-ink-300">—</span>
                     <span className="num font-medium text-ink-900">

@@ -48,6 +48,9 @@ export const NAV: NavGroup[] = [
     items: [
       { href: '/requests', label: 'Requests', feature: 'requests', alsoActiveOn: ['/request'] },
       { href: '/order-tracking', label: 'Order tracking', feature: 'orderTracking' },
+      // Last of the three because it is the only one that is not a queue: the
+      // first two are today's work, this is the whole book by partner.
+      { href: '/stores', label: 'Stores & Orders', feature: 'storeOrders' },
     ],
   },
   {
@@ -74,8 +77,11 @@ export const NAV: NavGroup[] = [
     label: 'Admin',
     items: [
       // Which partners the requests queue is for. Sits under Admin rather than
-      // Fulfilment because it is configuration, not a queue to work.
-      { href: '/settings/stores', label: 'Stores', feature: 'coverage' },
+      // Fulfilment because it is configuration, not a queue to work — and it
+      // is named for what it configures, because "Stores" next to a
+      // "Stores & Orders" that shows the orders was two items one word apart
+      // doing entirely different jobs.
+      { href: '/settings/stores', label: 'Tracked stores', feature: 'coverage' },
       { href: '/users', label: 'Users & roles', feature: 'admin' },
     ],
   },

@@ -47,7 +47,10 @@ const QUEUE = {
 export default async function OrderTrackingPage({
   searchParams,
 }: {
-  searchParams: { tab?: string; urgent?: string; mine?: string; within?: string; store?: string };
+  searchParams: {
+    tab?: string; urgent?: string; mine?: string; within?: string; store?: string;
+    owner?: string;
+  };
 }) {
   const gate = await requireView('orderTracking', '/order-tracking');
   if (gate.blocked) return <RoleBlocked area="Order tracking" detail="network, operations and admin" />;
@@ -69,6 +72,9 @@ export default async function OrderTrackingPage({
   ] as const;
   const horizon = HORIZONS.find((h) => h.key === searchParams.within);
   const mine = searchParams.mine === '1';
+  // Everything that already has an owner, which is what the counter beside the
+  // tabs opens.
+  const assignedOnly = searchParams.owner === 'assigned';
   const canAssign = canManage(gate.user, 'orderTracking');
   // filter(Boolean) before Number, not after: ''.split(',') is [''], and
   // Number('') is 0, which Number.isInteger happily accepts — so an absent
@@ -85,7 +91,7 @@ export default async function OrderTrackingPage({
       urgent: urgent && tab === 'chase_report',
       late: urgent && tab === 'chase_report',
       stores,
-      assignee: mine ? gate.user.id : undefined,
+      assignee: mine ? gate.user.id : assignedOnly ? 'any' : undefined,
     }),
     getAssignableUsers(),
     getQueueStores(tab),
@@ -107,6 +113,7 @@ export default async function OrderTrackingPage({
       urgent: urgent ? '1' : undefined,
       within: searchParams.within,
       mine: mine ? '1' : undefined,
+      owner: assignedOnly ? 'assigned' : undefined,
       store: stores.length ? stores.join(',') : undefined,
       ...patch,
     };
@@ -169,6 +176,34 @@ export default async function OrderTrackingPage({
           );
         })}
 
+        {/* How many of this queue already have an owner.
+            It sits with the tabs rather than only in the ASSIGNED TO column
+            because it is the number somebody is working towards — "ten
+            assigned today" is a target, and a target you have to count by
+            scrolling a column is one nobody checks. Clicking it shows exactly
+            those rows, so the figure can be opened rather than trusted. */}
+        <Link
+          href={link({ owner: assignedOnly ? undefined : 'assigned', mine: undefined })}
+          aria-pressed={assignedOnly}
+          title={assignedOnly
+            ? 'Showing only the orders that have an owner. Click to show all.'
+            : 'Show only the orders that already have an owner.'}
+          className={`ml-auto self-center flex items-center gap-2 px-3 py-1.5 mb-1 rounded-md
+                      border text-sm transition-colors
+                      ${assignedOnly
+                        ? 'border-brand-600 bg-brand-600 text-white'
+                        : 'border-ink-200 text-ink-600 hover:bg-ink-100'}`}
+        >
+          <span className="font-medium">Assigned</span>
+          <span className={`text-[11px] font-bold rounded-full px-2 py-0.5 tabular-nums
+                            ${assignedOnly ? 'bg-white/20 text-white' : 'bg-ink-100 text-ink-700'}`}>
+            {count.total - count.unassigned}
+          </span>
+          <span className={`text-[11px] tabular-nums
+                            ${assignedOnly ? 'text-white/70' : 'text-ink-400'}`}>
+            of {count.total}
+          </span>
+        </Link>
       </div>
 
       <div className="mt-4 mb-4 max-w-3xl">
@@ -237,8 +272,11 @@ export default async function OrderTrackingPage({
 
         <div className="flex items-center gap-1.5">
           <span className="text-[11px] uppercase tracking-wide text-ink-400 mr-0.5">Owner</span>
-          <ChipButton href={link({ mine: undefined })} active={!mine}>Everyone</ChipButton>
-          <ChipButton href={link({ mine: '1' })} active={mine}>Assigned to me</ChipButton>
+          <ChipButton href={link({ mine: undefined, owner: undefined })}
+                      active={!mine && !assignedOnly}>Everyone</ChipButton>
+          <ChipButton href={link({ mine: '1', owner: undefined })} active={mine}>
+            Assigned to me
+          </ChipButton>
         </div>
       </div>
 

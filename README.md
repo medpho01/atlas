@@ -40,6 +40,11 @@ Sign in as `admin@local.test` / `atlas1234`.
 data covers, every environment variable, how local differs from production,
 and what to do when it goes wrong.
 
+**[docs/STORES-AND-ORDERS.md](docs/STORES-AND-ORDERS.md)** covers `/stores`:
+what the six stages mean, how turnaround and cancellation rate are measured,
+the permission model, the API, and — the part worth reading first — exactly
+which of a partner's data Atlas may change and which belongs to the console.
+
 ## Routes
 
 | Route | Purpose |
@@ -49,6 +54,10 @@ and what to do when it goes wrong.
 | `/pincode/[code]` | Pincode Explorer — coverage matrix, funnel, labs serving |
 | `/heatmap` | Order origin heatmap with kind × modality lens |
 | `/directory` | All labs / providers / pharmacies with data-quality nudges |
+| `/requests` | Fulfilment — quote and date the open request queue |
+| `/order-tracking` | Fulfilment — the three ways an order in flight goes wrong |
+| `/stores` | Fulfilment — every partner and their whole book of orders |
+| `/stores/[id]` | One partner: orders, analytics, account overlay, change log |
 | `/gaps` | Network gaps queue ranked by (pincode × kind × modality) |
 | `/quality` | Lab health watchtower |
 | `/check` | **Public** pincode serviceability check (lead-gen) |

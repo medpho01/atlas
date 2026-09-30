@@ -294,7 +294,12 @@ export async function listLabs(opts: { centerType?: string; city?: string; searc
   params.push(opts.offset ?? 0);
   return query(`
     SELECT
-      l.id, l."labName" AS lab_name, l.city, l.pincode, l.active, l."mouEndDate" AS mou_end_date,
+      l.id, l."labName" AS lab_name, l.city, l.pincode, l.active,
+      -- ::text, like accountQueries does. Left as a timestamp the driver hands
+      -- over a JS Date, the client re-reads it in the browser's timezone, and a
+      -- contract ending on the 1st renders as the 30th for anyone west of the
+      -- server.
+      l."mouEndDate"::text AS mou_end_date,
       l."centerType"::text AS center_type,
       l."centerVisit" AS center_visit, l."homeCollection" AS home_collection,
       c."chainName" AS chain_name,

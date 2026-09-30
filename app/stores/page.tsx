@@ -1,0 +1,350 @@
+import Link from 'next/link';
+import { AlertTriangle, Plus } from 'lucide-react';
+import { requireView } from '@/lib/guard';
+import { canManage } from '@/lib/access';
+import { getSessionUser } from '@/lib/auth';
+import { RoleBlocked } from '@/components/RoleBlocked';
+import { Card, CardBody } from '@/components/ui/Card';
+import { PageHeader } from '@/components/ui/PageHeader';
+import { InfoTip } from '@/components/ui/InfoTip';
+import { ChipButton } from '@/components/ui/Toggle';
+import { Pager } from '@/components/ui/Pager';
+import {
+  getStoreRows, countStores, getStoreOverview, getArchivedStores,
+  STORE_SORTS, type StoreSort,
+} from '@/lib/storeOrders';
+import { StoreList } from './StoreList';
+import { MissingSchema, missingRelation } from './MissingSchema';
+import { ArchivedStores } from './ArchivedStores';
+import { StoreSearch } from './StoreSearch';
+
+export const dynamic = 'force-dynamic';
+
+const PAGE_SIZE = 25;
+
+/**
+ * How far back the counts look.
+ *
+ * A window, not "everything", because every number on this page is a rate or
+ * an average and both are meaningless without one — a partner onboarded in
+ * March and one onboarded last week are not comparable on lifetime totals,
+ * and "all time" quietly averages this quarter's turnaround with last year's.
+ * Ninety days is the default: long enough for a monthly partner to appear,
+ * short enough that a problem from last summer is not still dragging the mean.
+ */
+const WINDOWS = [
+  { key: '30', label: '30 days', days: 30 },
+  { key: '90', label: '90 days', days: 90 },
+  { key: '365', label: '12 months', days: 365 },
+  { key: 'all', label: 'All time', days: null },
+] as const;
+const DEFAULT_WINDOW = '90';
+
+function isoDaysAgo(days: number): string {
+  const d = new Date();
+  d.setDate(d.getDate() - days);
+  return d.toISOString().slice(0, 10);
+}
+
+type SP = {
+  q?: string; window?: string; from?: string; to?: string;
+  active?: string; tracked?: string; tracking?: string; attention?: string;
+  sort?: string; page?: string;
+};
+
+export default async function StoresPage({ searchParams }: { searchParams: SP }) {
+  const gate = await requireView('storeOrders', '/stores');
+  if (gate.blocked) {
+    return <RoleBlocked area="Stores & Orders" detail="accounts, network, operations and admin" />;
+  }
+  const isAdmin = (await getSessionUser())?.role === 'admin';
+  const canEdit = canManage(gate.user, 'storeOrders');
+
+  const win = WINDOWS.find((w) => w.key === searchParams.window)
+    ?? WINDOWS.find((w) => w.key === DEFAULT_WINDOW)!;
+  // An explicit from/to beats the preset — the preset is the quick way in, the
+  // dates are the exact question somebody came with.
+  const from = searchParams.from || (win.days ? isoDaysAgo(win.days) : undefined);
+  const to = searchParams.to || undefined;
+
+  const activeOnly = searchParams.active !== '0';
+  const trackedOnly = searchParams.tracked === '1';
+  const inTrackingOnly = searchParams.tracking === '1';
+  const needsAttention = searchParams.attention === '1';
+  // Ordered by today's pile by default: the store with appointments happening
+  // in hours and no lab named is the one somebody should open first, and it is
+  // not usually the busiest. Still overridable through ?sort=, which the API
+  // and any bookmark keep working.
+  const sort: StoreSort = (STORE_SORTS as readonly string[]).includes(searchParams.sort ?? '')
+    ? (searchParams.sort as StoreSort) : 'today';
+  const requestedPage = Math.max(1, Math.floor(Number(searchParams.page)) || 1);
+
+  const f = { q: searchParams.q?.trim() || undefined, from, to, activeOnly, trackedOnly,
+              inTrackingOnly, needsAttention, sort };
+
+  // Counted first so the page can be clamped to one that exists — see the note
+  // on the same pattern in [id]/page.tsx.
+  //
+  // Wrapped because sql/init/ runs once, on a database's first boot: an
+  // existing host does not get this feature's files from a deploy, and without
+  // them every query here throws and Next renders a blank page. A blank page
+  // after a deploy is the most expensive failure there is — it tells whoever
+  // is looking at it nothing at all.
+  let total: number;
+  let page: number;
+  let rows: Awaited<ReturnType<typeof getStoreRows>>;
+  let overview: Awaited<ReturnType<typeof getStoreOverview>>;
+  let archived: Awaited<ReturnType<typeof getArchivedStores>>;
+  try {
+    total = await countStores(f);
+    const lastPage = Math.max(1, Math.ceil(total / PAGE_SIZE));
+    page = Math.min(requestedPage, lastPage);
+    [rows, overview, archived] = await Promise.all([
+      getStoreRows({ ...f, limit: PAGE_SIZE, offset: (page - 1) * PAGE_SIZE }),
+      getStoreOverview({ from, to }),
+      getArchivedStores(),
+    ]);
+  } catch (err) {
+    const relation = missingRelation(err);
+    if (relation) return <MissingSchema relation={relation} />;
+    throw err;
+  }
+
+  /**
+   * Every link on this page except the pager drops `page`.
+   *
+   * Narrowing a filter while on page three would otherwise land on a page that
+   * no longer exists, and an empty table reads as "no matches" rather than
+   * "wrong page" — the one pagination bug that costs somebody a phone call.
+   */
+  const link = (patch: Partial<SP>) => {
+    const merged: SP = {
+      q: searchParams.q,
+      window: win.key === DEFAULT_WINDOW ? undefined : win.key,
+      from: searchParams.from, to: searchParams.to,
+      active: activeOnly ? undefined : '0',
+      tracked: trackedOnly ? '1' : undefined,
+      tracking: inTrackingOnly ? '1' : undefined,
+      attention: needsAttention ? '1' : undefined,
+      sort: sort === 'today' ? undefined : sort,
+      ...patch,
+    };
+    const p = new URLSearchParams();
+    for (const [k, v] of Object.entries(merged)) if (v) p.set(k, String(v));
+    const q = p.toString();
+    return `/stores${q ? `?${q}` : ''}`;
+  };
+
+  // Summed from the rows on screen rather than a seventh query: the strip and
+  // the table must agree, and the surest way for them to agree is for one to
+  // be the sum of the other.
+  const trackedCount = rows.filter((r) => r.in_tracking).length;
+  const queueTotals = rows.reduce(
+    (a, r) => ({
+      needs_lab: a.needs_lab + r.needs_lab,
+      pickup_today: a.pickup_today + r.pickup_today,
+      pickup_no_lab: a.pickup_no_lab + r.pickup_no_lab,
+    }),
+    { needs_lab: 0, pickup_today: 0, pickup_no_lab: 0 },
+  );
+
+  const hrefForPage = (n: number) => {
+    const base = link({});
+    const sep = base.includes('?') ? '&' : '?';
+    return n <= 1 ? base : `${base}${sep}page=${n}`;
+  };
+
+  const windowLabel = searchParams.from || searchParams.to
+    ? [searchParams.from ?? 'the beginning', searchParams.to ?? 'today'].join(' → ')
+    : win.label.toLowerCase();
+
+  return (
+    <div className="px-6 lg:px-8 py-6 max-w-[1700px] mx-auto">
+      <PageHeader
+        title="Stores & Orders"
+        subtitle="Every partner, and the whole book of orders behind each one."
+        actions={
+          <>
+          {isAdmin && (
+            <Link
+              href="/stores/new"
+              className="inline-flex items-center gap-1.5 rounded-md bg-brand-600 px-3 py-1.5
+                         text-xs font-medium text-white hover:bg-brand-700"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              Add a store
+            </Link>
+          )}
+          <InfoTip
+            title="Stores & Orders"
+            width={380}
+            shows={
+              <>
+                One row per store, with its orders grouped into six stages. Open a row to see
+                the orders themselves — patient, phlebo, lab, status and timings.
+              </>
+            }
+            computed={
+              <>
+                Counts, turnaround and cancellation rate are all measured inside the window
+                above ({windowLabel}), so two partners can be compared. Turnaround runs from
+                the order being taken to the report being delivered and is only counted on
+                completed orders. An order is <b>delayed</b> when its appointment has passed
+                by more than the store&apos;s own threshold and it is still unfinished.
+              </>
+            }
+            drives="Answer a partner's call without opening the console, and notice the store whose orders are quietly stalling before they do."
+            notes={
+              <>
+                Read-only on LabStack. A store added here is Atlas&apos;s own and is marked as
+                such; removing one deletes it only if Atlas owns it and nothing is behind it,
+                and otherwise archives it.
+              </>
+            }
+          />
+          </>
+        }
+      />
+
+      {/* Two numbers, not six. Turnaround, cancellation rate and the rest are
+          about how a partner has been doing; these two are what is waiting
+          right now, which is what this screen is for. The rest is on the
+          store's own page, where there is room to say what it means. */}
+      <div className="flex flex-wrap items-baseline gap-x-8 gap-y-3 mt-5 mb-4">
+        <div>
+          <div className="text-2xl font-bold num text-ink-900">
+            {(overview?.stores ?? 0).toLocaleString('en-IN')}
+          </div>
+          <div className="text-[11px] text-ink-500 mt-0.5">
+            stores · {trackedCount} tracked
+          </div>
+        </div>
+        <div>
+          <div className={`text-2xl font-bold num
+            ${queueTotals.needs_lab > 0 ? 'text-ink-900' : 'text-ink-300'}`}>
+            {queueTotals.needs_lab.toLocaleString('en-IN')}
+          </div>
+          <div className="text-[11px] text-ink-500 mt-0.5">need a lab</div>
+        </div>
+        <div>
+          <div className={`text-2xl font-bold num
+            ${queueTotals.pickup_today > 0 ? 'text-ink-900' : 'text-ink-300'}`}>
+            {queueTotals.pickup_today.toLocaleString('en-IN')}
+          </div>
+          <div className="text-[11px] text-ink-500 mt-0.5">appointments today</div>
+        </div>
+        {queueTotals.pickup_no_lab > 0 && (
+          <div>
+            <div className="text-2xl font-bold num text-danger-500">
+              {queueTotals.pickup_no_lab.toLocaleString('en-IN')}
+            </div>
+            <div className="text-[11px] text-danger-500 mt-0.5">today with no lab</div>
+          </div>
+        )}
+      </div>
+
+      <div className="mb-4 flex flex-wrap items-center gap-x-4 gap-y-2 rounded-lg
+                      border border-ink-200 bg-surface px-4 py-2.5">
+        <StoreSearch defaultValue={searchParams.q ?? ''} hidden={carry(searchParams, 'q')} />
+
+        <span className="w-px h-5 bg-ink-200" />
+
+        {/* Three filters. The window, the sort and the attention chips went
+            with the columns they were sorting — none of them made sense once
+            the row stopped carrying turnaround and cancellation rate. */}
+        <div className="flex items-center gap-1.5">
+          <span className="text-[11px] uppercase tracking-wide text-ink-400 mr-0.5">Show</span>
+          <ChipButton href={link({ tracking: inTrackingOnly ? undefined : '1' })}
+                      active={inTrackingOnly}>
+            Tracked only
+          </ChipButton>
+          <ChipButton href={link({ active: activeOnly ? '0' : undefined })} active={activeOnly}>
+            Active only
+          </ChipButton>
+          <ChipButton
+            href={link({ attention: needsAttention ? undefined : '1' })}
+            active={needsAttention}
+          >
+            Needs attention
+          </ChipButton>
+        </div>
+      </div>
+
+      {(searchParams.from || searchParams.to) && (
+        <p className="text-[12px] text-ink-500 mb-3">
+          Counting orders from {searchParams.from ?? 'the beginning'} to{' '}
+          {searchParams.to ?? 'today'}.{' '}
+          <Link href={link({ from: undefined, to: undefined })} className="text-brand-600 hover:underline">
+            Clear the dates
+          </Link>
+        </p>
+      )}
+
+      <Card>
+        <CardBody className="pt-4 px-0">
+          {rows.length === 0 ? (
+            <p className="px-5 py-10 text-center text-sm text-ink-500">
+              {needsAttention
+                ? 'Nothing is delayed or waiting on a new date. '
+                : 'No store matches these filters. '}
+              <Link href="/stores" className="text-brand-600 hover:underline">
+                Clear the filters
+              </Link>
+            </p>
+          ) : (
+            <StoreList rows={rows} canEdit={canEdit} />
+          )}
+          <Pager
+            page={page}
+            pageSize={PAGE_SIZE}
+            total={total}
+            shown={rows.length}
+            hrefForPage={hrefForPage}
+            unit="stores"
+          />
+        </CardBody>
+      </Card>
+
+      <ArchivedStores rows={archived} canRestore={isAdmin} />
+
+      <p className="text-[11px] text-ink-400 mt-3 flex items-start gap-1.5 max-w-3xl">
+        <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-px" />
+        <span>
+          Orders and the console&apos;s own store records belong to LabStack, and Atlas reads
+          them without writing — editing a partner&apos;s address or moving an appointment
+          happens there. A store added here is Atlas&apos;s own and is marked as such; removing
+          one deletes it only if Atlas owns it and nothing is behind it, and otherwise archives
+          it so the orders stay in the ledger.
+        </span>
+      </p>
+    </div>
+  );
+}
+
+/** Every search param except the named one, as hidden inputs for the GET form. */
+function carry(sp: SP, without: keyof SP): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(sp)) {
+    // `page` is dropped with the rest: a new search starts at the first page.
+    if (v && k !== without && k !== 'page') out[k] = String(v);
+  }
+  return out;
+}
+
+function Metric({
+  n, label, tone, href,
+}: { n: number; label: string; tone?: 'bad' | 'warn'; href?: string }) {
+  const colour = tone === 'bad' ? 'text-danger-500' : tone === 'warn' ? 'text-warn-600' : 'text-ink-900';
+  const body = (
+    <>
+      <div className={`text-2xl font-bold num ${colour}`}>{n.toLocaleString('en-IN')}</div>
+      <div className="text-[11px] text-ink-500 mt-0.5">{label}</div>
+    </>
+  );
+  // Only the numbers that lead somewhere become links, so a pointer over a
+  // figure means it can be clicked rather than meaning nothing.
+  return href && n > 0
+    ? <Link href={href} className="rounded-sm hover:opacity-80 focus:outline-none
+                                   focus-visible:ring-2 focus-visible:ring-brand-500">{body}</Link>
+    : <div>{body}</div>;
+}
