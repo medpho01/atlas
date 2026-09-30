@@ -189,6 +189,28 @@ Atlas. A store id that does not exist at all still 404s.
 
 ## Deploying this
 
+### Before you merge: does it run against the real database?
+
+```bash
+docker exec -i atlas-db psql -U atlas -d atlas -f -   < scripts/check-labstack-columns.sql
+```
+
+Every column this feature reads from the mirrored LabStack tables — 51 of them
+across Lab, LabDepartment, Master, Order, Profile, Request, Store and User —
+checked against what that database actually has. It reads only the catalogue,
+writes nothing, and takes a second. A column named by the code and absent there
+means the view will not create.
+
+The list is generated from the SQL and the query modules, so it is what the code
+asks for rather than what somebody remembered to write down.
+
+**One row is worth reading even when it passes.** The catalogue fix changes
+`d.department` to `d.name` on `LabDepartment`, because that table has `id` and
+`name` — `department` never existed, which is why `/catalogue/tests` was
+returning a 500. The check prints that table's real columns at the bottom. If
+your database disagrees, that one query needs the other name.
+
+
 **`sql/init/` runs once, on a database's first boot.** A host that already
 exists will not pick up `28_store_orders.sql` from a deploy, and `/stores` will
 fail with `relation "analytics.v_store_order" does not exist` until it is
