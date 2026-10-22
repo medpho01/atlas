@@ -11,6 +11,7 @@ import {
 } from '@/lib/accountHealth';
 import { LineDots, STATUS_CHIP } from './LineDots';
 import { ManagerPicker } from './ManagerPicker';
+import { AccountSearch } from './AccountSearch';
 
 export const dynamic = 'force-dynamic';
 
@@ -164,10 +165,13 @@ export default async function AccountsPage({
           ))}
         </div>
 
-        <Link href="/accounts/cross-sell"
-              className="ml-auto text-[12px] font-semibold text-brand-600 hover:underline">
-          Lines not activated →
-        </Link>
+        <div className="ml-auto flex items-center gap-4">
+          <AccountSearch initial={searchParams.q} />
+          <Link href="/accounts/cross-sell"
+                className="text-[12px] font-semibold text-brand-600 hover:underline whitespace-nowrap">
+            Lines not activated →
+          </Link>
+        </div>
       </div>
 
       <div className="rounded-xl border border-ink-200 bg-surface overflow-x-auto">
@@ -227,8 +231,15 @@ export default async function AccountsPage({
               </tr>
             ))}
             {rows.length === 0 && (
-              <tr><td colSpan={8} className="px-5 py-12 text-center text-sm text-ink-500">
-                No accounts match these filters.
+              <tr><td colSpan={8} className="px-5 py-12 text-center">
+                <p className="text-sm font-semibold text-ink-900">
+                  {searchParams.q ? `Nothing matches “${searchParams.q}”.` : 'No accounts match these filters.'}
+                </p>
+                {searchParams.q && (
+                  <p className="text-sm text-ink-500 mt-1">
+                    Searching looks at the account name, its city and its manager.
+                  </p>
+                )}
               </td></tr>
             )}
           </tbody>
