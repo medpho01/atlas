@@ -57,7 +57,7 @@ export function InterestButton({
         aria-pressed={shown === 'interested'}
         title={canSet
           ? (shown === 'interested' ? 'Interested — press again to clear' : 'Mark interested')
-          : 'Read-only: needs the network role'}
+          : 'Read-only: needs the network, operations or admin role'}
         disabled={!canSet || pending}
         onClick={() => press('interested')}
         className={`${base} ${shown === 'interested'
@@ -75,7 +75,7 @@ export function InterestButton({
         aria-pressed={shown === 'not_interested'}
         title={canSet
           ? (shown === 'not_interested' ? 'Not interested — press again to clear' : 'Mark not interested')
-          : 'Read-only: needs the network role'}
+          : 'Read-only: needs the network, operations or admin role'}
         disabled={!canSet || pending}
         onClick={() => press('not_interested')}
         className={`${base} ${shown === 'not_interested'

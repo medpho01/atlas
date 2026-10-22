@@ -40,6 +40,9 @@ export default async function PhlebosPage({ searchParams }: { searchParams: Prom
   ]);
 
   const canEdit = canManage(user, 'directory');
+  // Separate from canEdit: uploading a list is managing the directory, saying
+  // what somebody answered on the phone is not. Operations do the second.
+  const canSetInterest = canManage(user, 'providerInterest');
 
   return (
     <main className="mx-auto max-w-7xl px-6 py-8">
@@ -112,6 +115,7 @@ export default async function PhlebosPage({ searchParams }: { searchParams: Prom
         labOptions={labs}
         defaultRadius={PHLEBO_REACH_RADIUS_KM}
         canEdit={canEdit}
+        canSetInterest={canSetInterest}
       />
     </main>
   );

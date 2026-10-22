@@ -61,6 +61,7 @@ export function NursesClient({
   aggregatorOptions,
   defaultRadius,
   canEdit,
+  canSetInterest,
 }: {
   initialNurses: Nurse[];
   initialTotal: number;
@@ -68,6 +69,8 @@ export function NursesClient({
   aggregatorOptions: { aggregator: string; n: number }[];
   defaultRadius: number;
   canEdit: boolean;
+  /** Pressing the interest buttons — operations hold this without holding canEdit. */
+  canSetInterest: boolean;
 }) {
   const [filters, setFilters] = useState<Filters>(initialFilters);
   const [nurses, setNurses] = useState<Nurse[]>(initialNurses);
@@ -300,7 +303,7 @@ export function NursesClient({
               ) : (
                 nurses.map((n, i) => (
                   <NurseRow key={`${n.phone}:${i}`} n={n} selectedAggregators={filters.aggregators}
-                            canEdit={canEdit} />
+                            canEdit={canEdit} canSetInterest={canSetInterest} />
                 ))
               )}
             </tbody>
@@ -489,8 +492,8 @@ function formatPhone(p: string) {
   return p.length === 10 ? `${p.slice(0, 5)} ${p.slice(5)}` : p;
 }
 
-function NurseRow({ n, selectedAggregators, canEdit }: {
-  n: Nurse; selectedAggregators: string[]; canEdit: boolean;
+function NurseRow({ n, canSetInterest, selectedAggregators, canEdit }: {
+  n: Nurse; canSetInterest: boolean; selectedAggregators: string[]; canEdit: boolean;
 }) {
   const matched = selectedAggregators.includes(n.aggregator ?? '');
   return (
@@ -625,7 +628,7 @@ function NurseRow({ n, selectedAggregators, canEdit }: {
       {/* What they said when we rang. Written where it is read. */}
       <td className="px-4 py-3 sticky right-0 bg-surface group-hover:bg-ink-100/40
                      transition border-l border-ink-150">
-        <InterestButton kind="nurse" phone={n.phone} value={n.interest} canSet={canEdit} />
+        <InterestButton kind="nurse" phone={n.phone} value={n.interest} canSet={canSetInterest} />
         {n.interest_set_by && (
           <div className="text-[10px] text-ink-400 mt-1 leading-tight">
             {n.interest_set_by}

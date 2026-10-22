@@ -53,6 +53,7 @@ export function PhlebosClient({
   labOptions,
   defaultRadius,
   canEdit,
+  canSetInterest,
 }: {
   initialPhlebos: Phlebo[];
   initialTotal: number;
@@ -60,6 +61,8 @@ export function PhlebosClient({
   labOptions: { lab: string; n: number }[];
   defaultRadius: number;
   canEdit: boolean;
+  /** Pressing the interest buttons — operations hold this without holding canEdit. */
+  canSetInterest: boolean;
 }) {
   const [filters, setFilters] = useState<Filters>(initialFilters);
   const [phlebos, setPhlebos] = useState<Phlebo[]>(initialPhlebos);
@@ -313,7 +316,7 @@ export function PhlebosClient({
               // variants_at_phone). Keying on it alone collides, and React then
               // keeps stale rows from the previous result set when filters change.
               phlebos.map((p, i) => (
-                <PhleboRow key={`${p.phone}:${i}`} p={p} selectedLabs={filters.labs} canEdit={canEdit} />
+                <PhleboRow key={`${p.phone}:${i}`} p={p} selectedLabs={filters.labs} canEdit={canEdit} canSetInterest={canSetInterest} />
               ))
             )}
           </tbody>
@@ -518,8 +521,8 @@ function SortableTh({
   );
 }
 
-function PhleboRow({ p, selectedLabs, canEdit }: {
-  p: Phlebo; selectedLabs: string[]; canEdit: boolean;
+function PhleboRow({ p, canSetInterest, selectedLabs, canEdit }: {
+  p: Phlebo; canSetInterest: boolean; selectedLabs: string[]; canEdit: boolean;
 }) {
   // A phlebo on a lab's shared dispatch number often serves several of that
   // lab's cities, so the lab that caused the match isn't necessarily the first
@@ -630,7 +633,7 @@ function PhleboRow({ p, selectedLabs, canEdit }: {
       {/* What they said when we rang. */}
       <td className="px-4 py-3 sticky right-0 bg-surface group-hover:bg-ink-100/40
                      transition border-l border-ink-150">
-        <InterestButton kind="phlebo" phone={p.phone} value={p.interest} canSet={canEdit} />
+        <InterestButton kind="phlebo" phone={p.phone} value={p.interest} canSet={canSetInterest} />
         {p.interest_set_by && (
           <div className="text-[10px] text-ink-400 mt-1 leading-tight">
             {p.interest_set_by}

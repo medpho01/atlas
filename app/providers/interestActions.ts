@@ -36,8 +36,12 @@ export async function setProviderInterest(input: {
 }): Promise<{ ok: boolean; error?: string; status?: InterestStatus | null }> {
   const me = await getSessionUser();
   if (!me) return { ok: false, error: 'unauthenticated' };
-  if (!canManage(me, 'directory')) {
-    return { ok: false, error: 'Needs the network, network lead or admin role' };
+  // Its own feature, not directory:manage. Recording what somebody said on the
+  // phone is not editing the directory, and operations make those calls too.
+  // Which roles hold it is a row in atlas.role_feature, editable from
+  // Roles & screens.
+  if (!canManage(me, 'providerInterest')) {
+    return { ok: false, error: 'Needs the network, operations or admin role' };
   }
 
   const kind = KINDS.find((k) => k === input.kind);
