@@ -19,11 +19,15 @@ export async function GET(req: NextRequest) {
     // Repeated ?lab= params — multi-select. None = all labs.
     labs:      sp.getAll('lab').filter(Boolean),
     source:    (sp.get('source') || 'all') as 'derived' | 'manual' | 'both' | 'all',
-    nearby:    sp.get('nearby') === '1',
+    nearby:    sp.get('nearby') !== '0',   // absent means ON, which is what the
+                                     // page sends and what page.tsx already assumed
     radiusKm:  Number(sp.get('radius')) || PHLEBO_REACH_RADIUS_KM,
     minOrders: Number(sp.get('min')) || 0,
     sortBy:    (sp.get('sort') || undefined) as SortKey | undefined,
-    sortDir:   sp.get('dir') === 'asc' ? 'asc' as const : 'desc' as const,
+    // Left undefined when the URL says nothing, so each sort key can pick its
+    // own sensible direction — distance counts up, everything else counts down.
+    sortDir:  sp.get('dir') === 'asc' ? 'asc' as const
+            : sp.get('dir') === 'desc' ? 'desc' as const : undefined,
     interest: sp.get('interest') ?? '',
   };
 

@@ -77,12 +77,84 @@ function selectedLabs(filters: PhleboFilters): string[] | null {
   return labs.length > 0 ? labs : null;
 }
 
+
+/**
+ * The pieces of a pincode search that the list and its count must agree on.
+ * They were two copies of the same trigonometry, which is how a page ends up
+ * showing twenty rows above the words "4 phlebos".
+ */
+const nearbyTarget = (targetPin: string) => `
+      -- The pincode you typed, as a point and as a city. Always exactly one
+      -- row, even for a pincode with no coordinates: a pincode we only know
+      -- the city for should still find that city rather than nothing.
+      WITH target AS (
+        SELECT g.latitude AS lat, g.longitude AS lon, pc.city AS city
+        FROM (SELECT ${targetPin}::text AS pincode) q
+        LEFT JOIN analytics.mv_pincode_geo  g  ON g.pincode = q.pincode
+        LEFT JOIN analytics.mv_pincode_city pc ON pc.pincode = q.pincode
+      )`;
+
+const nearbyFromWhere = (radius: string, where: string) => `
+      FROM atlas.phlebos_all p
+      LEFT JOIN atlas.provider_interest pi ON pi.kind = 'phlebo' AND pi.phone = p.phone
+      LEFT JOIN atlas.users iu ON iu.id = pi.set_by
+      -- LEFT, not an inner join: it dropped everyone without a pincode before
+      -- the radius was even considered.
+      LEFT JOIN analytics.mv_pincode_geo g
+        ON g.pincode = p.pincode AND p.pincode ~ '^[0-9]{6}$'
+      CROSS JOIN target t
+      WHERE (
+          (g.latitude IS NOT NULL AND t.lat IS NOT NULL
+           AND 6371 * acos(GREATEST(-1, LEAST(1,
+             cos(radians(t.lat)) * cos(radians(g.latitude)) *
+             cos(radians(g.longitude) - radians(t.lon)) +
+             sin(radians(t.lat)) * sin(radians(g.latitude))
+           ))) <= ${radius})
+          -- ...or, only when we cannot place them at all, in the city that
+          -- pincode belongs to. Guarded on having no coordinates rather than
+          -- applied to everyone: a phlebo whose profile says Bengaluru and
+          -- whose pincode is in Ghaziabad is 1,700 km away, and the pincode
+          -- is the better evidence. The fallback is for the uploaded rows
+          -- that carry a city and nothing else.
+          OR (g.latitude IS NULL AND t.city IS NOT NULL
+              AND atlas.city_key(p.city) = atlas.city_key(t.city))
+        )
+        ${where}`;
+
+const NEARBY_DISTANCE = `
+        CASE WHEN g.latitude IS NOT NULL AND t.lat IS NOT NULL THEN
+          ROUND((6371 * acos(GREATEST(-1, LEAST(1,
+            cos(radians(t.lat)) * cos(radians(g.latitude)) *
+            cos(radians(g.longitude) - radians(t.lon)) +
+            sin(radians(t.lat)) * sin(radians(g.latitude))
+          ))))::numeric, 1)::float8
+        END AS distance_km`;
+
+const PHLEBO_COLS = `
+        p.phone, p.name, p.city, p.state, p.pincode,
+        p.orders_served, p.active_days, p.avg_orders_per_day::float8 AS avg_orders_per_day,
+        p.labs, p.first_order_at, p.last_order_at,
+        p.is_shared_phone, p.variants_at_phone,
+        p.email, p.notes, p.source,
+        pi.status AS interest, pi.note AS interest_note,
+        (pi.set_at AT TIME ZONE 'Asia/Kolkata')::text AS interest_set_at,
+        iu.name AS interest_set_by`;
+
 function orderClause(filters: PhleboFilters, isNearby: boolean): string {
   const key: SortKey = filters.sortBy && SORT_EXPRS[filters.sortBy] ? filters.sortBy : (isNearby ? 'distance' : 'orders');
-  const dir = filters.sortDir === 'asc' ? 'ASC' : 'DESC';
+  // Distance counts up: nearest first unless somebody asks otherwise. Every
+  // other sort here reads best-first as DESC, and distance inherited that.
+  const dir = key === 'distance'
+    ? (filters.sortDir === 'desc' ? 'DESC' : 'ASC')
+    : (filters.sortDir === 'asc' ? 'ASC' : 'DESC');
   const expr = key === 'distance' && !isNearby ? SORT_EXPRS.orders : SORT_EXPRS[key];
+  // Whoever we can actually place comes before whoever we only know the city
+  // of, whatever the chosen sort. The underlying expression, not the output
+  // alias: Postgres takes a bare output name in ORDER BY, not one inside an
+  // expression.
+  const placed = isNearby ? '(g.latitude IS NULL OR t.lat IS NULL) ASC, ' : '';
   // Stable tiebreakers keep pagination deterministic.
-  return `ORDER BY ${expr} ${dir} NULLS LAST, p.orders_served DESC NULLS LAST, p.phone ASC`;
+  return `ORDER BY ${placed}${expr} ${dir} NULLS LAST, p.orders_served DESC NULLS LAST, p.phone ASC`;
 }
 
 export type PhleboRepoStats = {
@@ -136,10 +208,16 @@ export async function listPhlebos(
 
   if (filters.q && filters.q.trim()) {
     const q = push(`%${filters.q.trim().toLowerCase()}%`);
-    conds.push(`(lower(p.name) LIKE ${q} OR p.phone LIKE ${q} OR lower(p.city) LIKE ${q})`);
+    const raw = push(filters.q.trim());
+    conds.push(`(lower(p.name) LIKE ${q} OR p.phone LIKE ${q} OR lower(p.state) LIKE ${q}
+                 OR p.pincode LIKE ${q}
+                 OR lower(p.city) LIKE ${q} OR atlas.city_key(p.city) = atlas.city_key(${raw}))`);
   }
   if (filters.city && filters.city.trim()) {
-    conds.push(`lower(p.city) = ${push(filters.city.trim().toLowerCase())}`);
+    // Through atlas.city_key, so Bangalore finds Bengaluru. The count builder
+    // below says the same thing; these two lists of conditions are duplicated
+    // and this is exactly how they drift.
+    conds.push(`atlas.city_key(p.city) = atlas.city_key(${push(filters.city.trim())})`);
   }
   if (filters.state && filters.state.trim()) {
     conds.push(`lower(p.state) = ${push(filters.state.trim().toLowerCase())}`);
@@ -167,45 +245,9 @@ export async function listPhlebos(
     const whereClause = conds.length > 0 ? `AND ${conds.join(' AND ')}` : '';
 
     return query<Phlebo>(`
-      WITH target AS (
-        SELECT latitude, longitude
-        FROM analytics.mv_pincode_geo
-        WHERE pincode = ${targetPin}
-      )
-      SELECT
-        p.phone, p.name, p.city, p.state, p.pincode,
-        p.orders_served, p.active_days, p.avg_orders_per_day::float8 AS avg_orders_per_day,
-        p.labs, p.first_order_at, p.last_order_at,
-        p.is_shared_phone, p.variants_at_phone,
-        p.email, p.notes, p.source,
-      pi.status AS interest, pi.note AS interest_note,
-      (pi.set_at AT TIME ZONE 'Asia/Kolkata')::text AS interest_set_at,
-      iu.name AS interest_set_by,
-        pi.status AS interest, pi.note AS interest_note,
-        (pi.set_at AT TIME ZONE 'Asia/Kolkata')::text AS interest_set_at,
-        iu.name AS interest_set_by,
-        ROUND((6371 * acos(
-          GREATEST(-1, LEAST(1,
-            cos(radians(t.latitude)) * cos(radians(g.latitude)) *
-            cos(radians(g.longitude) - radians(t.longitude)) +
-            sin(radians(t.latitude)) * sin(radians(g.latitude))
-          ))
-        ))::numeric, 1)::float8 AS distance_km
-      FROM atlas.phlebos_all p
-      LEFT JOIN atlas.provider_interest pi ON pi.kind = 'phlebo' AND pi.phone = p.phone
-      LEFT JOIN atlas.users iu ON iu.id = pi.set_by
-      JOIN analytics.mv_pincode_geo g ON g.pincode = p.pincode
-      CROSS JOIN target t
-      WHERE g.latitude IS NOT NULL
-        AND p.pincode ~ '^[0-9]{6}$'
-        AND 6371 * acos(
-          GREATEST(-1, LEAST(1,
-            cos(radians(t.latitude)) * cos(radians(g.latitude)) *
-            cos(radians(g.longitude) - radians(t.longitude)) +
-            sin(radians(t.latitude)) * sin(radians(g.latitude))
-          ))
-        ) <= ${radius}
-        ${whereClause}
+${nearbyTarget(targetPin)}
+      SELECT ${PHLEBO_COLS},${NEARBY_DISTANCE}
+      ${nearbyFromWhere(radius, whereClause)}
       ${orderClause(filters, true)}
       LIMIT ${push(limit)} OFFSET ${push(offset)}
     `, params);
@@ -250,9 +292,15 @@ export async function countPhlebos(filters: PhleboFilters): Promise<number> {
   const conds: string[] = [];
   if (filters.q && filters.q.trim()) {
     const q = push(`%${filters.q.trim().toLowerCase()}%`);
-    conds.push(`(lower(p.name) LIKE ${q} OR p.phone LIKE ${q} OR lower(p.city) LIKE ${q})`);
+    const raw = push(filters.q.trim());
+    conds.push(`(lower(p.name) LIKE ${q} OR p.phone LIKE ${q} OR lower(p.state) LIKE ${q}
+                 OR p.pincode LIKE ${q}
+                 OR lower(p.city) LIKE ${q} OR atlas.city_key(p.city) = atlas.city_key(${raw}))`);
   }
-  if (filters.city && filters.city.trim()) conds.push(`lower(p.city) = ${push(filters.city.trim().toLowerCase())}`);
+  // Through atlas.city_key, so Bangalore finds Bengaluru.
+  if (filters.city && filters.city.trim()) {
+    conds.push(`atlas.city_key(p.city) = atlas.city_key(${push(filters.city.trim())})`);
+  }
   if (filters.state && filters.state.trim()) conds.push(`lower(p.state) = ${push(filters.state.trim().toLowerCase())}`);
   if (filters.source && filters.source !== 'all') conds.push(`p.source = ${push(filters.source)}`);
   const labSel = selectedLabs(filters);
@@ -268,23 +316,9 @@ export async function countPhlebos(filters: PhleboFilters): Promise<number> {
     const radius = push(radiusKm);
     const whereClause = conds.length > 0 ? `AND ${conds.join(' AND ')}` : '';
     const row = await queryOne<{ n: number }>(`
-      WITH target AS (
-        SELECT latitude, longitude FROM analytics.mv_pincode_geo WHERE pincode = ${targetPin}
-      )
+${nearbyTarget(targetPin)}
       SELECT COUNT(*)::int AS n
-      FROM atlas.phlebos_all p
-      LEFT JOIN atlas.provider_interest pi ON pi.kind = 'phlebo' AND pi.phone = p.phone
-      LEFT JOIN atlas.users iu ON iu.id = pi.set_by
-      JOIN analytics.mv_pincode_geo g ON g.pincode = p.pincode
-      CROSS JOIN target t
-      WHERE g.latitude IS NOT NULL
-        AND p.pincode ~ '^[0-9]{6}$'
-        AND 6371 * acos(GREATEST(-1, LEAST(1,
-          cos(radians(t.latitude)) * cos(radians(g.latitude)) *
-          cos(radians(g.longitude) - radians(t.longitude)) +
-          sin(radians(t.latitude)) * sin(radians(g.latitude))
-        ))) <= ${radius}
-        ${whereClause}
+      ${nearbyFromWhere(radius, whereClause)}
     `, params);
     return row?.n ?? 0;
   }

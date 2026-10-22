@@ -82,10 +82,20 @@ const SORT_EXPRS: Record<SortKey, string> = {
 function orderClause(filters: NurseFilters, isNearby: boolean): string {
   const key: SortKey =
     filters.sortBy && SORT_EXPRS[filters.sortBy] ? filters.sortBy : (isNearby ? 'distance' : 'name');
-  const dir = filters.sortDir === 'asc' ? 'ASC' : 'DESC';
+  // Distance counts up: nearest first unless somebody asks otherwise. Every
+  // other sort here reads best-first as DESC, and distance inherited that.
+  const dir = key === 'distance'
+    ? (filters.sortDir === 'desc' ? 'DESC' : 'ASC')
+    : (filters.sortDir === 'asc' ? 'ASC' : 'DESC');
   const expr = key === 'distance' && !isNearby ? SORT_EXPRS.name : SORT_EXPRS[key];
+  // In a pincode search, whoever we can actually place comes before whoever we
+  // only know the city of, whatever the chosen sort — otherwise a name sort
+  // puts an Aarti with no pincode above the nurse two streets away. Written as
+  // the underlying expression because Postgres takes a bare output name in
+  // ORDER BY but not an expression built on one.
+  const placed = isNearby ? '(g.latitude IS NULL OR t.lat IS NULL) ASC, ' : '';
   // Verified first on ties — the network team screens on it.
-  return `ORDER BY ${expr} ${dir} NULLS LAST, n.is_verified DESC, lower(n.name) ASC, n.phone ASC`;
+  return `ORDER BY ${placed}${expr} ${dir} NULLS LAST, n.is_verified DESC, lower(n.name) ASC, n.phone ASC`;
 }
 
 /** Empty selection means no aggregator filter, matching the other filters. */
@@ -102,12 +112,21 @@ function buildConds(
   const conds: string[] = [];
   if (filters.q && filters.q.trim()) {
     const q = push(`%${filters.q.trim().toLowerCase()}%`);
+    // The city half goes through the alias table too, and the state and
+    // pincode are searchable because people type both into a box that offers
+    // to search by city.
+    const raw = push(filters.q.trim());
     conds.push(
-      `(lower(n.name) LIKE ${q} OR n.phone LIKE ${q} OR lower(n.city) LIKE ${q} OR lower(n.locality) LIKE ${q})`,
+      `(lower(n.name) LIKE ${q} OR n.phone LIKE ${q} OR lower(n.locality) LIKE ${q}
+        OR lower(n.state) LIKE ${q} OR n.pincode LIKE ${q}
+        OR lower(n.city) LIKE ${q} OR atlas.city_key(n.city) = atlas.city_key(${raw}))`,
     );
   }
   if (filters.city && filters.city.trim()) {
-    conds.push(`lower(n.city) = ${push(filters.city.trim().toLowerCase())}`);
+    // Through atlas.city_key, so Bangalore finds Bengaluru and Mysore finds
+    // Mysuru. The alias table has known that since 08a; nothing here was
+    // asking it, so the city box matched the spelling and not the place.
+    conds.push(`atlas.city_key(n.city) = atlas.city_key(${push(filters.city.trim())})`);
   }
   if (filters.state && filters.state.trim()) {
     conds.push(`lower(n.state) = ${push(filters.state.trim().toLowerCase())}`);
@@ -182,6 +201,62 @@ const NURSE_FROM = `atlas.nurses_all n
     LEFT JOIN atlas.provider_interest pi ON pi.kind = 'nurse' AND pi.phone = n.phone
     LEFT JOIN atlas.users iu ON iu.id = pi.set_by`;
 
+
+/**
+ * The pieces of a pincode search that the list and its count must agree on.
+ *
+ * They were two copies of the same forty lines of trigonometry, which is how
+ * a page ends up showing twenty rows above the words "4 nurses".
+ */
+const nearbyTarget = (targetPin: string) => `
+      -- The pincode you typed, as a point and as a city. Always exactly one
+      -- row, even for a pincode with no coordinates: a pincode we only know
+      -- the city for should still find that city rather than nothing.
+      WITH target AS (
+        SELECT g.latitude AS lat, g.longitude AS lon, pc.city AS city
+        FROM (SELECT ${targetPin}::text AS pincode) q
+        LEFT JOIN analytics.mv_pincode_geo  g  ON g.pincode = q.pincode
+        LEFT JOIN analytics.mv_pincode_city pc ON pc.pincode = q.pincode
+      )`;
+
+const nearbyFromWhere = (radius: string, where: string) => `
+      FROM ${NURSE_FROM}
+      -- LEFT, not an inner join. It dropped every nurse without a pincode
+      -- before the radius was even considered, and on an uploaded list that
+      -- carries a city and no pincode that is almost all of them.
+      LEFT JOIN analytics.mv_pincode_geo g
+        ON g.pincode = n.pincode AND n.pincode ~ '^[0-9]{6}$'
+      CROSS JOIN target t
+      WHERE (
+          -- Near enough by their own pincode...
+          (g.latitude IS NOT NULL AND t.lat IS NOT NULL
+           AND 6371 * acos(GREATEST(-1, LEAST(1,
+             cos(radians(t.lat)) * cos(radians(g.latitude)) *
+             cos(radians(g.longitude) - radians(t.lon)) +
+             sin(radians(t.lat)) * sin(radians(g.latitude))
+           ))) <= ${radius})
+          -- ...or in the city that pincode belongs to, which is all we know
+          -- about somebody an upload gave a city and no pincode.
+          -- ...or, only when we cannot place them at all, in the city that
+          -- pincode belongs to. Guarded on having no coordinates rather than
+          -- applied to everyone: a phlebo whose profile says Bengaluru and
+          -- whose pincode is in Ghaziabad is 1,700 km away, and the pincode
+          -- is the better evidence. The fallback is for the uploaded rows
+          -- that carry a city and nothing else.
+          OR (g.latitude IS NULL AND t.city IS NOT NULL
+              AND atlas.city_key(n.city) = atlas.city_key(t.city))
+        )
+        ${where}`;
+
+const NEARBY_DISTANCE = `
+        CASE WHEN g.latitude IS NOT NULL AND t.lat IS NOT NULL THEN
+          ROUND((6371 * acos(GREATEST(-1, LEAST(1,
+            cos(radians(t.lat)) * cos(radians(g.latitude)) *
+            cos(radians(g.longitude) - radians(t.lon)) +
+            sin(radians(t.lat)) * sin(radians(g.latitude))
+          ))))::numeric, 1)::float8
+        END AS distance_km`;
+
 /**
  * Nurses matching the filters. In nearby mode the pincode is haversine-joined
  * against mv_pincode_geo and distance_km is returned.
@@ -203,26 +278,9 @@ export async function listNurses(
     const radius = push(radiusKm);
     const where = conds.length ? `AND ${conds.join(' AND ')}` : '';
     return query<Nurse>(`
-      WITH target AS (
-        SELECT latitude, longitude FROM analytics.mv_pincode_geo WHERE pincode = ${targetPin}
-      )
-      SELECT ${SELECT_COLS},
-        ROUND((6371 * acos(GREATEST(-1, LEAST(1,
-          cos(radians(t.latitude)) * cos(radians(g.latitude)) *
-          cos(radians(g.longitude) - radians(t.longitude)) +
-          sin(radians(t.latitude)) * sin(radians(g.latitude))
-        ))))::numeric, 1)::float8 AS distance_km
-      FROM ${NURSE_FROM}
-      JOIN analytics.mv_pincode_geo g ON g.pincode = n.pincode
-      CROSS JOIN target t
-      WHERE g.latitude IS NOT NULL
-        AND n.pincode ~ '^[0-9]{6}$'
-        AND 6371 * acos(GREATEST(-1, LEAST(1,
-          cos(radians(t.latitude)) * cos(radians(g.latitude)) *
-          cos(radians(g.longitude) - radians(t.longitude)) +
-          sin(radians(t.latitude)) * sin(radians(g.latitude))
-        ))) <= ${radius}
-        ${where}
+${nearbyTarget(targetPin)}
+      SELECT ${SELECT_COLS},${NEARBY_DISTANCE}
+      ${nearbyFromWhere(radius, where)}
       ${orderClause(filters, true)}
       LIMIT ${push(limit)} OFFSET ${push(offset)}
     `, params);
@@ -255,21 +313,9 @@ export async function countNurses(filters: NurseFilters): Promise<number> {
     const radius = push(radiusKm);
     const where = conds.length ? `AND ${conds.join(' AND ')}` : '';
     const row = await queryOne<{ n: number }>(`
-      WITH target AS (
-        SELECT latitude, longitude FROM analytics.mv_pincode_geo WHERE pincode = ${targetPin}
-      )
+${nearbyTarget(targetPin)}
       SELECT COUNT(*)::int AS n
-      FROM ${NURSE_FROM}
-      JOIN analytics.mv_pincode_geo g ON g.pincode = n.pincode
-      CROSS JOIN target t
-      WHERE g.latitude IS NOT NULL
-        AND n.pincode ~ '^[0-9]{6}$'
-        AND 6371 * acos(GREATEST(-1, LEAST(1,
-          cos(radians(t.latitude)) * cos(radians(g.latitude)) *
-          cos(radians(g.longitude) - radians(t.longitude)) +
-          sin(radians(t.latitude)) * sin(radians(g.latitude))
-        ))) <= ${radius}
-        ${where}
+      ${nearbyFromWhere(radius, where)}
     `, params);
     return row?.n ?? 0;
   }

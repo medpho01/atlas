@@ -21,10 +21,14 @@ export async function GET(req: NextRequest) {
     source:   (sp.get('source') || 'all') as 'derived' | 'manual' | 'both' | 'all',
     verifiedOnly: sp.get('verified') === '1',
     interest: sp.get('interest') ?? '',
-    nearby:   sp.get('nearby') === '1',
+    nearby:   sp.get('nearby') !== '0',   // absent means ON, which is what the
+                                     // page sends and what page.tsx already assumed
     radiusKm: Number(sp.get('radius')) || NURSE_REACH_RADIUS_KM,
     sortBy:   (sp.get('sort') || undefined) as SortKey | undefined,
-    sortDir:  sp.get('dir') === 'asc' ? 'asc' as const : 'desc' as const,
+    // Left undefined when the URL says nothing, so each sort key can pick its
+    // own sensible direction — distance counts up, everything else counts down.
+    sortDir:  sp.get('dir') === 'asc' ? 'asc' as const
+            : sp.get('dir') === 'desc' ? 'desc' as const : undefined,
   };
 
   const [nurses, total] = await Promise.all([
