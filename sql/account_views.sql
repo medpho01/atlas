@@ -16,11 +16,18 @@
 --   APPOINTMENT    Appointment — see the coverage caveat below
 --   REQUEST        Request     — the enquiry funnel, absent from Atlas until now
 --
--- APPOINTMENT caveat: Appointment carries no storeId. The only route to a
--- store is order_id → Order.storeId, and that column is unpopulated in the
--- database this was written against, so the stream will read zero until it
--- is. The join is correct when the data arrives; the UI reports coverage
--- rather than implying the absence means "no appointments".
+-- APPOINTMENT attribution: Appointment carries no storeId, and this file used
+-- to say the only route was order_id → Order.storeId. That was wrong twice
+-- over. order_id is set on 0 of 23,836 appointments, so an INNER JOIN on it
+-- made the whole stream read zero — a declared, labelled, permanently empty
+-- business line. And it is not the only route: the patient is a User, and a
+-- User belongs to a store. That is also the better attribution for account
+-- health, because the question is whose customer this consultation was.
+--
+-- So: the order's store where an appointment hangs off one, the patient's
+-- store otherwise. On the snapshot that turns 0 into 3,110, and reveals an
+-- account the dashboard called nearly dead — Om Shiv Bone Joint and Dental,
+-- 3,103 consultations against 23 lab orders.
 -- ============================================================================
 
 DROP MATERIALIZED VIEW IF EXISTS analytics.mv_account_activity CASCADE;
@@ -68,7 +75,7 @@ WITH events AS (
 
   -- ---- Appointments, attributed through their order ----------------------
   SELECT
-    o."storeId", DATE_TRUNC('month', a."createdAt")::date, 'APPOINTMENT',
+    COALESCE(o."storeId", u."storeId"), DATE_TRUNC('month', a."createdAt")::date, 'APPOINTMENT',
     CASE
       WHEN pt."typeName" = 'Doctor' AND a."appointmentType"::text = 'CENTER_VISIT' THEN 'DOCTOR_CONSULT_CENTER'
       WHEN pt."typeName" = 'Doctor' AND a."appointmentType"::text = 'HOME_VISIT'   THEN 'DOCTOR_CONSULT_HOME'
@@ -83,9 +90,10 @@ WITH events AS (
     a.user_id, a."providerGroup_id",
     0, 0, 0
   FROM src_local."Appointment" a
-  JOIN src_local."Order" o ON o.id = a.order_id
+  LEFT JOIN src_local."Order" o ON o.id = a.order_id
+  LEFT JOIN src_local."User"  u ON u.id = a.user_id
   LEFT JOIN src_local."ProviderType" pt ON pt.id = a."providerType_id"
-  WHERE o."storeId" IS NOT NULL
+  WHERE COALESCE(o."storeId", u."storeId") IS NOT NULL
 
   UNION ALL
 

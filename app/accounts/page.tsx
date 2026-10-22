@@ -11,7 +11,7 @@ import { StickyMetrics } from '@/components/ui/StickyMetrics';
 import { Pill, ChipButton } from '@/components/ui/Toggle';
 import { InfoTip } from '@/components/ui/InfoTip';
 import { AccountsTable } from './AccountsTable';
-import { query } from '@/lib/db';
+import { query, queryOne } from '@/lib/db';
 
 export const dynamic = 'force-dynamic';
 
@@ -71,6 +71,15 @@ export default async function AccountsPage({ searchParams }: { searchParams: { s
   if (statusFilter) { params.push(statusFilter); where.push(`account_status = $${params.length}`); }
   if (q) { params.push(`%${q.toLowerCase()}%`); where.push(`(lower(store_name) LIKE $${params.length} OR lower(city) LIKE $${params.length})`); }
 
+  // The real, unfiltered count. The subtitle used to read "80 B2B stores"
+  // hardcoded while the table under it said 139 — two numbers for the same
+  // thing on one page, and neither moved when the data did. Taken from the
+  // same view the table reads, and not from accounts.length, which is the
+  // filtered page and would make the sentence change as you search.
+  const totalRow = await queryOne<{ n: number }>(
+    `SELECT COUNT(*)::int AS n FROM mv_store_health`);
+  const totalAccounts = totalRow?.n ?? 0;
+
   const accounts: Account[] = await query(
     `
     SELECT * FROM mv_store_health
@@ -107,7 +116,7 @@ export default async function AccountsPage({ searchParams }: { searchParams: { s
     <div className="px-6 lg:px-8 py-6 max-w-[1600px] mx-auto">
       <PageHeader
         title="Account Health · B2B Stores"
-        subtitle="80 B2B stores route orders through the platform. Surface the at-risk + declining accounts that drive most revenue."
+        subtitle={`${totalAccounts.toLocaleString('en-IN')} accounts route demand through the platform. Surface the at-risk and declining ones.`}
         actions={
           <InfoTip
             title="Account Health"
