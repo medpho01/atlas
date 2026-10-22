@@ -31,6 +31,7 @@ export type Phlebo = {
   notes: string | null;
   source: 'derived' | 'manual' | 'both';
   distance_km?: number | null;
+  availability: ('morning' | 'afternoon' | 'evening')[];
   interest: 'interested' | 'not_interested' | null;
   interest_note: string | null;
   interest_set_at: string | null;
@@ -49,6 +50,8 @@ export type PhleboFilters = {
   minOrders?: number;
   /** 'interested' | 'not_interested' | 'unasked' | 'asked'. */
   interest?: string;
+  /** morning | afternoon | evening | 'unasked' | 'asked'. */
+  slot?: string;
   sortBy?: SortKey;
   sortDir?: 'asc' | 'desc';
 };
@@ -98,6 +101,7 @@ const nearbyFromWhere = (radius: string, where: string) => `
       FROM atlas.phlebos_all p
       LEFT JOIN atlas.provider_interest pi ON pi.kind = 'phlebo' AND pi.phone = p.phone
       LEFT JOIN atlas.users iu ON iu.id = pi.set_by
+      LEFT JOIN atlas.provider_availability av ON av.kind = 'phlebo' AND av.phone = p.phone
       -- LEFT, not an inner join: it dropped everyone without a pincode before
       -- the radius was even considered.
       LEFT JOIN analytics.mv_pincode_geo g
@@ -136,7 +140,11 @@ const PHLEBO_COLS = `
         p.labs, p.first_order_at, p.last_order_at,
         p.is_shared_phone, p.variants_at_phone,
         p.email, p.notes, p.source,
-        pi.status AS interest, pi.note AS interest_note,
+        COALESCE(ARRAY_REMOVE(ARRAY[
+        CASE WHEN av.morning   THEN 'morning'   END,
+        CASE WHEN av.afternoon THEN 'afternoon' END,
+        CASE WHEN av.evening   THEN 'evening'   END], NULL), ARRAY[]::text[]) AS availability,
+      pi.status AS interest, pi.note AS interest_note,
         (pi.set_at AT TIME ZONE 'Asia/Kolkata')::text AS interest_set_at,
         iu.name AS interest_set_by`;
 
@@ -236,6 +244,11 @@ export async function listPhlebos(
   else if (filters.interest === 'interested')     conds.push(`pi.status = 'interested'`);
   else if (filters.interest === 'not_interested') conds.push(`pi.status = 'not_interested'`);
   else if (filters.interest === 'asked')          conds.push(`pi.status IS NOT NULL`);
+  if (filters.slot === 'unasked')        conds.push(`av.phone IS NULL`);
+  else if (filters.slot === 'asked')     conds.push(`av.phone IS NOT NULL`);
+  else if (filters.slot === 'morning')   conds.push(`av.morning`);
+  else if (filters.slot === 'afternoon') conds.push(`av.afternoon`);
+  else if (filters.slot === 'evening')   conds.push(`av.evening`);
 
   if (isNearby) {
     // Radius search: haversine-join phlebo pincode → target pincode via mv_pincode_geo
@@ -266,6 +279,10 @@ ${nearbyTarget(targetPin)}
       p.labs, p.first_order_at, p.last_order_at,
       p.is_shared_phone, p.variants_at_phone,
       p.email, p.notes, p.source,
+      COALESCE(ARRAY_REMOVE(ARRAY[
+        CASE WHEN av.morning   THEN 'morning'   END,
+        CASE WHEN av.afternoon THEN 'afternoon' END,
+        CASE WHEN av.evening   THEN 'evening'   END], NULL), ARRAY[]::text[]) AS availability,
       pi.status AS interest, pi.note AS interest_note,
       (pi.set_at AT TIME ZONE 'Asia/Kolkata')::text AS interest_set_at,
       iu.name AS interest_set_by,
@@ -273,6 +290,7 @@ ${nearbyTarget(targetPin)}
     FROM atlas.phlebos_all p
       LEFT JOIN atlas.provider_interest pi ON pi.kind = 'phlebo' AND pi.phone = p.phone
       LEFT JOIN atlas.users iu ON iu.id = pi.set_by
+      LEFT JOIN atlas.provider_availability av ON av.kind = 'phlebo' AND av.phone = p.phone
     ${whereClause}
     ${orderClause(filters, false)}
     LIMIT ${push(limit)} OFFSET ${push(offset)}
@@ -310,6 +328,11 @@ export async function countPhlebos(filters: PhleboFilters): Promise<number> {
   else if (filters.interest === 'interested')     conds.push(`pi.status = 'interested'`);
   else if (filters.interest === 'not_interested') conds.push(`pi.status = 'not_interested'`);
   else if (filters.interest === 'asked')          conds.push(`pi.status IS NOT NULL`);
+  if (filters.slot === 'unasked')        conds.push(`av.phone IS NULL`);
+  else if (filters.slot === 'asked')     conds.push(`av.phone IS NOT NULL`);
+  else if (filters.slot === 'morning')   conds.push(`av.morning`);
+  else if (filters.slot === 'afternoon') conds.push(`av.afternoon`);
+  else if (filters.slot === 'evening')   conds.push(`av.evening`);
 
   if (isNearby) {
     const targetPin = push(filters.pincode);
@@ -330,6 +353,7 @@ ${nearbyTarget(targetPin)}
   const row = await queryOne<{ n: number }>(
     `SELECT COUNT(*)::int AS n FROM atlas.phlebos_all p
        LEFT JOIN atlas.provider_interest pi ON pi.kind = 'phlebo' AND pi.phone = p.phone
+       LEFT JOIN atlas.provider_availability av ON av.kind = 'phlebo' AND av.phone = p.phone
        ${whereClause}`,
     params,
   );

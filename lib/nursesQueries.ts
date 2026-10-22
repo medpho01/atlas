@@ -37,6 +37,7 @@ export type Nurse = {
   appointments_completed: number;
   appointments_cancelled: number;
   last_appointment: string | null;
+  availability: ('morning' | 'afternoon' | 'evening')[];
   interest: 'interested' | 'not_interested' | null;
   interest_note: string | null;
   interest_set_at: string | null;
@@ -54,6 +55,8 @@ export type NurseFilters = {
   verifiedOnly?: boolean;
   /** 'interested' | 'not_interested' | 'unasked' — nobody has rung them yet. */
   interest?: string;
+  /** morning | afternoon | evening | 'unasked' | 'asked'. */
+  slot?: string;
   /** Only nurses who have served at least this many appointments. */
   minAppointments?: number;
   nearby?: boolean;
@@ -143,6 +146,11 @@ function buildConds(
   else if (filters.interest === 'interested') conds.push(`pi.status = 'interested'`);
   else if (filters.interest === 'not_interested') conds.push(`pi.status = 'not_interested'`);
   else if (filters.interest === 'asked')      conds.push(`pi.status IS NOT NULL`);
+  if (filters.slot === 'unasked')      conds.push(`av.phone IS NULL`);
+  else if (filters.slot === 'asked')   conds.push(`av.phone IS NOT NULL`);
+  else if (filters.slot === 'morning')   conds.push(`av.morning`);
+  else if (filters.slot === 'afternoon') conds.push(`av.afternoon`);
+  else if (filters.slot === 'evening')   conds.push(`av.evening`);
   if (filters.minAppointments && filters.minAppointments > 0) {
     conds.push(`COALESCE(ap.appointments, 0) >= ${push(filters.minAppointments)}`);
   }
@@ -183,6 +191,13 @@ const SELECT_COLS = `
   COALESCE(ap.completed, 0)::int    AS appointments_completed,
   COALESCE(ap.cancelled, 0)::int    AS appointments_cancelled,
   ap.last_appointment::text         AS last_appointment,
+  -- When they said they can work. An array so the row renders one way
+  -- whatever is ticked, and a missing row comes back empty rather than
+  -- three falses, which would read as "available at no time".
+  COALESCE(ARRAY_REMOVE(ARRAY[
+    CASE WHEN av.morning   THEN 'morning'   END,
+    CASE WHEN av.afternoon THEN 'afternoon' END,
+    CASE WHEN av.evening   THEN 'evening'   END], NULL), ARRAY[]::text[]) AS availability,
   pi.status                         AS interest,
   pi.note                           AS interest_note,
   (pi.set_at AT TIME ZONE 'Asia/Kolkata')::text AS interest_set_at,
@@ -199,7 +214,8 @@ const SELECT_COLS = `
 const NURSE_FROM = `atlas.nurses_all n
     LEFT JOIN analytics.mv_nurse_appointments ap ON ap.phone = n.phone
     LEFT JOIN atlas.provider_interest pi ON pi.kind = 'nurse' AND pi.phone = n.phone
-    LEFT JOIN atlas.users iu ON iu.id = pi.set_by`;
+    LEFT JOIN atlas.users iu ON iu.id = pi.set_by
+    LEFT JOIN atlas.provider_availability av ON av.kind = 'nurse' AND av.phone = n.phone`;
 
 
 /**

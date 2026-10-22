@@ -5,6 +5,7 @@ import {
   Phone, MapPin, Search, X, Building2, Check, ChevronDown, BadgeCheck, Database, Sparkles,
 } from 'lucide-react';
 import { InterestButton } from '@/components/ui/InterestButton';
+import { AvailabilityPicker } from '@/components/ui/AvailabilityPicker';
 
 type Nurse = {
   phone: string;
@@ -23,6 +24,7 @@ type Nurse = {
   appointments_completed: number;
   appointments_cancelled: number;
   last_appointment: string | null;
+  availability: ('morning' | 'afternoon' | 'evening')[];
   interest: 'interested' | 'not_interested' | null;
   interest_note: string | null;
   interest_set_at: string | null;
@@ -52,6 +54,8 @@ type Filters = {
   sortDir: 'asc' | 'desc';
   /** '' = everyone, or interested / not_interested / unasked. */
   interest: string;
+  /** '' = any, or morning / afternoon / evening / unasked. */
+  slot: string;
 };
 
 export function NursesClient({
@@ -86,7 +90,7 @@ export function NursesClient({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filters.q, filters.pincode, filters.city, JSON.stringify(filters.aggregators),
       filters.source, filters.verifiedOnly, filters.nearby, filters.radiusKm,
-      filters.sortBy, filters.sortDir, filters.interest]);
+      filters.sortBy, filters.sortDir, filters.interest, filters.slot]);
 
   const runSearch = (f: Filters) => {
     const params = new URLSearchParams();
@@ -97,6 +101,7 @@ export function NursesClient({
     if (f.source !== 'all') params.set('source', f.source);
     if (f.verifiedOnly) params.set('verified', '1');
     if (f.interest) params.set('interest', f.interest);
+    if (f.slot) params.set('slot', f.slot);
     // Nearby is the default, so only the narrower choice needs recording.
     if (!f.nearby) params.set('nearby', '0');
     if (f.radiusKm !== defaultRadius) params.set('radius', String(f.radiusKm));
@@ -120,7 +125,7 @@ export function NursesClient({
   const clearAll = () =>
     setFilters({
       q: '', pincode: '', city: '', aggregators: [], source: 'all', verifiedOnly: false,
-      interest: '', nearby: true, radiusKm: defaultRadius, sortBy: 'name', sortDir: 'asc',
+      interest: '', slot: '', nearby: true, radiusKm: defaultRadius, sortBy: 'name', sortDir: 'asc',
     });
 
   const toggleSort = (key: SortKey) =>
@@ -133,7 +138,7 @@ export function NursesClient({
 
   const hasFilters =
     filters.q || filters.pincode || filters.city || filters.aggregators.length > 0 ||
-    filters.source !== 'all' || filters.verifiedOnly || !!filters.interest;
+    filters.source !== 'all' || filters.verifiedOnly || !!filters.interest || !!filters.slot;
   const isPincodeValid = /^\d{6}$/.test(filters.pincode);
 
   return (
@@ -235,6 +240,23 @@ export function NursesClient({
               </select>
             </label>
 
+            {/* When they can work. The same phone call as the one above, so it
+                sits beside it. */}
+            <label className="inline-flex items-center gap-1.5 text-xs text-ink-600">
+              <span>Available:</span>
+              <select
+                value={filters.slot}
+                onChange={(e) => setFilters({ ...filters, slot: e.target.value })}
+                className="text-xs px-2 py-1 rounded-md border border-ink-200 bg-surface font-medium"
+              >
+                <option value="">Any time</option>
+                <option value="morning">Morning</option>
+                <option value="afternoon">Afternoon</option>
+                <option value="evening">Evening</option>
+                <option value="unasked">Not asked yet</option>
+              </select>
+            </label>
+
             <label className="inline-flex items-center gap-1.5 text-xs text-ink-600">
               <span>Source:</span>
               <select
@@ -288,14 +310,16 @@ export function NursesClient({
                 {/* Pinned to the right edge. The directory is wider than any screen,
                     so the one button this column exists for was the only thing
                     on the row you had to scroll sideways to reach. */}
+                <th className="px-3 py-2 font-semibold sticky right-[112px] bg-surface
+                               border-l border-ink-150 w-[106px]">Available</th>
                 <th className="px-4 py-2 font-semibold sticky right-0 bg-surface
-                               border-l border-ink-150">Interested</th>
+                               border-l border-ink-150 w-[112px]">Interested</th>
               </tr>
             </thead>
             <tbody>
               {nurses.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="px-4 py-12 text-center text-sm text-ink-500">
+                  <td colSpan={9} className="px-4 py-12 text-center text-sm text-ink-500">
                     No nurses match these filters.
                     {canEdit && !hasFilters && ' Upload a list to start building the repository.'}
                   </td>
@@ -625,7 +649,13 @@ function NurseRow({ n, canSetInterest, selectedAggregators, canEdit }: {
         )}
       </td>
     
-      {/* What they said when we rang. Written where it is read. */}
+      {/* When they can work, and whether they want to — the two halves of the
+          same phone call, both pinned so neither needs a sideways scroll. */}
+      <td className="px-3 py-3 sticky right-[112px] bg-surface group-hover:bg-ink-100/40
+                     transition border-l border-ink-150">
+        <AvailabilityPicker kind="nurse" phone={n.phone}
+                            value={n.availability ?? []} canSet={canSetInterest} />
+      </td>
       <td className="px-4 py-3 sticky right-0 bg-surface group-hover:bg-ink-100/40
                      transition border-l border-ink-150">
         <InterestButton kind="nurse" phone={n.phone} value={n.interest} canSet={canSetInterest} />

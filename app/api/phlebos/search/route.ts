@@ -29,6 +29,7 @@ export async function GET(req: NextRequest) {
     sortDir:  sp.get('dir') === 'asc' ? 'asc' as const
             : sp.get('dir') === 'desc' ? 'desc' as const : undefined,
     interest: sp.get('interest') ?? '',
+    slot:     sp.get('slot') ?? '',
   };
 
   const [phlebos, total] = await Promise.all([

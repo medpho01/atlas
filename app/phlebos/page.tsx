@@ -30,6 +30,7 @@ export default async function PhlebosPage({ searchParams }: { searchParams: Prom
     radiusKm:  Number(s(sp.radius)) || PHLEBO_REACH_RADIUS_KM,
     minOrders: Number(s(sp.min)) || 0,
     interest: (Array.isArray(sp.interest) ? sp.interest[0] : sp.interest) ?? '',
+    slot: (Array.isArray(sp.slot) ? sp.slot[0] : sp.slot) ?? '',
   };
 
   const [stats, phlebos, totalCount, labs] = await Promise.all([
@@ -109,6 +110,7 @@ export default async function PhlebosPage({ searchParams }: { searchParams: Prom
           radiusKm: filters.radiusKm,
           minOrders: filters.minOrders,
           interest: filters.interest,
+          slot: filters.slot,
           sortBy: 'orders',
           sortDir: 'desc',
         }}

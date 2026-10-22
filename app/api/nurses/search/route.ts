@@ -21,6 +21,7 @@ export async function GET(req: NextRequest) {
     source:   (sp.get('source') || 'all') as 'derived' | 'manual' | 'both' | 'all',
     verifiedOnly: sp.get('verified') === '1',
     interest: sp.get('interest') ?? '',
+    slot:     sp.get('slot') ?? '',
     nearby:   sp.get('nearby') !== '0',   // absent means ON, which is what the
                                      // page sends and what page.tsx already assumed
     radiusKm: Number(sp.get('radius')) || NURSE_REACH_RADIUS_KM,

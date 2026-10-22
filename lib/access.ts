@@ -57,7 +57,7 @@ export type Feature =
   | 'commitments'       // open promises — gates quoting actions on requests
   | 'orderTracking'     // Fulfilment › Order tracking (the three order queues)
   | 'salesCrm'          // Growth › Sales CRM (new stores)
-  | 'providerInterest'  // The like/dislike on a phlebo or nurse row
+  | 'providerInterest'  // Interest and availability on a phlebo or nurse row
   | 'admin';            // users & roles
 
 export type Capability = 'none' | 'view' | 'manage';
@@ -100,10 +100,11 @@ const MATRIX: Record<Feature, Record<Role, Capability>> = {
   // Network works the queues; only a lead hands the work out, which is the
   // difference between 'manage' and 'view' on this one.
   orderTracking:    { admin: 'manage', network_lead: 'manage', network: 'view',   accounts: 'none',   sales: 'none',     operations: 'view',   editor: 'view',   viewer: 'none' },
-  // Recording whether a phlebo or nurse wants to work with us is a phone call,
-  // not a change to the directory — operations make those calls too, and
-  // giving them 'manage' on the whole directory to allow two buttons would
-  // also let them edit labs and upload lists.
+  // What a phlebo or nurse said when we rang — whether they want the work and
+  // when they can do it. A phone call, not a change to the directory:
+  // operations make those calls too, and giving them 'manage' on the whole
+  // directory to allow a few buttons would also let them edit labs and upload
+  // lists. One permission for both, because it is one conversation.
   providerInterest: { admin: 'manage', network_lead: 'manage', network: 'manage', accounts: 'none', sales: 'none', operations: 'manage', editor: 'manage', viewer: 'none' },
   // The sales pipeline. Accounts reads it because the handover from a signed
   // deal to a managed account is theirs.
@@ -199,7 +200,7 @@ export const FEATURE_LABEL: Record<Feature, string> = {
   commitments: 'Open promises',
   orderTracking: 'Order tracking',
   salesCrm: 'Sales CRM',
-  providerInterest: 'Phlebo & nurse interest',
+  providerInterest: 'Phlebo & nurse field notes',
   pricing: 'Packages & Pricing',
   providerPipeline: 'Provider onboarding',
   admin: 'Users & roles',

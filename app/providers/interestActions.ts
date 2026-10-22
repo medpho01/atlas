@@ -83,3 +83,60 @@ export async function setProviderInterest(input: {
   revalidatePath(path);
   return { ok: true, status: status ?? null };
 }
+
+
+export type Slot = 'morning' | 'afternoon' | 'evening';
+const SLOTS: Slot[] = ['morning', 'afternoon', 'evening'];
+
+/**
+ * When somebody said they can work.
+ *
+ * Ticking nothing clears the row rather than storing three falses: "nobody has
+ * asked" and "available at no time" are different answers, and only the first
+ * is true of a person we have not rung. The table's CHECK enforces the same
+ * thing from below.
+ */
+export async function setProviderAvailability(input: {
+  kind: string; phone: string; slots: string[];
+}): Promise<{ ok: boolean; error?: string; slots?: Slot[] }> {
+  const me = await getSessionUser();
+  if (!me) return { ok: false, error: 'unauthenticated' };
+  if (!canManage(me, 'providerInterest')) {
+    return { ok: false, error: 'Needs the network, operations or admin role' };
+  }
+
+  const kind = KINDS.find((k) => k === input.kind);
+  if (!kind) return { ok: false, error: 'Unknown directory' };
+
+  const phone = normalise(input.phone);
+  if (!phone) return { ok: false, error: 'No phone number to record this against' };
+
+  const slots = SLOTS.filter((s) => (input.slots ?? []).includes(s));
+  const [morning, afternoon, evening] =
+    [slots.includes('morning'), slots.includes('afternoon'), slots.includes('evening')];
+
+  if (slots.length === 0) {
+    await query('DELETE FROM atlas.provider_availability WHERE kind = $1 AND phone = $2',
+      [kind, phone]);
+  } else {
+    await query(`
+      INSERT INTO atlas.provider_availability
+        (kind, phone, morning, afternoon, evening, set_by, set_at)
+      VALUES ($1, $2, $3, $4, $5, $6, now())
+      ON CONFLICT (kind, phone) DO UPDATE SET
+        morning = EXCLUDED.morning, afternoon = EXCLUDED.afternoon,
+        evening = EXCLUDED.evening, set_by = EXCLUDED.set_by, set_at = now()
+    `, [kind, phone, morning, afternoon, evening, me.id]);
+  }
+
+  await query(`
+    INSERT INTO atlas.provider_availability_log
+      (kind, phone, morning, afternoon, evening, set_by)
+    VALUES ($1, $2, $3, $4, $5, $6)
+  `, [kind, phone, morning, afternoon, evening, me.id]);
+
+  const path = kind === 'nurse' ? '/nurses' : '/phlebos';
+  audit(me.id, path, slots.length ? `availability:${slots.join('+')}` : 'availability-clear');
+  revalidatePath(path);
+  return { ok: true, slots };
+}

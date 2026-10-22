@@ -31,6 +31,7 @@ export default async function NursesPage({ searchParams }: { searchParams: Promi
     source:  (s(sp.source) || 'all') as 'derived' | 'manual' | 'both' | 'all',
     verifiedOnly: s(sp.verified) === '1',
     interest: s(sp.interest) ?? '',
+    slot: s(sp.slot) ?? '',
     nearby:  s(sp.nearby) !== '0',
     radiusKm: Number(s(sp.radius)) || NURSE_REACH_RADIUS_KM,
   };
@@ -109,6 +110,7 @@ export default async function NursesPage({ searchParams }: { searchParams: Promi
           source: filters.source,
           verifiedOnly: filters.verifiedOnly,
           interest: filters.interest,
+          slot: filters.slot,
           nearby: filters.nearby,
           radiusKm: filters.radiusKm,
           sortBy: 'name',

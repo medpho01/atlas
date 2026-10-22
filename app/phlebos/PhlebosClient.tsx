@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState, useTransition } from 'react';
 import { Phone, MapPin, Search, X, Sparkles, Database, Users, Building2, Check, ChevronDown } from 'lucide-react';
 import { InterestButton } from '@/components/ui/InterestButton';
+import { AvailabilityPicker } from '@/components/ui/AvailabilityPicker';
 
 type Phlebo = {
   phone: string;
@@ -22,6 +23,7 @@ type Phlebo = {
   notes: string | null;
   source: 'derived' | 'manual' | 'both';
   distance_km?: number | null;
+  availability: ('morning' | 'afternoon' | 'evening')[];
   interest: 'interested' | 'not_interested' | null;
   interest_note: string | null;
   interest_set_at: string | null;
@@ -44,6 +46,8 @@ type Filters = {
   sortDir: 'asc' | 'desc';
   /** '' = everyone, or interested / not_interested / unasked / asked. */
   interest: string;
+  /** '' = any, or morning / afternoon / evening / unasked. */
+  slot: string;
 };
 
 export function PhlebosClient({
@@ -77,7 +81,7 @@ export function PhlebosClient({
     // eslint-disable-next-line react-hooks/exhaustive-deps
     // labs is an array — stringify it so the dep is a primitive that can't
     // alias two different selections (lab names contain spaces).
-  }, [filters.q, filters.pincode, filters.city, JSON.stringify(filters.labs), filters.source, filters.nearby, filters.radiusKm, filters.minOrders, filters.sortBy, filters.sortDir]);
+  }, [filters.q, filters.pincode, filters.city, JSON.stringify(filters.labs), filters.source, filters.nearby, filters.radiusKm, filters.minOrders, filters.sortBy, filters.sortDir, filters.interest, filters.slot]);
 
   const runSearch = (f: Filters) => {
     const params = new URLSearchParams();
@@ -91,6 +95,7 @@ export function PhlebosClient({
     if (f.radiusKm !== defaultRadius) params.set('radius', String(f.radiusKm));
     if (f.minOrders > 0) params.set('min', String(f.minOrders));
     if (f.interest) params.set('interest', f.interest);
+    if (f.slot) params.set('slot', f.slot);
     params.set('sort', f.sortBy);
     params.set('dir', f.sortDir);
 
@@ -109,7 +114,7 @@ export function PhlebosClient({
   };
 
   const clearAll = () => {
-    setFilters({ q: '', pincode: '', city: '', labs: [], source: 'all', nearby: true, radiusKm: defaultRadius, minOrders: 0, interest: '', sortBy: 'orders', sortDir: 'desc' });
+    setFilters({ q: '', pincode: '', city: '', labs: [], source: 'all', nearby: true, radiusKm: defaultRadius, minOrders: 0, interest: '', slot: '', sortBy: 'orders', sortDir: 'desc' });
   };
 
   const toggleSort = (key: SortKey) => {
@@ -122,7 +127,7 @@ export function PhlebosClient({
     }));
   };
 
-  const hasFilters = filters.q || filters.pincode || filters.city || filters.labs.length > 0 || filters.source !== 'all' || filters.minOrders > 0 || !!filters.interest;
+  const hasFilters = filters.q || filters.pincode || filters.city || filters.labs.length > 0 || filters.source !== 'all' || filters.minOrders > 0 || !!filters.interest || !!filters.slot;
   const isPincodeValid = /^\d{6}$/.test(filters.pincode);
 
   return (
@@ -224,6 +229,22 @@ export function PhlebosClient({
             </select>
           </label>
 
+          {/* When they can work. The same phone call as the one above. */}
+          <label className="inline-flex items-center gap-1.5 text-xs text-ink-600">
+            <span>Available:</span>
+            <select
+              value={filters.slot}
+              onChange={(e) => setFilters({ ...filters, slot: e.target.value })}
+              className="text-xs px-2 py-1 rounded-md border border-ink-200 bg-surface font-medium"
+            >
+              <option value="">Any time</option>
+              <option value="morning">Morning</option>
+              <option value="afternoon">Afternoon</option>
+              <option value="evening">Evening</option>
+              <option value="unasked">Not asked yet</option>
+            </select>
+          </label>
+
           <label className="inline-flex items-center gap-1.5 text-xs text-ink-600">
             <span>Source:</span>
             <select
@@ -295,14 +316,16 @@ export function PhlebosClient({
               {/* Pinned to the right edge. The directory is wider than any screen,
                     so the one button this column exists for was the only thing
                     on the row you had to scroll sideways to reach. */}
+                <th className="px-3 py-2 font-semibold sticky right-[112px] bg-surface
+                               border-l border-ink-150 w-[106px]">Available</th>
                 <th className="px-4 py-2 font-semibold sticky right-0 bg-surface
-                               border-l border-ink-150">Interested</th>
+                               border-l border-ink-150 w-[112px]">Interested</th>
             </tr>
           </thead>
           <tbody>
             {phlebos.length === 0 ? (
               <tr>
-                <td colSpan={7} className="px-4 py-12 text-center">
+                <td colSpan={8} className="px-4 py-12 text-center">
                   <Users className="w-8 h-8 text-ink-300 mx-auto mb-2" />
                   <p className="text-sm text-ink-500">No phlebos match your filters.</p>
                   {canEdit && !hasFilters && (
@@ -630,7 +653,13 @@ function PhleboRow({ p, canSetInterest, selectedLabs, canEdit }: {
         )}
       </td>
     
-      {/* What they said when we rang. */}
+      {/* When they can work, and whether they want to — the two halves of
+          the same phone call, both pinned so neither needs a sideways scroll. */}
+      <td className="px-3 py-3 sticky right-[112px] bg-surface group-hover:bg-ink-100/40
+                     transition border-l border-ink-150">
+        <AvailabilityPicker kind="phlebo" phone={p.phone}
+                            value={p.availability ?? []} canSet={canSetInterest} />
+      </td>
       <td className="px-4 py-3 sticky right-0 bg-surface group-hover:bg-ink-100/40
                      transition border-l border-ink-150">
         <InterestButton kind="phlebo" phone={p.phone} value={p.interest} canSet={canSetInterest} />
