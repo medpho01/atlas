@@ -1,5 +1,12 @@
 'use server';
 
+// Funnels are created and edited in Admin › Configure pipelines
+// (app/settings/pipeline), for every CRM at once. createFunnel and
+// setFunnelSuccessStage used to live here and were the board's own builder:
+// they could make a funnel but never change one, so a typo in a stage name was
+// permanent. Their replacements enforce the same success-stage rule and add
+// editing, renaming and reordering.
+
 import { revalidatePath } from 'next/cache';
 import { getSessionUser } from '@/lib/auth';
 import { query, queryOne } from '@/lib/db';
@@ -382,32 +389,6 @@ export async function updateProvider(input: {
   return { ok: true };
 }
 
-export async function createFunnel(input: { name: string; stages: { key: string; label: string }[]; successIndex?: number }): Promise<R> {
-  const me = await getSessionUser();
-  if (!me || me.role !== 'admin') return { ok: false, error: 'Funnel management is admin-only' };
-  if (!input.name.trim()) return { ok: false, error: 'Funnel name required' };
-  const stages = (input.stages ?? []).filter((s) => s.label.trim());
-  if (stages.length < 2) return { ok: false, error: 'A funnel needs at least 2 stages' };
-  // Derive stable keys from labels; ensure uniqueness
-  const seen = new Set<string>();
-  const norm = stages.map((st) => {
-    let key = st.label.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '') || 'stage';
-    while (seen.has(key)) key = key + '_2';
-    seen.add(key);
-    return { key, label: st.label.trim() };
-  });
-  // Success stage: explicit pick, else last stage mentioning "onboard", else last.
-  const idx = input.successIndex;
-  const successKey =
-    (idx != null && idx >= 0 && idx < norm.length) ? norm[idx].key
-    : ([...norm].reverse().find((st) => /onboard/i.test(st.key + st.label))?.key ?? norm[norm.length - 1].key);
-  const row = await queryOne<{ id: number }>(
-    `INSERT INTO atlas.crm_funnels (name, stages, success_stage_key, created_by) VALUES ($1, $2, $3, $4) RETURNING id`,
-    [input.name.trim(), JSON.stringify(norm), successKey, me.id],
-  );
-  revalidatePath('/crm');
-  return { ok: true, id: row!.id };
-}
 
 export async function updateThread(input: {
   threadId: number;
@@ -630,17 +611,6 @@ export async function removeChecklistItem(input: { threadId: number; itemId: num
   return { ok: true };
 }
 
-export async function setFunnelSuccessStage(input: { funnelId: number; stageKey: string }): Promise<R> {
-  const me = await getSessionUser();
-  if (!me || me.role !== 'admin') return { ok: false, error: 'Funnel management is admin-only' };
-  const f = await queryOne<{ stages: { key: string }[] }>(
-    `SELECT stages FROM atlas.crm_funnels WHERE id = $1`, [input.funnelId]);
-  if (!f) return { ok: false, error: 'Funnel not found' };
-  if (!f.stages.some((s) => s.key === input.stageKey)) return { ok: false, error: 'Stage not in this funnel' };
-  await query(`UPDATE atlas.crm_funnels SET success_stage_key = $1 WHERE id = $2`, [input.stageKey, input.funnelId]);
-  revalidatePath('/crm');
-  return { ok: true };
-}
 
 /**
  * Take a provider off this thread.

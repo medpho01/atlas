@@ -3,7 +3,7 @@
 import { useState, useTransition } from 'react';
 import { ArrowDown, ArrowUp, Check, X } from 'lucide-react';
 import { saveStages } from './actions';
-import type { PipelineStage, PipelineSummary } from '@/lib/pipelines';
+import type { PipelineStage, PipelineSummary } from '@/lib/pipelineKinds';
 
 const slug = (s: string) => s.toLowerCase().trim().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '');
 

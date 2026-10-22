@@ -18,42 +18,10 @@ import { query } from './db';
  * funnel would put a field in the database that nothing reads, and a reader
  * later would reasonably believe it. The screen adapts instead.
  */
-export type PipelineKind = 'sales' | 'network';
+export type { PipelineKind, PipelineStage, PipelineSummary } from './pipelineKinds';
+export { KIND_LABEL, KIND_BLURB } from './pipelineKinds';
 
-export type PipelineStage = {
-  key: string;
-  label: string;
-  /** Sales only. */
-  probability?: number;
-  /** Sales only: open | won | lost. */
-  outcome?: 'open' | 'won' | 'lost';
-};
-
-export type PipelineSummary = {
-  kind: PipelineKind;
-  id: number;
-  name: string;
-  isDefault: boolean;
-  stages: PipelineStage[];
-  /** Network only: the stage that means onboarded. */
-  successKey: string | null;
-  /** How many cards sit on each stage, keyed by stage key. */
-  counts: Record<string, number>;
-  /** What the cards on this pipeline are called, for the editor's column. */
-  cardNoun: string;
-  /** Where this pipeline's board lives. */
-  href: string;
-};
-
-export const KIND_LABEL: Record<PipelineKind, string> = {
-  sales: 'Sales CRM',
-  network: 'Network CRM',
-};
-
-export const KIND_BLURB: Record<PipelineKind, string> = {
-  sales: 'Signing new stores. Stages carry a win probability, and one of them means signed.',
-  network: 'Onboarding providers. Stages are a checklist; one of them means onboarded.',
-};
+import type { PipelineKind, PipelineStage, PipelineSummary } from './pipelineKinds';
 
 export async function listPipelines(): Promise<PipelineSummary[]> {
   const [sales, salesCounts, funnels, funnelCounts] = await Promise.all([

@@ -60,7 +60,17 @@ violation:
 One pipeline today. `pipeline_id` is on every deal so the planned
 account-management CRM adds a row rather than a migration.
 
-**The screen configures every CRM's pipelines, not just this one.** It lists
+**The screen configures every CRM's pipelines, not just this one, and it is the
+only place that creates one.** Provider onboarding used to carry its own funnel
+builder in a modal on the board — same idea, different code, different rules,
+and it could create a funnel but never edit one, so a typo in a stage name was
+permanent. That modal is gone; the board links here.
+
+A pipeline created here appears on its CRM's board straight away, because both
+read the same tables. The sales board grows a pipeline switcher as soon as
+there is more than one, so a second pipeline is never invisible.
+
+ It lists
 `atlas.sales_pipeline` under Sales CRM and `atlas.crm_funnels` under Network
 CRM, and the editor asks each pipeline what shape it is: a sales stage carries
 a probability and an outcome, a network stage is a key and a label with one of

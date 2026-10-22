@@ -4,7 +4,7 @@ import { revalidatePath } from 'next/cache';
 import { query, queryOne } from '@/lib/db';
 import { getSessionUser, audit } from '@/lib/auth';
 import { canManage } from '@/lib/access';
-import type { PipelineKind, PipelineStage } from '@/lib/pipelines';
+import type { PipelineKind, PipelineStage } from '@/lib/pipelineKinds';
 
 type R = { ok: boolean; error?: string };
 
@@ -117,5 +117,77 @@ export async function renamePipeline(input: {
   await query(`UPDATE ${table} SET name = $2 WHERE id = $1`, [input.pipelineId, name]);
   audit(me.id, '/settings/pipeline', 'rename');
   revalidatePath('/settings/pipeline');
+  return { ok: true };
+}
+
+
+/**
+ * Create a pipeline for any CRM.
+ *
+ * This is the only place a pipeline is made. The Network CRM used to have its
+ * own funnel builder in a modal — same idea, different code, different rules,
+ * and no way to edit a funnel once created. Two builders meant two answers to
+ * "what is a stage", and the one on the board could not fix a typo.
+ *
+ * A new pipeline starts with the stages its kind needs and nothing else. The
+ * editor beside it is where the real shape gets built, and a half-built
+ * pipeline with a board already pointing at it is worse than an empty one.
+ */
+export async function createPipeline(input: { kind: PipelineKind; name: string }): Promise<
+  R & { id?: number }
+> {
+  const me = await getSessionUser();
+  if (!me) return { ok: false, error: 'unauthenticated' };
+  if (!canManage(me, 'admin')) return { ok: false, error: 'Needs the admin role' };
+
+  const name = (input.name ?? '').trim().slice(0, 60);
+  if (!name) return { ok: false, error: 'Give it a name' };
+
+  let row: { id: number } | null;
+  if (input.kind === 'sales') {
+    row = await queryOne<{ id: number }>(`
+      INSERT INTO atlas.sales_pipeline (name, stages, is_default, created_by)
+      VALUES ($1, $2::jsonb, false, $3) RETURNING id
+    `, [name, JSON.stringify([
+      { key: 'prospect', label: 'Prospect', probability: 10, outcome: 'open' },
+      { key: 'won', label: 'Won', probability: 100, outcome: 'won' },
+      { key: 'lost', label: 'Lost', probability: 0, outcome: 'lost' },
+    ]), me.id]);
+  } else {
+    row = await queryOne<{ id: number }>(`
+      INSERT INTO atlas.crm_funnels (name, stages, success_stage_key, is_default, created_by)
+      VALUES ($1, $2::jsonb, 'onboarded', false, $3) RETURNING id
+    `, [name, JSON.stringify([
+      { key: 'identified', label: 'Identified' },
+      { key: 'contacted', label: 'Contacted' },
+      { key: 'onboarded', label: 'Onboarded' },
+    ]), me.id]);
+  }
+
+  audit(me.id, '/settings/pipeline', `create:${input.kind}`);
+  revalidatePath('/settings/pipeline');
+  revalidatePath(input.kind === 'sales' ? '/sales' : '/crm');
+  return { ok: true, id: row?.id };
+}
+
+/**
+ * Make one pipeline the default for its CRM.
+ *
+ * Per kind, not globally: the sales default and the onboarding default are
+ * unrelated, and a single flag across both would mean picking one CRM's
+ * default unsets the other's.
+ */
+export async function setDefaultPipeline(input: {
+  kind: PipelineKind; pipelineId: number;
+}): Promise<R> {
+  const me = await getSessionUser();
+  if (!me) return { ok: false, error: 'unauthenticated' };
+  if (!canManage(me, 'admin')) return { ok: false, error: 'Needs the admin role' };
+
+  const table = input.kind === 'sales' ? 'atlas.sales_pipeline' : 'atlas.crm_funnels';
+  await query(`UPDATE ${table} SET is_default = (id = $1)`, [input.pipelineId]);
+  audit(me.id, '/settings/pipeline', `default:${input.kind}`);
+  revalidatePath('/settings/pipeline');
+  revalidatePath(input.kind === 'sales' ? '/sales' : '/crm');
   return { ok: true };
 }

@@ -3,7 +3,7 @@
 import { useMemo, useState, useTransition } from 'react';
 import Link from 'next/link';
 import { Plus, Target, ChevronRight, Settings2, X } from 'lucide-react';
-import { createThread, createFunnel, updateThread, setFunnelSuccessStage,
+import { createThread, updateThread,
          renameThread, setThreadMembers, deleteThread } from './actions';
 import type { Thread, Funnel, ThreadMember } from '@/lib/crm';
 import { providerKindLabel, providerKindOptions } from '@/lib/providerKinds';
@@ -32,7 +32,6 @@ export function ThreadsClient({ threads, funnels, canWrite, isAdmin, members, te
   team: { id: number; name: string; role: string }[];
 }) {
   const [showCreate, setShowCreate] = useState(false);
-  const [showFunnels, setShowFunnels] = useState(false);
   const [renaming, setRenaming] = useState<Thread | null>(null);
   const [assigning, setAssigning] = useState<Thread | null>(null);
   const [deleting, setDeleting] = useState<Thread | null>(null);
@@ -84,13 +83,17 @@ export function ThreadsClient({ threads, funnels, canWrite, isAdmin, members, te
               <Plus className="w-4 h-4" /> New thread
             </button>
           )}
+          {/* One place configures pipelines, for every CRM. This board used to
+              carry its own funnel builder: same idea, different code, different
+              rules — and it could create a funnel but never edit one, so a typo
+              in a stage name was permanent. */}
           {isAdmin && (
-            <button
-              onClick={() => setShowFunnels(true)}
+            <Link
+              href="/settings/pipeline?kind=network"
               className="inline-flex items-center gap-1.5 px-3 h-9 text-sm font-medium rounded-md border border-ink-200 text-ink-700 hover:bg-ink-50 transition"
             >
-              <Settings2 className="w-4 h-4" /> Manage funnels ({funnels.length})
-            </button>
+              <Settings2 className="w-4 h-4" /> Configure funnels ({funnels.length})
+            </Link>
           )}
         </div>
 
@@ -275,7 +278,6 @@ export function ThreadsClient({ threads, funnels, canWrite, isAdmin, members, te
         </div>
       )}
 
-      {showFunnels && <FunnelManager funnels={funnels} onClose={() => setShowFunnels(false)} />}
       {renaming && (
         <RenameThread thread={renaming} onClose={() => setRenaming(null)} />
       )}
@@ -298,137 +300,6 @@ export function ThreadsClient({ threads, funnels, canWrite, isAdmin, members, te
   );
 }
 
-function FunnelManager({ funnels, onClose }: { funnels: Funnel[]; onClose: () => void }) {
-  const [name, setName] = useState('');
-  const [stages, setStages] = useState<string[]>(['Identified', 'Contacted', 'Onboarded']);
-  const [successIndex, setSuccessIndex] = useState<number | null>(2);
-  const [err, setErr] = useState<string | null>(null);
-  const [pending, startTransition] = useTransition();
-
-  const submit = () => {
-    if (!name.trim()) { setErr('Funnel name is required'); return; }
-    const filled = stages.filter((s) => s.trim());
-    if (filled.length < 2) { setErr('A funnel needs at least 2 stages'); return; }
-    setErr(null);
-    startTransition(async () => {
-      const res = await createFunnel({
-        name,
-        stages: filled.map((label) => ({ key: '', label })),
-        successIndex: successIndex ?? undefined,
-      });
-      if (!res.ok) { setErr(res.error ?? 'Failed'); return; }
-      window.location.reload();
-    });
-  };
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4" onClick={onClose}>
-      <div className="w-full max-w-md rounded-2xl border border-ink-200 bg-surface p-5 max-h-[85vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center justify-between mb-3">
-          <h3 className="text-[15px] font-bold text-ink-900">Funnels</h3>
-          <button onClick={onClose} className="text-ink-400 hover:text-ink-900"><X className="w-4 h-4" /></button>
-        </div>
-
-        <div className="space-y-2 mb-4">
-          {funnels.map((f) => (
-            <div key={f.id} className="rounded-lg border border-ink-200 bg-ink-50/60 px-3 py-2">
-              <div className="text-[13px] font-medium text-ink-900">
-                {f.name} {f.is_default && <span className="text-[10px] text-ink-500">(default)</span>}
-              </div>
-              <div className="text-[11px] text-ink-500 mt-0.5">
-                {f.stages.map((s) => s.label).join(' → ')}
-              </div>
-              <label className="flex items-center gap-1.5 text-[11px] text-ink-600 mt-1.5">
-                Counts as onboarded:
-                <select
-                  value={f.success_stage_key ?? ''}
-                  onChange={(e) => startTransition(async () => {
-                    const res = await setFunnelSuccessStage({ funnelId: f.id, stageKey: e.target.value });
-                    if (!res.ok) { setErr(res.error ?? 'Failed'); return; }
-                    window.location.reload();
-                  })}
-                  className="text-[11px] px-1.5 py-0.5 rounded border border-success-100 bg-success-50 text-success-600 font-semibold"
-                >
-                  {f.stages.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
-                </select>
-              </label>
-            </div>
-          ))}
-        </div>
-
-        <div className="border-t border-ink-200 pt-3">
-          <div className="text-[12px] font-semibold text-ink-700 mb-2">Create funnel</div>
-          <input
-            type="text" placeholder="Funnel name — e.g. Hospital onboarding" value={name}
-            autoFocus
-            onChange={(e) => setName(e.target.value)}
-            className={`w-full h-9 px-3 text-sm rounded-md border bg-surface mb-2 ${
-              name.trim() ? 'border-ink-200' : 'border-warn-100 focus:border-brand-500'
-            }`}
-          />
-          <div className="space-y-1.5 mb-2">
-            {stages.map((s, i) => (
-              <div key={i} className="flex items-center gap-1.5">
-                <span className="text-[11px] text-ink-400 tabular-nums w-4">{i + 1}.</span>
-                <input
-                  type="text" value={s} placeholder={`Stage ${i + 1}`}
-                  onChange={(e) => setStages(stages.map((x, j) => (j === i ? e.target.value : x)))}
-                  className="flex-1 h-8 px-2 text-[13px] rounded-md border border-ink-200 bg-surface"
-                />
-                <label
-                  title="Mark as the onboarded / success stage"
-                  className={`inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-1 rounded border cursor-pointer transition ${
-                    successIndex === i
-                      ? 'bg-success-50 text-success-600 border-success-100'
-                      : 'bg-surface text-ink-400 border-ink-200 hover:text-ink-700'
-                  }`}
-                >
-                  <input
-                    type="radio" name="successStage" checked={successIndex === i}
-                    onChange={() => setSuccessIndex(i)} className="w-3 h-3"
-                  />
-                  win
-                </label>
-                <button
-                  onClick={() => {
-                    setStages(stages.filter((_, j) => j !== i));
-                    if (successIndex === i) setSuccessIndex(null);
-                    else if (successIndex != null && successIndex > i) setSuccessIndex(successIndex - 1);
-                  }}
-                  disabled={stages.length <= 2}
-                  className="text-ink-400 hover:text-danger-500 disabled:opacity-30 p-1"
-                  aria-label="Remove stage"
-                >
-                  <X className="w-3.5 h-3.5" />
-                </button>
-              </div>
-            ))}
-          </div>
-          <button
-            onClick={() => setStages([...stages, ''])}
-            className="text-[12px] font-medium text-brand-700 dark:text-brand-400 hover:underline mb-3"
-          >
-            + Add stage
-          </button>
-          {err && <p className="text-sm text-danger-500 mb-2">{err}</p>}
-          {!name.trim() && (
-            <p className="text-[12px] text-warn-600 mb-2">Give the funnel a name to save it.</p>
-          )}
-          <button
-            onClick={submit} disabled={pending}
-            className="w-full h-9 text-sm font-semibold rounded-md bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-40 transition"
-          >
-            {pending ? 'Creating…' : 'Create funnel'}
-          </button>
-          <p className="text-[11px] text-ink-500 mt-2">
-            Mark one stage “win” — reaching it counts a provider as onboarded.
-            It doesn’t have to be the last stage. Existing threads keep their funnel.
-          </p>
-        </div>
-      </div>
-    </div>
-  );
-}
 
 
 /** Small modal shell — the three thread dialogs share it. */

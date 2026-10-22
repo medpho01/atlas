@@ -5,7 +5,7 @@ import { PageHeader } from '@/components/ui/PageHeader';
 import { ChipButton } from '@/components/ui/Toggle';
 import { InfoTip } from '@/components/ui/InfoTip';
 import {
-  getPipeline, getDeals, getBoardSummary, getTags, getAssignableUsers,
+  getPipeline, listSalesPipelines, getDeals, getBoardSummary, getTags, getAssignableUsers,
 } from '@/lib/salesCrm';
 import { Board } from './Board';
 import { NewDeal } from './NewDeal';
@@ -37,12 +37,15 @@ function Metric({ label, value, sub, tone }: {
 export default async function SalesPage({
   searchParams,
 }: {
-  searchParams: { mine?: string; tag?: string; q?: string; show?: string };
+  searchParams: { mine?: string; tag?: string; q?: string; show?: string; pipeline?: string };
 }) {
   const gate = await requireView('salesCrm', '/sales');
   if (gate.blocked) return <RoleBlocked area="Sales CRM" detail="sales, accounts and admin" />;
 
-  const pipeline = await getPipeline();
+  const pipelines = await listSalesPipelines();
+  const wanted = Number(searchParams.pipeline);
+  const pipeline = (Number.isInteger(wanted) && pipelines.find((p) => p.id === wanted))
+    || pipelines[0] || await getPipeline();
   if (!pipeline) {
     return (
       <div className="px-6 lg:px-8 py-6">
@@ -77,6 +80,7 @@ export default async function SalesPage({
       tag: searchParams.tag,
       q: searchParams.q,
       show: show === 'all' ? 'all' : undefined,
+      pipeline: searchParams.pipeline,
       ...patch,
     };
     for (const [k, v] of Object.entries(merged)) if (v) p.set(k, v);
@@ -119,6 +123,24 @@ export default async function SalesPage({
 
       <div className="mt-5 mb-4 flex flex-wrap items-center gap-x-4 gap-y-2 rounded-lg
                       border border-ink-200 bg-surface px-4 py-2.5">
+        {/* Only when there is more than one: a control with a single option is
+            a control nobody needs, and a second pipeline made in Configure
+            pipelines would otherwise be invisible. */}
+        {pipelines.length > 1 && (
+          <>
+            <div className="flex items-center gap-1.5">
+              <span className="text-[11px] uppercase tracking-wide text-ink-400 mr-0.5">Pipeline</span>
+              {pipelines.map((p) => (
+                <ChipButton key={p.id} href={link({ pipeline: String(p.id) })}
+                            active={p.id === pipeline.id}>
+                  {p.name}
+                </ChipButton>
+              ))}
+            </div>
+            <span className="w-px h-5 bg-ink-200" />
+          </>
+        )}
+
         <div className="flex items-center gap-1.5">
           <span className="text-[11px] uppercase tracking-wide text-ink-400 mr-0.5">Owner</span>
           <ChipButton href={link({ mine: undefined })} active={!mine}>Everyone</ChipButton>

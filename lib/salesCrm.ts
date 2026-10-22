@@ -51,13 +51,30 @@ export type DealFilters = {
   show?: 'open' | 'all';
 };
 
-export async function getPipeline(): Promise<Pipeline | null> {
+export async function getPipeline(id?: number): Promise<Pipeline | null> {
+  if (id) {
+    return queryOne<Pipeline>(
+      `SELECT id, name, stages, is_default FROM atlas.sales_pipeline WHERE id = $1`, [id]);
+  }
   return queryOne<Pipeline>(`
     SELECT id, name, stages, is_default
     FROM atlas.sales_pipeline
     ORDER BY is_default DESC, id
     LIMIT 1
   `);
+}
+
+/**
+ * Every sales pipeline, for the board's switcher.
+ *
+ * The switcher only appears when there is more than one — with a single
+ * pipeline it is a control with one option, and a second pipeline created in
+ * Configure pipelines would otherwise be invisible unless somebody also made
+ * it the default.
+ */
+export async function listSalesPipelines(): Promise<Pipeline[]> {
+  return query<Pipeline>(
+    `SELECT id, name, stages, is_default FROM atlas.sales_pipeline ORDER BY is_default DESC, id`);
 }
 
 /**
