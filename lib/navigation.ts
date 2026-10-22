@@ -79,7 +79,7 @@ export const NAV: NavGroup[] = [
       { href: '/settings/stores', label: 'Stores', feature: 'coverage' },
       { href: '/users', label: 'Users & roles', feature: 'admin' },
       { href: '/settings/roles', label: 'Roles & screens', feature: 'admin' },
-      { href: '/settings/pipeline', label: 'Pipeline', feature: 'admin' },
+      { href: '/settings/pipeline', label: 'Configure pipelines', feature: 'admin' },
     ],
   },
 ];

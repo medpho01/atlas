@@ -46,7 +46,7 @@ is a clock that never says anything.
 Tags are created by using them. A separate screen to mint a tag is a screen
 nobody opens.
 
-## The pipeline — Admin › Pipeline
+## The pipeline — Admin › Configure pipelines
 
 Three rules the editor enforces, with a sentence each rather than a constraint
 violation:
@@ -59,6 +59,14 @@ violation:
 
 One pipeline today. `pipeline_id` is on every deal so the planned
 account-management CRM adds a row rather than a migration.
+
+**The screen configures every CRM's pipelines, not just this one.** It lists
+`atlas.sales_pipeline` under Sales CRM and `atlas.crm_funnels` under Network
+CRM, and the editor asks each pipeline what shape it is: a sales stage carries
+a probability and an outcome, a network stage is a key and a label with one of
+them marked as the one that means onboarded. The shapes are not flattened —
+writing sales fields into a CRM funnel would put data in the database that
+nothing reads.
 
 ## Roles
 
