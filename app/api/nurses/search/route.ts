@@ -20,6 +20,7 @@ export async function GET(req: NextRequest) {
     aggregators: sp.getAll('agg').filter(Boolean),
     source:   (sp.get('source') || 'all') as 'derived' | 'manual' | 'both' | 'all',
     verifiedOnly: sp.get('verified') === '1',
+    interest: sp.get('interest') ?? '',
     nearby:   sp.get('nearby') === '1',
     radiusKm: Number(sp.get('radius')) || NURSE_REACH_RADIUS_KM,
     sortBy:   (sp.get('sort') || undefined) as SortKey | undefined,

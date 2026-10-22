@@ -30,6 +30,7 @@ export default async function NursesPage({ searchParams }: { searchParams: Promi
     aggregators: (Array.isArray(sp.agg) ? sp.agg : sp.agg ? [sp.agg] : []).filter(Boolean),
     source:  (s(sp.source) || 'all') as 'derived' | 'manual' | 'both' | 'all',
     verifiedOnly: s(sp.verified) === '1',
+    interest: s(sp.interest) ?? '',
     nearby:  s(sp.nearby) !== '0',
     radiusKm: Number(s(sp.radius)) || NURSE_REACH_RADIUS_KM,
   };
@@ -104,6 +105,7 @@ export default async function NursesPage({ searchParams }: { searchParams: Promi
           aggregators: filters.aggregators,
           source: filters.source,
           verifiedOnly: filters.verifiedOnly,
+          interest: filters.interest,
           nearby: filters.nearby,
           radiusKm: filters.radiusKm,
           sortBy: 'name',

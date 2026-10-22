@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState, useTransition } from 'react';
 import {
   Phone, MapPin, Search, X, Building2, Check, ChevronDown, BadgeCheck, Database, Sparkles,
 } from 'lucide-react';
+import { InterestButton } from '@/components/ui/InterestButton';
 
 type Nurse = {
   phone: string;
@@ -18,6 +19,14 @@ type Nurse = {
   registration_num: string | null;
   registration_body: string | null;
   experience_years: number | null;
+  appointments: number;
+  appointments_completed: number;
+  appointments_cancelled: number;
+  last_appointment: string | null;
+  interest: 'interested' | 'not_interested' | null;
+  interest_note: string | null;
+  interest_set_at: string | null;
+  interest_set_by: string | null;
   registered_at: string | null;
   is_shared_phone: boolean;
   variants_at_phone: number;
@@ -27,7 +36,7 @@ type Nurse = {
   distance_km?: number | null;
 };
 
-type SortKey = 'name' | 'city' | 'phone' | 'aggregator' | 'experience' | 'verified' | 'source' | 'distance';
+type SortKey = 'name' | 'city' | 'phone' | 'aggregator' | 'experience' | 'verified' | 'source' | 'distance' | 'appointments';
 
 type Filters = {
   q: string;
@@ -41,6 +50,8 @@ type Filters = {
   radiusKm: number;
   sortBy: SortKey;
   sortDir: 'asc' | 'desc';
+  /** '' = everyone, or interested / not_interested / unasked. */
+  interest: string;
 };
 
 export function NursesClient({
@@ -72,7 +83,7 @@ export function NursesClient({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filters.q, filters.pincode, filters.city, JSON.stringify(filters.aggregators),
       filters.source, filters.verifiedOnly, filters.nearby, filters.radiusKm,
-      filters.sortBy, filters.sortDir]);
+      filters.sortBy, filters.sortDir, filters.interest]);
 
   const runSearch = (f: Filters) => {
     const params = new URLSearchParams();
@@ -82,6 +93,7 @@ export function NursesClient({
     f.aggregators.forEach((a) => params.append('agg', a));
     if (f.source !== 'all') params.set('source', f.source);
     if (f.verifiedOnly) params.set('verified', '1');
+    if (f.interest) params.set('interest', f.interest);
     // Nearby is the default, so only the narrower choice needs recording.
     if (!f.nearby) params.set('nearby', '0');
     if (f.radiusKm !== defaultRadius) params.set('radius', String(f.radiusKm));
@@ -105,7 +117,7 @@ export function NursesClient({
   const clearAll = () =>
     setFilters({
       q: '', pincode: '', city: '', aggregators: [], source: 'all', verifiedOnly: false,
-      nearby: true, radiusKm: defaultRadius, sortBy: 'name', sortDir: 'asc',
+      interest: '', nearby: true, radiusKm: defaultRadius, sortBy: 'name', sortDir: 'asc',
     });
 
   const toggleSort = (key: SortKey) =>
@@ -118,7 +130,7 @@ export function NursesClient({
 
   const hasFilters =
     filters.q || filters.pincode || filters.city || filters.aggregators.length > 0 ||
-    filters.source !== 'all' || filters.verifiedOnly;
+    filters.source !== 'all' || filters.verifiedOnly || !!filters.interest;
   const isPincodeValid = /^\d{6}$/.test(filters.pincode);
 
   return (
@@ -203,6 +215,23 @@ export function NursesClient({
               <span className="text-xs font-medium text-ink-700">Verified only</span>
             </label>
 
+            {/* Who has said yes, who has said no, and who nobody has rung.
+                The third is the one the team works from. */}
+            <label className="inline-flex items-center gap-1.5 text-xs text-ink-600">
+              <span>Interest:</span>
+              <select
+                value={filters.interest}
+                onChange={(e) => setFilters({ ...filters, interest: e.target.value })}
+                className="text-xs px-2 py-1 rounded-md border border-ink-200 bg-surface font-medium"
+              >
+                <option value="">Everyone</option>
+                <option value="interested">Interested</option>
+                <option value="not_interested">Not interested</option>
+                <option value="unasked">Not asked yet</option>
+                <option value="asked">Asked (either answer)</option>
+              </select>
+            </label>
+
             <label className="inline-flex items-center gap-1.5 text-xs text-ink-600">
               <span>Source:</span>
               <select
@@ -250,21 +279,24 @@ export function NursesClient({
                 <SortableTh label="Location"    sortKey="city"       filters={filters} onSort={toggleSort} />
                 <SortableTh label="Contact"     sortKey="phone"      filters={filters} onSort={toggleSort} />
                 <SortableTh label="Credentials" sortKey="experience" filters={filters} onSort={toggleSort} />
+                <SortableTh label="Appointments" sortKey="appointments" filters={filters} onSort={toggleSort} align="right" />
                 <SortableTh label="Aggregator"  sortKey="aggregator" filters={filters} onSort={toggleSort} />
                 <SortableTh label="Source"      sortKey="source"     filters={filters} onSort={toggleSort} />
+                <th className="px-4 py-2 font-semibold">Interested</th>
               </tr>
             </thead>
             <tbody>
               {nurses.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="px-4 py-12 text-center text-sm text-ink-500">
+                  <td colSpan={8} className="px-4 py-12 text-center text-sm text-ink-500">
                     No nurses match these filters.
                     {canEdit && !hasFilters && ' Upload a list to start building the repository.'}
                   </td>
                 </tr>
               ) : (
                 nurses.map((n, i) => (
-                  <NurseRow key={`${n.phone}:${i}`} n={n} selectedAggregators={filters.aggregators} />
+                  <NurseRow key={`${n.phone}:${i}`} n={n} selectedAggregators={filters.aggregators}
+                            canEdit={canEdit} />
                 ))
               )}
             </tbody>
@@ -453,7 +485,9 @@ function formatPhone(p: string) {
   return p.length === 10 ? `${p.slice(0, 5)} ${p.slice(5)}` : p;
 }
 
-function NurseRow({ n, selectedAggregators }: { n: Nurse; selectedAggregators: string[] }) {
+function NurseRow({ n, selectedAggregators, canEdit }: {
+  n: Nurse; selectedAggregators: string[]; canEdit: boolean;
+}) {
   const matched = selectedAggregators.includes(n.aggregator ?? '');
   return (
     <tr className="border-b border-ink-100 hover:bg-ink-100/40 transition">
@@ -525,6 +559,31 @@ function NurseRow({ n, selectedAggregators }: { n: Nurse; selectedAggregators: s
         )}
       </td>
 
+      {/* What they have actually done for us. Attributed through the slot the
+          appointment was booked into — see sql/init/29. */}
+      <td className="px-4 py-3 text-right">
+        {n.appointments > 0 ? (
+          <>
+            <div className="text-[13px] font-semibold text-ink-900 tabular-nums">{n.appointments}</div>
+            <div className="text-[11px] text-ink-500 tabular-nums">
+              {n.appointments_completed} done
+              {n.appointments_cancelled > 0 && ` · ${n.appointments_cancelled} cxl`}
+            </div>
+            {n.last_appointment && (
+              <div className="text-[10px] text-ink-400 mt-0.5">last {n.last_appointment}</div>
+            )}
+            {n.is_shared_phone && (
+              <div className="text-[10px] text-violet-700 dark:text-violet-400 mt-0.5"
+                   title={`This number is shared across ${n.variants_at_phone} nurses, so this is the total for the number, not for this person.`}>
+                shared number
+              </div>
+            )}
+          </>
+        ) : (
+          <span className="text-[12px] text-ink-400">—</span>
+        )}
+      </td>
+
       <td className="px-4 py-3">
         {n.aggregator ? (
           <span
@@ -556,6 +615,17 @@ function NurseRow({ n, selectedAggregators }: { n: Nurse; selectedAggregators: s
           <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-brand-50 text-brand-700 dark:text-brand-400 border border-brand-100">
             <Database className="w-3 h-3" /> Both
           </span>
+        )}
+      </td>
+    
+      {/* What they said when we rang. Written where it is read. */}
+      <td className="px-4 py-3">
+        <InterestButton kind="nurse" phone={n.phone} value={n.interest} canSet={canEdit} />
+        {n.interest_set_by && (
+          <div className="text-[10px] text-ink-400 mt-1 leading-tight">
+            {n.interest_set_by}
+            {n.interest_set_at ? ` · ${n.interest_set_at.slice(0, 10)}` : ''}
+          </div>
         )}
       </td>
     </tr>

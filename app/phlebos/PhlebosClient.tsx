@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState, useTransition } from 'react';
 import { Phone, MapPin, Search, X, Sparkles, Database, Users, Building2, Check, ChevronDown } from 'lucide-react';
+import { InterestButton } from '@/components/ui/InterestButton';
 
 type Phlebo = {
   phone: string;
@@ -21,6 +22,10 @@ type Phlebo = {
   notes: string | null;
   source: 'derived' | 'manual' | 'both';
   distance_km?: number | null;
+  interest: 'interested' | 'not_interested' | null;
+  interest_note: string | null;
+  interest_set_at: string | null;
+  interest_set_by: string | null;
 };
 
 type SortKey = 'name' | 'city' | 'phone' | 'orders' | 'labs' | 'source' | 'distance';
@@ -37,6 +42,8 @@ type Filters = {
   minOrders: number;
   sortBy: SortKey;
   sortDir: 'asc' | 'desc';
+  /** '' = everyone, or interested / not_interested / unasked / asked. */
+  interest: string;
 };
 
 export function PhlebosClient({
@@ -80,6 +87,7 @@ export function PhlebosClient({
     if (!f.nearby) params.set('nearby', '0');
     if (f.radiusKm !== defaultRadius) params.set('radius', String(f.radiusKm));
     if (f.minOrders > 0) params.set('min', String(f.minOrders));
+    if (f.interest) params.set('interest', f.interest);
     params.set('sort', f.sortBy);
     params.set('dir', f.sortDir);
 
@@ -98,7 +106,7 @@ export function PhlebosClient({
   };
 
   const clearAll = () => {
-    setFilters({ q: '', pincode: '', city: '', labs: [], source: 'all', nearby: true, radiusKm: defaultRadius, minOrders: 0, sortBy: 'orders', sortDir: 'desc' });
+    setFilters({ q: '', pincode: '', city: '', labs: [], source: 'all', nearby: true, radiusKm: defaultRadius, minOrders: 0, interest: '', sortBy: 'orders', sortDir: 'desc' });
   };
 
   const toggleSort = (key: SortKey) => {
@@ -111,7 +119,7 @@ export function PhlebosClient({
     }));
   };
 
-  const hasFilters = filters.q || filters.pincode || filters.city || filters.labs.length > 0 || filters.source !== 'all' || filters.minOrders > 0;
+  const hasFilters = filters.q || filters.pincode || filters.city || filters.labs.length > 0 || filters.source !== 'all' || filters.minOrders > 0 || !!filters.interest;
   const isPincodeValid = /^\d{6}$/.test(filters.pincode);
 
   return (
@@ -197,6 +205,22 @@ export function PhlebosClient({
             />
           </div>
 
+          {/* Who has said yes, who has said no, and who nobody has rung. */}
+          <label className="inline-flex items-center gap-1.5 text-xs text-ink-600">
+            <span>Interest:</span>
+            <select
+              value={filters.interest}
+              onChange={(e) => setFilters({ ...filters, interest: e.target.value })}
+              className="text-xs px-2 py-1 rounded-md border border-ink-200 bg-surface font-medium"
+            >
+              <option value="">Everyone</option>
+              <option value="interested">Interested</option>
+              <option value="not_interested">Not interested</option>
+              <option value="unasked">Not asked yet</option>
+              <option value="asked">Asked (either answer)</option>
+            </select>
+          </label>
+
           <label className="inline-flex items-center gap-1.5 text-xs text-ink-600">
             <span>Source:</span>
             <select
@@ -265,12 +289,13 @@ export function PhlebosClient({
               <SortableTh label="Orders"   sortKey="orders" filters={filters} onSort={toggleSort} align="right" />
               <SortableTh label="Labs"     sortKey="labs"   filters={filters} onSort={toggleSort} />
               <SortableTh label="Source"   sortKey="source" filters={filters} onSort={toggleSort} />
+              <th className="px-4 py-2 font-semibold">Interested</th>
             </tr>
           </thead>
           <tbody>
             {phlebos.length === 0 ? (
               <tr>
-                <td colSpan={6} className="px-4 py-12 text-center">
+                <td colSpan={7} className="px-4 py-12 text-center">
                   <Users className="w-8 h-8 text-ink-300 mx-auto mb-2" />
                   <p className="text-sm text-ink-500">No phlebos match your filters.</p>
                   {canEdit && !hasFilters && (
@@ -283,7 +308,9 @@ export function PhlebosClient({
               // across every phlebo at that lab (see is_shared_phone /
               // variants_at_phone). Keying on it alone collides, and React then
               // keeps stale rows from the previous result set when filters change.
-              phlebos.map((p, i) => <PhleboRow key={`${p.phone}:${i}`} p={p} selectedLabs={filters.labs} />)
+              phlebos.map((p, i) => (
+                <PhleboRow key={`${p.phone}:${i}`} p={p} selectedLabs={filters.labs} canEdit={canEdit} />
+              ))
             )}
           </tbody>
         </table>
@@ -487,7 +514,9 @@ function SortableTh({
   );
 }
 
-function PhleboRow({ p, selectedLabs }: { p: Phlebo; selectedLabs: string[] }) {
+function PhleboRow({ p, selectedLabs, canEdit }: {
+  p: Phlebo; selectedLabs: string[]; canEdit: boolean;
+}) {
   // A phlebo on a lab's shared dispatch number often serves several of that
   // lab's cities, so the lab that caused the match isn't necessarily the first
   // one listed. Surface the matched labs first and mark them, otherwise the row
@@ -591,6 +620,17 @@ function PhleboRow({ p, selectedLabs }: { p: Phlebo; selectedLabs: string[] }) {
           <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-success-50 text-success-600 border border-success-100">
             <Sparkles className="w-3 h-3" /> Both
           </span>
+        )}
+      </td>
+    
+      {/* What they said when we rang. */}
+      <td className="px-4 py-3">
+        <InterestButton kind="phlebo" phone={p.phone} value={p.interest} canSet={canEdit} />
+        {p.interest_set_by && (
+          <div className="text-[10px] text-ink-400 mt-1 leading-tight">
+            {p.interest_set_by}
+            {p.interest_set_at ? ` · ${p.interest_set_at.slice(0, 10)}` : ''}
+          </div>
         )}
       </td>
     </tr>

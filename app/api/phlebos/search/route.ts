@@ -24,6 +24,7 @@ export async function GET(req: NextRequest) {
     minOrders: Number(sp.get('min')) || 0,
     sortBy:    (sp.get('sort') || undefined) as SortKey | undefined,
     sortDir:   sp.get('dir') === 'asc' ? 'asc' as const : 'desc' as const,
+    interest: sp.get('interest') ?? '',
   };
 
   const [phlebos, total] = await Promise.all([

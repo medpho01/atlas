@@ -31,6 +31,10 @@ export type Phlebo = {
   notes: string | null;
   source: 'derived' | 'manual' | 'both';
   distance_km?: number | null;
+  interest: 'interested' | 'not_interested' | null;
+  interest_note: string | null;
+  interest_set_at: string | null;
+  interest_set_by: string | null;
 };
 
 export type PhleboFilters = {
@@ -43,6 +47,8 @@ export type PhleboFilters = {
   nearby?: boolean;               // if true + pincode set, radius search
   radiusKm?: number;
   minOrders?: number;
+  /** 'interested' | 'not_interested' | 'unasked' | 'asked'. */
+  interest?: string;
   sortBy?: SortKey;
   sortDir?: 'asc' | 'desc';
 };
@@ -146,6 +152,12 @@ export async function listPhlebos(
   if (filters.minOrders && filters.minOrders > 0) {
     conds.push(`p.orders_served >= ${push(filters.minOrders)}`);
   }
+  // "Not asked" is the absence of a row, not a third status: a phlebo nobody
+  // has rung must never be readable as one who said no.
+  if (filters.interest === 'unasked')             conds.push(`pi.status IS NULL`);
+  else if (filters.interest === 'interested')     conds.push(`pi.status = 'interested'`);
+  else if (filters.interest === 'not_interested') conds.push(`pi.status = 'not_interested'`);
+  else if (filters.interest === 'asked')          conds.push(`pi.status IS NOT NULL`);
 
   if (isNearby) {
     // Radius search: haversine-join phlebo pincode → target pincode via mv_pincode_geo
@@ -166,6 +178,12 @@ export async function listPhlebos(
         p.labs, p.first_order_at, p.last_order_at,
         p.is_shared_phone, p.variants_at_phone,
         p.email, p.notes, p.source,
+      pi.status AS interest, pi.note AS interest_note,
+      (pi.set_at AT TIME ZONE 'Asia/Kolkata')::text AS interest_set_at,
+      iu.name AS interest_set_by,
+        pi.status AS interest, pi.note AS interest_note,
+        (pi.set_at AT TIME ZONE 'Asia/Kolkata')::text AS interest_set_at,
+        iu.name AS interest_set_by,
         ROUND((6371 * acos(
           GREATEST(-1, LEAST(1,
             cos(radians(t.latitude)) * cos(radians(g.latitude)) *
@@ -174,6 +192,8 @@ export async function listPhlebos(
           ))
         ))::numeric, 1)::float8 AS distance_km
       FROM atlas.phlebos_all p
+      LEFT JOIN atlas.provider_interest pi ON pi.kind = 'phlebo' AND pi.phone = p.phone
+      LEFT JOIN atlas.users iu ON iu.id = pi.set_by
       JOIN analytics.mv_pincode_geo g ON g.pincode = p.pincode
       CROSS JOIN target t
       WHERE g.latitude IS NOT NULL
@@ -204,8 +224,13 @@ export async function listPhlebos(
       p.labs, p.first_order_at, p.last_order_at,
       p.is_shared_phone, p.variants_at_phone,
       p.email, p.notes, p.source,
+      pi.status AS interest, pi.note AS interest_note,
+      (pi.set_at AT TIME ZONE 'Asia/Kolkata')::text AS interest_set_at,
+      iu.name AS interest_set_by,
       NULL::float8 AS distance_km
     FROM atlas.phlebos_all p
+      LEFT JOIN atlas.provider_interest pi ON pi.kind = 'phlebo' AND pi.phone = p.phone
+      LEFT JOIN atlas.users iu ON iu.id = pi.set_by
     ${whereClause}
     ${orderClause(filters, false)}
     LIMIT ${push(limit)} OFFSET ${push(offset)}
@@ -233,6 +258,10 @@ export async function countPhlebos(filters: PhleboFilters): Promise<number> {
   const labSel = selectedLabs(filters);
   if (labSel) conds.push(`p.labs && ${push(labSel)}::text[]`);
   if (filters.minOrders && filters.minOrders > 0) conds.push(`p.orders_served >= ${push(filters.minOrders)}`);
+  if (filters.interest === 'unasked')             conds.push(`pi.status IS NULL`);
+  else if (filters.interest === 'interested')     conds.push(`pi.status = 'interested'`);
+  else if (filters.interest === 'not_interested') conds.push(`pi.status = 'not_interested'`);
+  else if (filters.interest === 'asked')          conds.push(`pi.status IS NOT NULL`);
 
   if (isNearby) {
     const targetPin = push(filters.pincode);
@@ -244,6 +273,8 @@ export async function countPhlebos(filters: PhleboFilters): Promise<number> {
       )
       SELECT COUNT(*)::int AS n
       FROM atlas.phlebos_all p
+      LEFT JOIN atlas.provider_interest pi ON pi.kind = 'phlebo' AND pi.phone = p.phone
+      LEFT JOIN atlas.users iu ON iu.id = pi.set_by
       JOIN analytics.mv_pincode_geo g ON g.pincode = p.pincode
       CROSS JOIN target t
       WHERE g.latitude IS NOT NULL
@@ -263,7 +294,9 @@ export async function countPhlebos(filters: PhleboFilters): Promise<number> {
   }
   const whereClause = conds.length > 0 ? `WHERE ${conds.join(' AND ')}` : '';
   const row = await queryOne<{ n: number }>(
-    `SELECT COUNT(*)::int AS n FROM atlas.phlebos_all p ${whereClause}`,
+    `SELECT COUNT(*)::int AS n FROM atlas.phlebos_all p
+       LEFT JOIN atlas.provider_interest pi ON pi.kind = 'phlebo' AND pi.phone = p.phone
+       ${whereClause}`,
     params,
   );
   return row?.n ?? 0;

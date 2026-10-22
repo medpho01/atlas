@@ -32,6 +32,15 @@ export type Nurse = {
   notes: string | null;
   source: 'derived' | 'manual' | 'both';
   distance_km?: number | null;
+  /** Appointments attributed through SlotConfig — see sql/init/29. */
+  appointments: number;
+  appointments_completed: number;
+  appointments_cancelled: number;
+  last_appointment: string | null;
+  interest: 'interested' | 'not_interested' | null;
+  interest_note: string | null;
+  interest_set_at: string | null;
+  interest_set_by: string | null;
 };
 
 export type NurseFilters = {
@@ -43,6 +52,10 @@ export type NurseFilters = {
   aggregators?: string[];
   source?: 'derived' | 'manual' | 'both' | 'all';
   verifiedOnly?: boolean;
+  /** 'interested' | 'not_interested' | 'unasked' — nobody has rung them yet. */
+  interest?: string;
+  /** Only nurses who have served at least this many appointments. */
+  minAppointments?: number;
   nearby?: boolean;
   radiusKm?: number;
   sortBy?: SortKey;
@@ -50,7 +63,8 @@ export type NurseFilters = {
 };
 
 export type SortKey =
-  | 'name' | 'city' | 'phone' | 'aggregator' | 'experience' | 'verified' | 'source' | 'distance';
+  | 'name' | 'city' | 'phone' | 'aggregator' | 'experience' | 'verified' | 'source' | 'distance'
+  | 'appointments';
 
 // Whitelisted ORDER BY expressions — sort keys arrive from the query string.
 const SORT_EXPRS: Record<SortKey, string> = {
@@ -58,6 +72,7 @@ const SORT_EXPRS: Record<SortKey, string> = {
   city:       'lower(n.city)',
   phone:      'n.phone',
   aggregator: 'lower(n.aggregator)',
+  appointments: 'COALESCE(ap.appointments, 0)',
   experience: 'n.experience_years',
   verified:   'n.is_verified',
   source:     'n.source',
@@ -103,6 +118,15 @@ function buildConds(
   const aggs = selectedAggregators(filters);
   if (aggs) conds.push(`n.aggregator = ANY(${push(aggs)}::text[])`);
   if (filters.verifiedOnly) conds.push(`n.is_verified`);
+  // "Not asked" is the absence of a row, not a third status: a nurse nobody
+  // has rung must never be readable as one who said no.
+  if (filters.interest === 'unasked')         conds.push(`pi.status IS NULL`);
+  else if (filters.interest === 'interested') conds.push(`pi.status = 'interested'`);
+  else if (filters.interest === 'not_interested') conds.push(`pi.status = 'not_interested'`);
+  else if (filters.interest === 'asked')      conds.push(`pi.status IS NOT NULL`);
+  if (filters.minAppointments && filters.minAppointments > 0) {
+    conds.push(`COALESCE(ap.appointments, 0) >= ${push(filters.minAppointments)}`);
+  }
   return conds;
 }
 
@@ -134,8 +158,29 @@ const SELECT_COLS = `
   n.aggregator, n.qualification, n.is_verified,
   n.registration_num, n.registration_body, n.experience_years,
   n.registered_at, n.is_shared_phone, n.variants_at_phone,
-  n.email, n.notes, n.source
+  n.email, n.notes, n.source,
+  -- What they have actually done for us, and what they said when we rang.
+  COALESCE(ap.appointments, 0)::int AS appointments,
+  COALESCE(ap.completed, 0)::int    AS appointments_completed,
+  COALESCE(ap.cancelled, 0)::int    AS appointments_cancelled,
+  ap.last_appointment::text         AS last_appointment,
+  pi.status                         AS interest,
+  pi.note                           AS interest_note,
+  (pi.set_at AT TIME ZONE 'Asia/Kolkata')::text AS interest_set_at,
+  iu.name                           AS interest_set_by
 `;
+
+/**
+ * The directory row plus the two things bolted onto it.
+ *
+ * Joined here rather than folded into atlas.nurses_all, so sql/nurses_derived.sql
+ * stays the one place that view is defined. Both joins are on phone, which is
+ * what the whole directory is keyed on.
+ */
+const NURSE_FROM = `atlas.nurses_all n
+    LEFT JOIN analytics.mv_nurse_appointments ap ON ap.phone = n.phone
+    LEFT JOIN atlas.provider_interest pi ON pi.kind = 'nurse' AND pi.phone = n.phone
+    LEFT JOIN atlas.users iu ON iu.id = pi.set_by`;
 
 /**
  * Nurses matching the filters. In nearby mode the pincode is haversine-joined
@@ -167,7 +212,7 @@ export async function listNurses(
           cos(radians(g.longitude) - radians(t.longitude)) +
           sin(radians(t.latitude)) * sin(radians(g.latitude))
         ))))::numeric, 1)::float8 AS distance_km
-      FROM atlas.nurses_all n
+      FROM ${NURSE_FROM}
       JOIN analytics.mv_pincode_geo g ON g.pincode = n.pincode
       CROSS JOIN target t
       WHERE g.latitude IS NOT NULL
@@ -189,7 +234,7 @@ export async function listNurses(
   const where = conds.length ? `WHERE ${conds.join(' AND ')}` : '';
   return query<Nurse>(`
     SELECT ${SELECT_COLS}, NULL::float8 AS distance_km
-    FROM atlas.nurses_all n
+    FROM ${NURSE_FROM}
     ${where}
     ${orderClause(filters, false)}
     LIMIT ${push(limit)} OFFSET ${push(offset)}
@@ -214,7 +259,7 @@ export async function countNurses(filters: NurseFilters): Promise<number> {
         SELECT latitude, longitude FROM analytics.mv_pincode_geo WHERE pincode = ${targetPin}
       )
       SELECT COUNT(*)::int AS n
-      FROM atlas.nurses_all n
+      FROM ${NURSE_FROM}
       JOIN analytics.mv_pincode_geo g ON g.pincode = n.pincode
       CROSS JOIN target t
       WHERE g.latitude IS NOT NULL
@@ -234,7 +279,7 @@ export async function countNurses(filters: NurseFilters): Promise<number> {
   }
   const where = conds.length ? `WHERE ${conds.join(' AND ')}` : '';
   const row = await queryOne<{ n: number }>(
-    `SELECT COUNT(*)::int AS n FROM atlas.nurses_all n ${where}`, params,
+    `SELECT COUNT(*)::int AS n FROM ${NURSE_FROM} ${where}`, params,
   );
   return row?.n ?? 0;
 }
