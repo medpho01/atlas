@@ -282,7 +282,11 @@ export function NursesClient({
                 <SortableTh label="Appointments" sortKey="appointments" filters={filters} onSort={toggleSort} align="right" />
                 <SortableTh label="Aggregator"  sortKey="aggregator" filters={filters} onSort={toggleSort} />
                 <SortableTh label="Source"      sortKey="source"     filters={filters} onSort={toggleSort} />
-                <th className="px-4 py-2 font-semibold">Interested</th>
+                {/* Pinned to the right edge. The directory is wider than any screen,
+                    so the one button this column exists for was the only thing
+                    on the row you had to scroll sideways to reach. */}
+                <th className="px-4 py-2 font-semibold sticky right-0 bg-surface
+                               border-l border-ink-150">Interested</th>
               </tr>
             </thead>
             <tbody>
@@ -490,7 +494,7 @@ function NurseRow({ n, selectedAggregators, canEdit }: {
 }) {
   const matched = selectedAggregators.includes(n.aggregator ?? '');
   return (
-    <tr className="border-b border-ink-100 hover:bg-ink-100/40 transition">
+    <tr className="group border-b border-ink-100 hover:bg-ink-100/40 transition">
       <td className="px-4 py-3">
         <div className="font-semibold text-ink-900 text-[13px]">{n.name || '—'}</div>
         {n.qualification && <div className="text-[11px] text-ink-600 mt-0.5">{n.qualification}</div>}
@@ -619,7 +623,8 @@ function NurseRow({ n, selectedAggregators, canEdit }: {
       </td>
     
       {/* What they said when we rang. Written where it is read. */}
-      <td className="px-4 py-3">
+      <td className="px-4 py-3 sticky right-0 bg-surface group-hover:bg-ink-100/40
+                     transition border-l border-ink-150">
         <InterestButton kind="nurse" phone={n.phone} value={n.interest} canSet={canEdit} />
         {n.interest_set_by && (
           <div className="text-[10px] text-ink-400 mt-1 leading-tight">
