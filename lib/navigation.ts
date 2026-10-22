@@ -77,6 +77,7 @@ export const NAV: NavGroup[] = [
       // Fulfilment because it is configuration, not a queue to work.
       { href: '/settings/stores', label: 'Stores', feature: 'coverage' },
       { href: '/users', label: 'Users & roles', feature: 'admin' },
+      { href: '/settings/roles', label: 'Roles & screens', feature: 'admin' },
     ],
   },
 ];

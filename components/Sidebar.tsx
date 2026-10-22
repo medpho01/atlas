@@ -8,8 +8,7 @@ import {
   BookOpenText, Users, HeartPulse, Activity, Briefcase, IndianRupee,
   KanbanSquare, UserCog, PanelLeftClose, PanelLeft, X, type LucideIcon,
 } from 'lucide-react';
-import type { Role } from '@/lib/access';
-import { navFor, isActive } from '@/lib/navigation';
+import { isActive, type NavGroup } from '@/lib/navigation';
 
 const ICONS: Record<string, LucideIcon> = {
   '/': LayoutDashboard,
@@ -29,11 +28,12 @@ const ICONS: Record<string, LucideIcon> = {
 const STORAGE_KEY = 'atlas-sidebar-collapsed';
 
 export function Sidebar({
-  role,
+  nav,
   mobileOpen,
   onCloseMobile,
 }: {
-  role: Role;
+  /** Already filtered on the server — see AppShell. */
+  nav: NavGroup[];
   mobileOpen: boolean;
   onCloseMobile: () => void;
 }) {
@@ -56,7 +56,7 @@ export function Sidebar({
   // Navigating on mobile should dismiss the drawer.
   useEffect(() => { onCloseMobile(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [pathname]);
 
-  const groups = navFor(role);
+  const groups = nav;
 
   return (
     <>

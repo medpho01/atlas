@@ -10,10 +10,10 @@
  * Nav and enforcement drifting apart is the failure mode this prevents.
  */
 
-export type Role = 'admin' | 'network_lead' | 'network' | 'accounts' | 'operations' | 'editor' | 'viewer';
+export type Role = 'admin' | 'network_lead' | 'network' | 'accounts' | 'sales' | 'operations' | 'editor' | 'viewer';
 
 /** Roles a new user can be given. editor/viewer are legacy — see LEGACY_ROLES. */
-export const ACTIVE_ROLES: Role[] = ['admin', 'network_lead', 'network', 'accounts', 'operations'];
+export const ACTIVE_ROLES: Role[] = ['admin', 'network_lead', 'network', 'accounts', 'sales', 'operations'];
 
 /**
  * Pre-dating the four-profile model. Kept so nobody on prod loses access at
@@ -27,6 +27,7 @@ export const ROLE_LABEL: Record<Role, string> = {
   network_lead: 'Network lead',
   network: 'Network',
   accounts: 'Accounts',
+  sales: 'Sales',
   operations: 'Operations',
   editor: 'Editor (legacy)',
   viewer: 'Viewer (legacy)',
@@ -37,6 +38,7 @@ export const ROLE_BLURB: Record<Role, string> = {
   network_lead: 'Runs the onboarding team — sees everyone\u2019s pipeline, owns threads and who works them.',
   network: 'Grows supply — works the providers assigned to them.',
   accounts: 'Grows demand — owns account health and can read the network side.',
+  sales: 'Signs new stores — owns the sales pipeline, reads what a deal conversation needs.',
   operations: 'Fulfils today’s orders — reads coverage and the directory.',
   editor: 'Legacy role. Behaves like Network. Reassign and retire.',
   viewer: 'Legacy role. Read-only across the network side. Reassign and retire.',
@@ -54,6 +56,7 @@ export type Feature =
   | 'requests'          // Fulfilment › Requests (ops: quote and date)
   | 'commitments'       // open promises — gates quoting actions on requests
   | 'orderTracking'     // Fulfilment › Order tracking (the three order queues)
+  | 'salesCrm'          // Growth › Sales CRM (new stores)
   | 'admin';            // users & roles
 
 export type Capability = 'none' | 'view' | 'manage';
@@ -79,24 +82,49 @@ const REQUIRES: Partial<Record<Feature, Feature>> = {
 };
 
 const MATRIX: Record<Feature, Record<Role, Capability>> = {
-  overview:         { admin: 'manage', network_lead: 'view', network: 'view',   accounts: 'view',   operations: 'view',   editor: 'view',   viewer: 'view' },
-  coverage:         { admin: 'manage', network_lead: 'view', network: 'view',   accounts: 'view',   operations: 'view',   editor: 'view',   viewer: 'view' },
-  directory:        { admin: 'manage', network_lead: 'manage', network: 'manage', accounts: 'view',   operations: 'view',   editor: 'manage', viewer: 'view' },
-  accountHealth:    { admin: 'manage', network_lead: 'view', network: 'view',   accounts: 'manage', operations: 'none',   editor: 'view',   viewer: 'view' },
-  catalogue:        { admin: 'manage', network_lead: 'manage', network: 'manage', accounts: 'view',   operations: 'none',   editor: 'manage', viewer: 'view' },
-  pricing:          { admin: 'manage', network_lead: 'manage', network: 'manage', accounts: 'view',   operations: 'none',   editor: 'manage', viewer: 'view' },
-  providerPipeline: { admin: 'manage', network_lead: 'manage', network: 'manage', accounts: 'view',   operations: 'none',   editor: 'manage', viewer: 'view' },
+  overview:         { admin: 'manage', network_lead: 'view', network: 'view',   accounts: 'view',   sales: 'view',   operations: 'view',   editor: 'view',   viewer: 'view' },
+  coverage:         { admin: 'manage', network_lead: 'view', network: 'view',   accounts: 'view',   sales: 'view',   operations: 'view',   editor: 'view',   viewer: 'view' },
+  directory:        { admin: 'manage', network_lead: 'manage', network: 'manage', accounts: 'view',   sales: 'none',     operations: 'view',   editor: 'manage', viewer: 'view' },
+  accountHealth:    { admin: 'manage', network_lead: 'view', network: 'view',   accounts: 'manage',   sales: 'view', operations: 'none',   editor: 'view',   viewer: 'view' },
+  catalogue:        { admin: 'manage', network_lead: 'manage', network: 'manage', accounts: 'view',   sales: 'view',   operations: 'none',   editor: 'manage', viewer: 'view' },
+  pricing:          { admin: 'manage', network_lead: 'manage', network: 'manage', accounts: 'view',   sales: 'view',   operations: 'none',   editor: 'manage', viewer: 'view' },
+  providerPipeline: { admin: 'manage', network_lead: 'manage', network: 'manage', accounts: 'view',   sales: 'none',     operations: 'none',   editor: 'manage', viewer: 'view' },
   // Operations gets 'manage' on requests: quoting is their job, and this is
   // the one screen where they act rather than read.
-  requests:         { admin: 'manage', network_lead: 'manage', network: 'manage', accounts: 'view',   operations: 'manage', editor: 'view',   viewer: 'none' },
-  commitments:      { admin: 'manage', network_lead: 'manage', network: 'manage', accounts: 'view',   operations: 'view',   editor: 'view',   viewer: 'none' },
+  requests:         { admin: 'manage', network_lead: 'manage', network: 'manage', accounts: 'view',   sales: 'view',   operations: 'manage', editor: 'view',   viewer: 'none' },
+  commitments:      { admin: 'manage', network_lead: 'manage', network: 'manage', accounts: 'view',   sales: 'view',   operations: 'view',   editor: 'view',   viewer: 'none' },
   // Network works the queues; only a lead hands the work out, which is the
   // difference between 'manage' and 'view' on this one.
-  orderTracking:    { admin: 'manage', network_lead: 'manage', network: 'view',   accounts: 'none',   operations: 'view',   editor: 'view',   viewer: 'none' },
-  admin:            { admin: 'manage', network_lead: 'none', network: 'none',   accounts: 'none',   operations: 'none',   editor: 'none',   viewer: 'none' },
+  orderTracking:    { admin: 'manage', network_lead: 'manage', network: 'view',   accounts: 'none',   sales: 'none',     operations: 'view',   editor: 'view',   viewer: 'none' },
+  // The sales pipeline. Accounts reads it because the handover from a signed
+  // deal to a managed account is theirs.
+  salesCrm:         { admin: 'manage', network_lead: 'none',   network: 'none',   accounts: 'view',   sales: 'manage', operations: 'none',   editor: 'none',   viewer: 'none' },
+  admin:            { admin: 'manage', network_lead: 'none', network: 'none',   accounts: 'none',   sales: 'none',   operations: 'none',   editor: 'none',   viewer: 'none' },
 };
 
 type UserLike = { role: Role } | null | undefined;
+
+/**
+ * Overrides loaded from atlas.role_feature.
+ *
+ * This file is imported by client components (the sidebar, the user chip), so
+ * it cannot read a database. The server loads the table and hands the result
+ * in; until it does, and in the browser, the compiled matrix below is what
+ * answers — which is the right default, because the compiled matrix is the
+ * one that ships with the code that depends on it.
+ *
+ * Keyed `role:feature`. A missing key means "whatever the code says", so a
+ * feature added by a deploy works before anybody opens the settings screen.
+ */
+let OVERRIDES: Record<string, Capability> = {};
+
+export function setCapabilityOverrides(next: Record<string, Capability>): void {
+  OVERRIDES = next;
+}
+
+export function capabilityOverrides(): Record<string, Capability> {
+  return OVERRIDES;
+}
 
 /**
  * Capability a role holds for a feature, after dependency promotion.
@@ -105,26 +133,37 @@ type UserLike = { role: Role } | null | undefined;
 export function capability(user: UserLike, feature: Feature): Capability {
   if (!user) return 'none';
   const row = MATRIX[feature];
-  if (!row) return 'none';
-  let cap = row[user.role] ?? 'none';
+  // An override may name a feature this build has never heard of — a screen
+  // removed in a deploy, say — and that is not an error, just nothing to show.
+  const over = OVERRIDES[`${user.role}:${feature}`];
+  if (!row && !over) return 'none';
+  let cap = over ?? row?.[user.role] ?? 'none';
 
   // If a role can reach something that depends on this feature, it must at
   // least be able to read this one.
   for (const [dependent, required] of Object.entries(REQUIRES) as [Feature, Feature][]) {
     if (required !== feature) continue;
-    const depCap = MATRIX[dependent]?.[user.role] ?? 'none';
+    const depCap = OVERRIDES[`${user.role}:${dependent}`]
+      ?? MATRIX[dependent]?.[user.role] ?? 'none';
     if (RANK[depCap] > RANK.none && RANK[cap] < RANK.view) cap = 'view';
   }
   return cap;
 }
 
 /** Can open the feature at all. */
+/**
+ * The one rule an override cannot break: an admin keeps the screen that edits
+ * the overrides. Enforced on read as well as on write, so a row inserted by
+ * hand in psql cannot lock everybody out either.
+ */
 export function canView(user: UserLike, feature: Feature): boolean {
+  if (user?.role === 'admin' && feature === 'admin') return true;
   return RANK[capability(user, feature)] >= RANK.view;
 }
 
 /** Can add, edit, upload, or move things within the feature. */
 export function canManage(user: UserLike, feature: Feature): boolean {
+  if (user?.role === 'admin' && feature === 'admin') return true;
   return capability(user, feature) === 'manage';
 }
 
@@ -150,6 +189,7 @@ export const FEATURE_LABEL: Record<Feature, string> = {
   requests: 'Requests',
   commitments: 'Open promises',
   orderTracking: 'Order tracking',
+  salesCrm: 'Sales CRM',
   pricing: 'Packages & Pricing',
   providerPipeline: 'Provider onboarding',
   admin: 'Users & roles',

@@ -3,6 +3,8 @@ import type { Metadata } from 'next';
 import { Inter } from 'next/font/google';
 import { AppShell } from '@/components/AppShell';
 import { getSessionUser } from '@/lib/auth';
+import { ensureRoleAccess } from '@/lib/roleAccess';
+import { navFor } from '@/lib/navigation';
 
 const inter = Inter({
   subsets: ['latin'],
@@ -31,6 +33,10 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   // Hide the chrome on /login (unauthenticated users have no session, so this
   // also naturally hides it on any auth-protected route loaded without a session).
   const me = await getSessionUser();
+  // The nav is decided here, where the role-to-screen table can be read. The
+  // sidebar runs in the browser and cannot.
+  if (me) await ensureRoleAccess();
+  const nav = me ? navFor(me.role) : [];
   return (
     <html lang="en" className={`${inter.variable} dark`} suppressHydrationWarning>
       <head>
@@ -39,7 +45,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
       <body className="min-h-screen bg-ink-50 text-ink-900 antialiased">
         {/* No session → no chrome. Covers /login and the public /network page. */}
         {me
-          ? <AppShell user={me}>{children}</AppShell>
+          ? <AppShell user={me} nav={nav}>{children}</AppShell>
           : <main className="animate-fade-in">{children}</main>}
       </body>
     </html>

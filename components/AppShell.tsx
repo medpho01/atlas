@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { usePathname } from 'next/navigation';
 import { Menu } from 'lucide-react';
 import type { Role } from '@/lib/access';
-import { locate } from '@/lib/navigation';
+import { locate, type NavGroup } from '@/lib/navigation';
 import { Sidebar } from './Sidebar';
 import { ThemeToggle } from './ThemeToggle';
 import { LensChip } from './LensChip';
@@ -20,14 +20,24 @@ type User = { id: number; email: string; name: string; role: Role };
  * page, so a route can't show up in the sidebar under one group and read as
  * another in the header.
  */
-export function AppShell({ user, children }: { user: User; children: React.ReactNode }) {
+export function AppShell({ user, nav, children }: {
+  user: User;
+  /**
+   * Computed on the server, not from the role here. Which screens a role can
+   * open now lives in the database, and this component runs in the browser
+   * where that table cannot be read — deciding the nav here would show items
+   * the server then refuses.
+   */
+  nav: NavGroup[];
+  children: React.ReactNode;
+}) {
   const [mobileOpen, setMobileOpen] = useState(false);
   const pathname = usePathname();
   const here = locate(pathname);
 
   return (
     <div className="flex min-h-screen">
-      <Sidebar role={user.role} mobileOpen={mobileOpen} onCloseMobile={() => setMobileOpen(false)} />
+      <Sidebar nav={nav} mobileOpen={mobileOpen} onCloseMobile={() => setMobileOpen(false)} />
 
       <div className="flex-1 min-w-0 flex flex-col">
         <header className="sticky top-0 z-30 h-14 shrink-0 bg-surface/90 backdrop-blur-md border-b border-ink-150">
