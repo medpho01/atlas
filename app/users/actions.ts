@@ -4,8 +4,12 @@ import { randomBytes } from 'node:crypto';
 import { revalidatePath } from 'next/cache';
 import { getSessionUser, hashPassword, type User } from '@/lib/auth';
 import { query, queryOne } from '@/lib/db';
+import { ACTIVE_ROLES, LEGACY_ROLES } from '@/lib/access';
 
-const ROLES: User['role'][] = ['admin', 'network_lead', 'network', 'accounts', 'operations', 'editor', 'viewer'];
+// Derived, not retyped. This list was a hand-maintained copy and it missed
+// `sales` the day that role was added, so the dropdown could not offer it and
+// the save would have refused it anyway.
+const ROLES: User['role'][] = [...ACTIVE_ROLES, ...LEGACY_ROLES];
 
 async function requireAdmin() {
   const me = await getSessionUser();

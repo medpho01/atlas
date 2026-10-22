@@ -137,12 +137,20 @@ export async function getTags(): Promise<{ id: number; key: string; label: strin
   `);
 }
 
-/** Who a deal or a task can be handed to. */
+/**
+ * Who a deal or a task can be handed to: the people who actually work this
+ * pipeline.
+ *
+ * Sales and admin only. Accounts can read the board — the handover from a
+ * signed deal to a managed account is theirs — but a deal assigned to somebody
+ * who never opens it to work it is a deal nobody owns, and a picker of twenty
+ * names where five are plausible is a picker that gets the wrong one.
+ */
 export async function getAssignableUsers(): Promise<{ id: number; name: string; role: string }[]> {
   return query(`
     SELECT id, name, role FROM atlas.users
-    WHERE active AND role IN ('sales', 'accounts', 'admin', 'network_lead')
-    ORDER BY name
+    WHERE active AND role IN ('sales', 'admin')
+    ORDER BY CASE role WHEN 'sales' THEN 0 ELSE 1 END, name
   `);
 }
 

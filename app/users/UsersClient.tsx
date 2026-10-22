@@ -3,26 +3,28 @@
 import { useState, useTransition } from 'react';
 import { Plus, CheckCircle2, AlertCircle, KeyRound, Trash2, UserX, UserCheck, Upload, Download } from 'lucide-react';
 import { createUser, updateUser, deleteUser, bulkCreateUsers, type UserRow, type BulkResult } from './actions';
+import { ACTIVE_ROLES, ROLE_LABEL, ROLE_BLURB, LEGACY_ROLES } from '@/lib/access';
 
-// The four profiles. editor/viewer still exist on old accounts and stay
+// Built from lib/access.ts rather than retyped. The hand-maintained copy that
+// used to live here missed `sales` the day that role was added: the dropdown
+// could not offer it, so the role existed everywhere except the one screen
+// that hands it out. editor/viewer still exist on old accounts and stay
 // selectable only for users already on them — see the legacy option below.
-const ROLE_OPTIONS = [
-  { value: 'admin',      label: 'Admin',      hint: 'Everything, plus provisioning people and roles' },
-  { value: 'network_lead', label: 'Network lead', hint: 'Runs onboarding — sees the whole pipeline, owns threads and who works them' },
-  { value: 'network',    label: 'Network',    hint: 'Grows supply — works the providers assigned to them' },
-  { value: 'accounts',   label: 'Accounts',   hint: 'Grows demand — owns account health, reads the network side' },
-  { value: 'operations', label: 'Operations', hint: 'Fulfils orders — reads coverage and the directory' },
-] as const;
+const ROLE_OPTIONS = ACTIVE_ROLES.map((value) => ({
+  value,
+  label: ROLE_LABEL[value],
+  hint: ROLE_BLURB[value],
+}));
 
-const LEGACY_LABEL: Record<string, string> = {
-  editor: 'Editor (legacy)',
-  viewer: 'Viewer (legacy)',
-};
+const LEGACY_LABEL: Record<string, string> = Object.fromEntries(
+  LEGACY_ROLES.map((r) => [r, ROLE_LABEL[r]]),
+);
 
 const ROLE_BADGE: Record<string, string> = {
   admin:      'bg-brand-50 text-brand-700 dark:text-brand-400 border-brand-100',
   network:    'bg-success-50 text-success-600 border-success-100',
   accounts:   'bg-violet-50 text-violet-600 dark:text-violet-400 border-violet-100 dark:border-violet-500/30',
+  sales:      'bg-warn-50 text-warn-600 border-warn-100',
   operations: 'bg-warn-50 text-warn-600 border-warn-100',
   editor:     'bg-ink-100 text-ink-700 border-ink-200',
   viewer:     'bg-ink-100 text-ink-700 border-ink-200',
