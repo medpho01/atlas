@@ -64,6 +64,7 @@ export const NAV: NavGroup[] = [
     label: 'Growth',
     noun: 'accounts & deals',
     items: [
+      { href: '/sales', label: 'Sales CRM', feature: 'salesCrm', alsoActiveOn: ['/sales'] },
       { href: '/accounts', label: 'Account health', feature: 'accountHealth' },
       { href: '/catalogue', label: 'Catalogue', feature: 'catalogue' },
       { href: '/pricing', label: 'Packages & Pricing', feature: 'pricing' },
@@ -78,6 +79,7 @@ export const NAV: NavGroup[] = [
       { href: '/settings/stores', label: 'Stores', feature: 'coverage' },
       { href: '/users', label: 'Users & roles', feature: 'admin' },
       { href: '/settings/roles', label: 'Roles & screens', feature: 'admin' },
+      { href: '/settings/pipeline', label: 'Pipeline', feature: 'admin' },
     ],
   },
 ];
