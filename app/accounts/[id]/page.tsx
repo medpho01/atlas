@@ -1,333 +1,227 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import {
-  ArrowLeft, Briefcase, TrendingUp, TrendingDown, Beaker, Pill, Stethoscope,
-  MessageSquare, MapPin, Sparkles, AlertTriangle,
-} from 'lucide-react';
 import { requireView } from '@/lib/guard';
+import { canManage } from '@/lib/access';
 import { RoleBlocked } from '@/components/RoleBlocked';
 import {
-  getAccount, getAccountStreams, getAccountMonthly, getAccountServiceMix,
-  getAccountRequestFunnel, getAccountPartners, getAccountGeography, getAccountUpsell,
-  STREAM_LABEL, SERVICE_LABEL, type Stream,
-} from '@/lib/accountQueries';
+  getAccount, getAccountMonths, getAccountTasks, getAccountNotes, getContacts,
+  getAccountPeople, LINES, LINE_LABEL, STATUS_LABEL, type LineStatus,
+} from '@/lib/accountHealth';
+import { ManagerPicker } from '../ManagerPicker';
+import { STATUS_CHIP } from '../LineDots';
+import { Composer, Tasks, Contacts, ActivateLine } from './AccountClient';
 
 export const dynamic = 'force-dynamic';
 
-const STREAM_ICON: Record<Stream, React.ReactNode> = {
-  LAB_ORDER: <Beaker className="w-3.5 h-3.5" />,
-  PHARMA_ORDER: <Pill className="w-3.5 h-3.5" />,
-  APPOINTMENT: <Stethoscope className="w-3.5 h-3.5" />,
-  REQUEST: <MessageSquare className="w-3.5 h-3.5" />,
+const n = (v: number | null | undefined) => (v ?? 0).toLocaleString('en-IN');
+
+/** Bar colour per line. Lightness differs as well as hue. */
+const LINE_BAR: Record<string, string> = {
+  LAB_ORDER: 'bg-brand-600',
+  APPOINTMENT: 'bg-success-600',
+  PHARMA_ORDER: 'bg-warn-500',
 };
 
-/** Request outcomes, grouped so the funnel reads as a story rather than a list. */
-const REQUEST_OUTCOME: Record<string, { label: string; tone: 'good' | 'bad' | 'warn' | 'mute' }> = {
-  ORDERED:         { label: 'Converted to order', tone: 'good' },
-  CONSENTED:       { label: 'Consented',          tone: 'good' },
-  QUOTED:          { label: 'Quoted',             tone: 'warn' },
-  OPEN:            { label: 'Open',               tone: 'warn' },
-  DISCHARGED:      { label: 'Discharged',         tone: 'mute' },
-  UNREACHABLE:     { label: 'Unreachable',        tone: 'bad' },
-  WRONG_NUMBER:    { label: 'Wrong number',       tone: 'bad' },
-  CANCELLED:       { label: 'Cancelled',          tone: 'bad' },
-  DENIED:          { label: 'Denied',             tone: 'bad' },
-  NON_SERVICEABLE: { label: 'Not serviceable',    tone: 'bad' },
-};
+export default async function AccountPage({ params }: { params: { id: string } }) {
+  const gate = await requireView('accountHealth', `/accounts/${params.id}`);
+  if (gate.blocked) return <RoleBlocked area="Account health" detail="accounts, network and admin" />;
 
-export default async function AccountPage({ params }: { params: Promise<{ id: string }> }) {
-  const { id } = await params;
-  const storeId = parseInt(id, 10);
-  if (!Number.isInteger(storeId)) notFound();
+  const id = Number(params.id);
+  if (!Number.isInteger(id) || id <= 0) notFound();
 
-  const gate = await requireView('accountHealth', `/accounts/${storeId}`);
-  if (gate.blocked) return <RoleBlocked area="Accounts" detail="the accounts, network and admin teams" />;
-
-  const account = await getAccount(storeId);
+  const account = await getAccount(id);
   if (!account) notFound();
 
-  const [streams, monthly, mix, funnel, partners, geo, upsell] = await Promise.all([
-    getAccountStreams(storeId),
-    getAccountMonthly(storeId),
-    getAccountServiceMix(storeId),
-    getAccountRequestFunnel(storeId),
-    getAccountPartners(storeId),
-    getAccountGeography(storeId),
-    getAccountUpsell(storeId),
+  const canEdit = canManage(gate.user, 'accountHealth');
+  const [months, tasks, notes, contacts, people] = await Promise.all([
+    getAccountMonths(id), getAccountTasks(id), getAccountNotes(id),
+    getContacts(id), getAccountPeople(),
   ]);
 
-  const total = streams.reduce((s, x) => s + x.events, 0);
-  const l30 = streams.reduce((s, x) => s + x.events_l30d, 0);
-  const prior = streams.reduce((s, x) => s + x.events_l30d_prior, 0);
-  const growth = prior > 0 ? Math.round((100 * (l30 - prior)) / prior) : null;
+  // Twelve buckets, newest last, each line stacked inside it.
+  const buckets = Array.from(new Set(months.map((m) => m.month))).sort();
+  const peak = Math.max(1, ...buckets.map((b) =>
+    months.filter((m) => m.month === b).reduce((s, m) => s + m.events, 0)));
 
-  const requests = funnel.reduce((s, r) => s + r.events, 0);
-  const converted = funnel.filter((r) => r.status === 'ORDERED' || r.status === 'CONSENTED')
-                          .reduce((s, r) => s + r.events, 0);
-  const lost = funnel.filter((r) => REQUEST_OUTCOME[r.status]?.tone === 'bad')
-                     .reduce((s, r) => s + r.events, 0);
-  const convRate = requests > 0 ? Math.round((100 * converted) / requests) : null;
-
-  // Monthly totals across streams, for the sparkline-ish bar row.
-  const byMonth = new Map<string, number>();
-  for (const m of monthly) byMonth.set(m.month, (byMonth.get(m.month) ?? 0) + m.events);
-  const months = [...byMonth.entries()].sort(([a], [b]) => a.localeCompare(b));
-  const peak = Math.max(1, ...months.map(([, v]) => v));
+  const byStream = new Map(account.lines.map((l) => [l.stream, l]));
 
   return (
     <div className="px-6 lg:px-8 py-6 max-w-[1500px] mx-auto">
-      <Link href="/accounts" className="inline-flex items-center gap-1.5 text-sm text-ink-500 hover:text-ink-900 transition mb-3">
-        <ArrowLeft className="w-4 h-4" /> All accounts
-      </Link>
-
-      <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 mb-1">
-        <Briefcase className="w-5 h-5 text-brand-600 self-center" />
-        <h1 className="text-2xl font-bold text-ink-900">{account.store_name}</h1>
-        {!account.active && (
-          <span className="text-[10px] font-bold uppercase px-1.5 py-0.5 rounded bg-ink-100 text-ink-600 border border-ink-200">Inactive</span>
-        )}
-        {account.city && <span className="text-sm text-ink-500">{account.city}{account.state ? `, ${account.state}` : ''}</span>}
-      </div>
-      <p className="text-sm text-ink-600 mb-6">
-        Every stream this account puts through the platform — lab orders, pharmacy, appointments and enquiries.
-      </p>
-
-      {/* Headline */}
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3 mb-5">
-        <Tile label="All activity" value={total.toLocaleString('en-IN')} sub="every stream, all time" />
-        <Tile label="Last month" value={l30.toLocaleString('en-IN')}
-              sub={growth === null ? 'no prior month' : `${growth >= 0 ? '+' : ''}${growth}% vs prior`}
-              tone={growth === null ? undefined : growth >= 0 ? 'good' : 'bad'}
-              icon={growth === null ? undefined : growth >= 0 ? <TrendingUp className="w-3.5 h-3.5" /> : <TrendingDown className="w-3.5 h-3.5" />} />
-        <Tile label="Streams used" value={`${streams.filter((s) => s.events > 0).length} of 4`}
-              sub={streams.filter((s) => s.events > 0).map((s) => STREAM_LABEL[s.stream]).join(', ') || '—'} />
-        <Tile label="Enquiries" value={requests.toLocaleString('en-IN')}
-              sub={convRate === null ? 'none recorded' : `${convRate}% became orders`}
-              tone={convRate !== null && convRate < 30 ? 'warn' : undefined} />
-        <Tile label="Lost enquiries" value={lost.toLocaleString('en-IN')}
-              sub="unreachable, cancelled or denied" tone={lost > 0 ? 'bad' : undefined} />
+      <div className="text-[13px] text-ink-500">
+        <Link href="/accounts" className="hover:text-ink-900">Account health</Link>
+        <span className="text-ink-300"> / </span>
+        <span className="font-semibold text-ink-900">{account.store_name}</span>
       </div>
 
-      {/* Streams */}
-      <Card title="Activity by stream" hint="fulfilled / cancelled shown against each">
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 p-4">
-          {(['LAB_ORDER', 'PHARMA_ORDER', 'APPOINTMENT', 'REQUEST'] as Stream[]).map((key) => {
-            const s = streams.find((x) => x.stream === key);
-            const n = s?.events ?? 0;
-            return (
-              <div key={key} className={`rounded-xl border p-3 ${n > 0 ? 'border-ink-200 bg-surface' : 'border-dashed border-ink-200 bg-ink-50/50'}`}>
-                <div className="flex items-center gap-1.5 text-[11px] uppercase tracking-wider font-semibold text-ink-500 mb-1">
-                  {STREAM_ICON[key]} {STREAM_LABEL[key]}
-                </div>
-                <div className={`text-2xl font-bold tabular-nums ${n > 0 ? 'text-ink-900' : 'text-ink-400'}`}>
-                  {n.toLocaleString('en-IN')}
-                </div>
-                {n > 0 ? (
-                  <div className="text-[11px] text-ink-500 mt-0.5 tabular-nums">
-                    <span className="text-success-600 font-semibold">{s!.fulfilled.toLocaleString('en-IN')}</span> fulfilled ·{' '}
-                    <span className="text-danger-500 font-semibold">{s!.canceled.toLocaleString('en-IN')}</span> cancelled
-                  </div>
-                ) : (
-                  <div className="text-[11px] text-ink-400 mt-0.5">
-                    {key === 'APPOINTMENT' ? 'not attributable — see note' : 'never used'}
-                  </div>
-                )}
+      <div className="flex flex-wrap gap-5 mt-5 items-start">
+        <div className="flex-[999_1_620px] min-w-0 flex flex-col gap-4">
+
+          <div className="rounded-xl border border-ink-200 bg-surface p-5">
+            <div className="flex flex-wrap items-start gap-4">
+              <div className="min-w-0">
+                <h1 className="text-[22px] font-extrabold tracking-tight text-ink-900">{account.store_name}</h1>
+                <p className="text-[13px] text-ink-500 mt-1">
+                  {[account.city, account.state].filter(Boolean).join(', ') || 'No address on file'}
+                  {' · '}{account.lines_active} of 3 lines active
+                </p>
               </div>
-            );
-          })}
-        </div>
-        {!streams.some((s) => s.stream === 'APPOINTMENT' && s.events > 0) && (
-          <div className="mx-4 mb-4 flex items-start gap-2 rounded-lg border border-warn-100 bg-warn-50 px-3 py-2 text-[11.5px] text-warn-600">
-            <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
-            <span>
-              Appointments carry no store reference in the source. The only route is
-              <code className="mx-1 font-mono">Appointment.order_id → Order.storeId</code>, which is unpopulated —
-              so this reads zero for every account. It is not evidence that no appointments happened.
-            </span>
-          </div>
-        )}
-      </Card>
-
-      {/* Trend */}
-      {months.length > 1 && (
-        <Card title="Monthly activity" hint={`${months.length} months, all streams`}>
-          <div className="p-4">
-            <div className="flex items-end gap-1 h-28">
-              {months.map(([m, v]) => (
-                // h-full matters: items-end sizes each column to its content, so
-                // without a definite height here the bar's percentage has nothing
-                // to resolve against and collapses to nothing.
-                <div key={m} className="flex-1 h-full flex flex-col justify-end items-center group" title={`${m}: ${v.toLocaleString('en-IN')}`}>
-                  <div className="w-full rounded-t bg-brand-500/70 group-hover:bg-brand-500 transition-colors"
-                       style={{ height: `${Math.max(2, (v / peak) * 100)}%` }} />
-                </div>
-              ))}
-            </div>
-            <div className="flex justify-between text-[10px] text-ink-500 mt-1.5 tabular-nums">
-              <span>{months[0][0].slice(0, 7)}</span>
-              <span>peak {peak.toLocaleString('en-IN')}</span>
-              <span>{months[months.length - 1][0].slice(0, 7)}</span>
+              <div className="ml-auto flex items-center gap-2">
+                <span className="text-[11px] text-ink-500">Account manager</span>
+                <ManagerPicker storeId={account.store_id} value={account.account_manager_id}
+                               people={people} canEdit={canEdit} />
+              </div>
             </div>
           </div>
-        </Card>
-      )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        {/* Request funnel */}
-        {funnel.length > 0 && (
-          <Card title="Enquiry outcomes" hint={`${requests.toLocaleString('en-IN')} requests`}>
-            <table className="w-full text-sm">
-              <tbody>
-                {funnel.map((r) => {
-                  const meta = REQUEST_OUTCOME[r.status] ?? { label: r.status, tone: 'mute' as const };
-                  const pct = requests > 0 ? Math.round((100 * r.events) / requests) : 0;
-                  return (
-                    <tr key={r.status} className="border-b border-ink-100 last:border-0">
-                      <td className="px-4 py-2 text-[13px] text-ink-800">{meta.label}</td>
-                      <td className="px-2 py-2 w-1/2">
-                        <div className="h-1.5 rounded bg-ink-100 overflow-hidden">
-                          <div className={`h-full ${
-                            meta.tone === 'good' ? 'bg-success-500' : meta.tone === 'bad' ? 'bg-danger-500'
-                            : meta.tone === 'warn' ? 'bg-warn-500' : 'bg-ink-300'}`}
-                            style={{ width: `${pct}%` }} />
+          {/* the line strip */}
+          <div className="rounded-xl border border-ink-200 bg-surface p-5">
+            <div className="flex items-baseline gap-2.5">
+              <h2 className="text-[14px] font-bold text-ink-900">Business lines</h2>
+              <span className="text-[11px] text-ink-500">each line gets its own verdict — never blended</span>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-3.5">
+              {LINES.map((s) => {
+                const l = byStream.get(s);
+                const st = (l?.status ?? 'never') as LineStatus;
+                const never = st === 'never';
+                return (
+                  <div key={s}
+                       className={`rounded-lg border p-3.5 ${never
+                         ? 'border-dashed border-ink-200 bg-transparent'
+                         : st === 'stopped' ? 'border-warn-100 bg-warn-50'
+                         : st === 'declining' ? 'border-danger-100 bg-danger-50'
+                         : 'border-success-100 bg-success-50'}`}>
+                    <div className="flex items-center gap-2">
+                      <span className={`text-[12px] font-bold ${never ? 'text-ink-500' : 'text-ink-900'}`}>
+                        {LINE_LABEL[s]}
+                      </span>
+                      <span className={`ml-auto text-[10px] font-bold uppercase px-1.5 py-0.5 rounded border ${STATUS_CHIP[st]}`}>
+                        {STATUS_LABEL[st]}
+                      </span>
+                    </div>
+                    {never ? (
+                      <>
+                        <p className="text-[12px] text-ink-500 leading-snug mt-2.5">
+                          Never ordered on this line.
+                        </p>
+                        <ActivateLine storeId={account.store_id} stream={s}
+                                      label={LINE_LABEL[s]} canEdit={canEdit} />
+                      </>
+                    ) : (
+                      <>
+                        <div className="flex items-baseline gap-2 mt-2.5">
+                          <span className="text-[26px] font-extrabold num text-ink-900">{n(l?.this_month)}</span>
+                          <span className="text-[11px] text-ink-500">this month</span>
                         </div>
-                      </td>
-                      <td className="px-4 py-2 text-right tabular-nums text-[13px] font-semibold text-ink-900">
-                        {r.events.toLocaleString('en-IN')}
-                        <span className="text-ink-500 font-normal text-[11px] ml-1">{pct}%</span>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </Card>
-        )}
+                        <div className="text-[11px] text-ink-600 num mt-1.5">
+                          last month {n(l?.last_month)}
+                          {(l?.year_ago_month ?? 0) > 0 && ` · a year ago ${n(l?.year_ago_month)}`}
+                        </div>
+                        {l?.first_month && (
+                          <div className="text-[10px] text-ink-400 mt-2 pt-2 border-t border-ink-150">
+                            live since {l.first_month.slice(0, 7)}
+                          </div>
+                        )}
+                      </>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
 
-        {/* Service mix */}
-        <Card title="What they order" hint="by service line">
-          {mix.length === 0 ? <Empty>No activity recorded.</Empty> : (
-            <table className="w-full text-sm">
-              <tbody>
-                {mix.filter((m) => m.stream !== 'REQUEST').map((m) => (
-                  <tr key={`${m.stream}:${m.service_line}`} className="border-b border-ink-100 last:border-0">
-                    <td className="px-4 py-2 text-[13px] text-ink-800">
-                      {SERVICE_LABEL[m.service_line] ?? m.service_line}
-                      <div className="text-[10px] text-ink-500">{STREAM_LABEL[m.stream]}</div>
-                    </td>
-                    <td className="px-4 py-2 text-right tabular-nums text-[13px] font-semibold text-ink-900">
-                      {m.events.toLocaleString('en-IN')}
-                    </td>
-                    <td className="px-4 py-2 text-right tabular-nums text-[11px] text-ink-500">
-                      {m.events > 0 ? `${Math.round((100 * m.fulfilled) / m.events)}% done` : '—'}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </Card>
-
-        {/* Partners */}
-        <Card title="Who fulfils their work" hint="labs by order volume">
-          {partners.length === 0 ? <Empty>No fulfilment recorded.</Empty> : (
-            <table className="w-full text-sm">
-              <tbody>
-                {partners.map((p) => (
-                  <tr key={p.name} className="border-b border-ink-100 last:border-0">
-                    <td className="px-4 py-2 text-[13px] text-ink-800">{p.name}</td>
-                    <td className="px-4 py-2 text-right tabular-nums text-[13px] font-semibold text-ink-900">
-                      {p.events.toLocaleString('en-IN')}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </Card>
-
-        {/* Geography */}
-        <Card title="Where their demand is" hint="top pincodes"
-              action={geo.length > 0 ? <Link href="/pincodes?tab=serviceability" className="text-[11px] text-brand-700 dark:text-brand-400 hover:underline">Check serviceability →</Link> : undefined}>
-          {geo.length === 0 ? <Empty>No geography recorded.</Empty> : (
-            <table className="w-full text-sm">
-              <tbody>
-                {geo.map((g) => (
-                  <tr key={g.pincode} className="border-b border-ink-100 last:border-0">
-                    <td className="px-4 py-2 text-[13px] tabular-nums text-ink-900 font-semibold">
-                      <Link href={`/pincode/${g.pincode}`} className="hover:text-brand-700 dark:hover:text-brand-400">
-                        {g.pincode}
-                      </Link>
-                      {g.city && <span className="text-ink-500 font-normal ml-2 text-[12px]">{g.city}</span>}
-                    </td>
-                    <td className="px-4 py-2 text-right tabular-nums text-[13px] text-ink-800">
-                      {g.events.toLocaleString('en-IN')}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </Card>
-      </div>
-
-      {/* Upsell */}
-      {upsell.length > 0 && (
-        <Card title="Not yet selling" hint="service lines this account has never ordered, ranked by adoption elsewhere">
-          <div className="p-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
-            {upsell.map((u) => (
-              <div key={u.service_line} className="rounded-xl border border-brand-100 dark:border-brand-500/30 bg-brand-50/60 dark:bg-brand-500/10 p-3">
-                <div className="flex items-center gap-1.5 text-[13px] font-semibold text-ink-900">
-                  <Sparkles className="w-3.5 h-3.5 text-brand-600 dark:text-brand-400" />
-                  {SERVICE_LABEL[u.service_line] ?? u.service_line}
+          {/* twelve months */}
+          <div className="rounded-xl border border-ink-200 bg-surface p-5">
+            <div className="flex items-baseline gap-2.5">
+              <h2 className="text-[14px] font-bold text-ink-900">Twelve months</h2>
+              <span className="text-[11px] text-ink-500">transactions per month, stacked by line</span>
+            </div>
+            {buckets.length === 0 ? (
+              <p className="text-[12px] text-ink-400 mt-4">No activity in the last twelve months.</p>
+            ) : (
+              <>
+                <div className="flex items-end gap-1.5 h-[150px] mt-4">
+                  {buckets.map((b) => {
+                    const rows = months.filter((m) => m.month === b);
+                    return (
+                      <div key={b} className="flex-1 flex flex-col justify-end gap-0.5"
+                           title={`${b}: ${rows.reduce((s, m) => s + m.events, 0)} transactions`}>
+                        {LINES.filter((s) => rows.some((m) => m.stream === s)).map((s) => {
+                          const e = rows.find((m) => m.stream === s)?.events ?? 0;
+                          return (
+                            <div key={s} className={`${LINE_BAR[s]} rounded-sm`}
+                                 style={{ height: `${Math.max(2, Math.round((e / peak) * 140))}px` }} />
+                          );
+                        })}
+                      </div>
+                    );
+                  })}
                 </div>
-                <div className="text-[11px] text-ink-600 mt-1 tabular-nums">
-                  {u.accounts_using} other account{u.accounts_using === 1 ? '' : 's'} ·{' '}
-                  {u.total_events.toLocaleString('en-IN')} orders
+                <div className="flex gap-1.5 mt-1.5">
+                  {buckets.map((b, i) => (
+                    <span key={b}
+                          className={`flex-1 text-[10px] text-center ${i === buckets.length - 1 ? 'text-ink-700 font-semibold' : 'text-ink-400'}`}>
+                      {b.slice(5)}
+                    </span>
+                  ))}
+                </div>
+                <div className="flex flex-wrap gap-4 mt-3 text-[11px] text-ink-500">
+                  {LINES.filter((s) => months.some((m) => m.stream === s)).map((s) => (
+                    <span key={s}>
+                      <span className={`inline-block w-2.5 h-2.5 rounded-sm mr-1.5 ${LINE_BAR[s]}`} />
+                      {LINE_LABEL[s]}
+                    </span>
+                  ))}
+                  <span className="ml-auto text-ink-400">the last bar is a month in progress</span>
+                </div>
+              </>
+            )}
+          </div>
+
+          <Composer storeId={account.store_id} canEdit={canEdit} />
+
+          <div className="rounded-xl border border-ink-200 bg-surface px-4">
+            {notes.length === 0 ? (
+              <p className="text-[12px] text-ink-400 py-5">Nothing logged yet.</p>
+            ) : notes.map((note, i) => (
+              <div key={note.id} className={`flex gap-3 py-4 ${i < notes.length - 1 ? 'border-b border-ink-100' : ''}`}>
+                <span className="w-6 h-6 shrink-0 rounded-full bg-ink-100 text-ink-600 text-[9px] font-bold flex items-center justify-center">
+                  {note.kind === 'system' ? '↗' : note.kind.slice(0, 2).toUpperCase()}
+                </span>
+                <div className="min-w-0">
+                  <div className="text-[12px] text-ink-500">
+                    <span className="text-ink-900 font-semibold">{note.author_name ?? 'Someone'}</span>
+                    {note.kind === 'system' ? '' : ` logged a ${note.kind}`}
+                    {' · '}{note.created_at.slice(0, 16).replace('T', ' ')}
+                  </div>
+                  {note.body && <p className="text-[13px] text-ink-700 leading-relaxed mt-1 whitespace-pre-line">{note.body}</p>}
                 </div>
               </div>
             ))}
           </div>
-        </Card>
-      )}
-    </div>
-  );
-}
-
-function Tile({ label, value, sub, tone, icon }: {
-  label: string; value: string; sub?: string;
-  tone?: 'good' | 'bad' | 'warn'; icon?: React.ReactNode;
-}) {
-  const colour = tone === 'good' ? 'text-success-600' : tone === 'bad' ? 'text-danger-500'
-               : tone === 'warn' ? 'text-warn-600' : 'text-ink-900';
-  return (
-    <div className="rounded-xl border border-ink-200 bg-surface p-3.5">
-      <div className="text-[10px] uppercase tracking-wider text-ink-500 font-bold mb-1">{label}</div>
-      <div className={`text-2xl font-bold tabular-nums leading-tight ${colour}`}>{value}</div>
-      {sub && (
-        <div className={`text-[11px] mt-0.5 flex items-center gap-1 ${tone ? colour : 'text-ink-500'}`}>
-          {icon}{sub}
         </div>
-      )}
-    </div>
-  );
-}
 
-function Card({ title, hint, action, children }: {
-  title: string; hint?: string; action?: React.ReactNode; children: React.ReactNode;
-}) {
-  return (
-    <div className="rounded-2xl border border-ink-200 bg-surface overflow-hidden mb-4">
-      <div className="px-4 py-2.5 border-b border-ink-200 flex items-center gap-2">
-        <b className="text-[13px] text-ink-900">{title}</b>
-        {hint && <span className="text-[11px] text-ink-500">{hint}</span>}
-        {action && <span className="ml-auto">{action}</span>}
+        <div className="flex-[1_1_320px] min-w-[300px] flex flex-col gap-3.5">
+          <Tasks storeId={account.store_id} tasks={tasks} people={people}
+                 meId={gate.user.id} canEdit={canEdit} />
+          <Contacts storeId={account.store_id} contacts={contacts} canEdit={canEdit} />
+
+          <div className="rounded-xl border border-ink-200 bg-surface p-4">
+            <div className="text-[10px] uppercase tracking-wide text-ink-500">Elsewhere in Atlas</div>
+            <div className="mt-2.5 space-y-1.5 text-[12px]">
+              <Link href={`/requests?store=${account.store_id}`} className="block text-brand-600 hover:underline">
+                Their requests →
+              </Link>
+              <Link href={`/order-tracking?store=${account.store_id}`} className="block text-brand-600 hover:underline">
+                Orders in flight →
+              </Link>
+            </div>
+            <p className="text-[11px] text-ink-400 mt-3 leading-snug">
+              Operational detail is read where it lives rather than copied here.
+            </p>
+          </div>
+        </div>
       </div>
-      {children}
     </div>
   );
-}
-
-function Empty({ children }: { children: React.ReactNode }) {
-  return <div className="px-4 py-8 text-center text-[12px] text-ink-500">{children}</div>;
 }
