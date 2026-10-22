@@ -33,8 +33,16 @@ async function stagesOf(pipelineId: number): Promise<Stage[]> {
   return row?.stages ?? [];
 }
 
+/** A key from atlas.sales_account_type, or nothing. */
+async function validType(key?: string | null): Promise<string | null> {
+  if (!key) return null;
+  const row = await queryOne<{ key: string }>(
+    `SELECT key FROM atlas.sales_account_type WHERE key = $1 AND active`, [key]);
+  return row?.key ?? null;
+}
+
 export async function createDeal(input: {
-  company: string; city?: string; website?: string;
+  company: string; city?: string; website?: string; accountType?: string;
   value?: string; expectedClose?: string; source?: string; ownerId?: number | null;
 }): Promise<R & { id?: number }> {
   const { me, error } = await gate();
@@ -53,15 +61,17 @@ export async function createDeal(input: {
   const close = input.expectedClose && /^\d{4}-\d{2}-\d{2}$/.test(input.expectedClose)
     ? input.expectedClose : null;
 
+  const accountType = await validType(input.accountType);
+
   const row = await queryOne<{ id: number }>(`
     INSERT INTO atlas.sales_deal
-      (pipeline_id, company, city, website, stage_key, value_inr, expected_close,
-       source, owner_id, created_by)
-    VALUES ($1, $2, NULLIF(btrim($3), ''), NULLIF(btrim($4), ''), $5, $6, $7::date,
-            NULLIF(btrim($8), ''), $9, $10)
+      (pipeline_id, company, city, website, account_type, stage_key, value_inr,
+       expected_close, source, owner_id, created_by)
+    VALUES ($1, $2, NULLIF(btrim($3), ''), NULLIF(btrim($4), ''), $5, $6, $7, $8::date,
+            NULLIF(btrim($9), ''), $10, $11)
     RETURNING id
-  `, [p.id, company, input.city ?? '', input.website ?? '', first.key, value, close,
-      input.source ?? '', input.ownerId ?? me.id, me.id]);
+  `, [p.id, company, input.city ?? '', input.website ?? '', accountType, first.key,
+      value, close, input.source ?? '', input.ownerId ?? me.id, me.id]);
 
   if (row) {
     await query(`INSERT INTO atlas.sales_stage_event (deal_id, to_key, moved_by) VALUES ($1, $2, $3)`,
@@ -224,7 +234,7 @@ export async function setTag(input: { dealId: number; label: string; on: boolean
 }
 
 export async function updateDeal(input: {
-  dealId: number;
+  dealId: number; accountType?: string;
   value?: string; expectedClose?: string;
   contactName?: string; contactRole?: string; contactPhone?: string; contactEmail?: string;
   city?: string; website?: string;
@@ -234,8 +244,10 @@ export async function updateDeal(input: {
   const value = input.value && /^\d+$/.test(input.value) ? Number(input.value) : null;
   const close = input.expectedClose && /^\d{4}-\d{2}-\d{2}$/.test(input.expectedClose)
     ? input.expectedClose : null;
+  const accountType = await validType(input.accountType);
   await query(`
     UPDATE atlas.sales_deal SET
+      account_type   = $10,
       value_inr      = $2,
       expected_close = $3::date,
       contact_name   = NULLIF(btrim($4), ''),
@@ -247,7 +259,8 @@ export async function updateDeal(input: {
       updated_at     = now()
     WHERE id = $1
   `, [input.dealId, value, close, input.contactName ?? '', input.contactRole ?? '',
-      input.contactPhone ?? '', input.contactEmail ?? '', input.city ?? '', input.website ?? '']);
+      input.contactPhone ?? '', input.contactEmail ?? '', input.city ?? '', input.website ?? '',
+      accountType]);
   audit(me.id, '/sales', 'edit-deal');
   revalidatePath('/sales');
   revalidatePath(`/sales/${input.dealId}`);

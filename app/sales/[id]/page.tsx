@@ -5,6 +5,7 @@ import { canManage } from '@/lib/access';
 import { RoleBlocked } from '@/components/RoleBlocked';
 import {
   getDeal, getNotes, getTasks, getPipeline, getAssignableUsers, getUnlinkedStores,
+  getAccountTypes,
 } from '@/lib/salesCrm';
 import { Composer, Tasks, Tags, Owner, CloseDeal, DealFields, Activity } from './DealClient';
 
@@ -29,9 +30,10 @@ export default async function DealPage({
   if (!deal) notFound();
 
   const canEdit = canManage(gate.user, 'salesCrm');
-  const [notes, tasks, pipeline, people, stores] = await Promise.all([
+  const [notes, tasks, pipeline, people, stores, types] = await Promise.all([
     getNotes(id), getTasks(id), getPipeline(), getAssignableUsers(),
     canEdit ? getUnlinkedStores('') : Promise.resolve([]),
+    getAccountTypes(),
   ]);
 
   const stages = pipeline?.stages ?? [];
@@ -53,6 +55,11 @@ export default async function DealPage({
               <div className="min-w-0">
                 <div className="flex items-center gap-2 flex-wrap">
                   <h1 className="text-[22px] font-extrabold tracking-tight text-ink-900">{deal.company}</h1>
+                  {deal.account_type_label && (
+                    <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-ink-50 text-ink-600 border border-ink-200">
+                      {deal.account_type_label}
+                    </span>
+                  )}
                   {deal.store_id ? (
                     <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-success-50 text-success-600 border border-success-100">
                       Live as {deal.store_name ?? `store ${deal.store_id}`}
@@ -117,7 +124,7 @@ export default async function DealPage({
           <Tags dealId={deal.deal_id} tags={deal.tags} canEdit={canEdit} />
           <CloseDeal deal={deal} stages={stages} stores={stores}
                      preselect={searchParams.close ?? null} canEdit={canEdit} />
-          <DealFields deal={deal} canEdit={canEdit} />
+          <DealFields deal={deal} canEdit={canEdit} types={types} />
 
           {deal.store_id ? (
             <div className="rounded-xl border border-success-100 bg-success-50 p-4">

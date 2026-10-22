@@ -6,13 +6,18 @@ import { createDeal } from './actions';
 import { startNav } from '@/components/ui/NavProgress';
 
 /** Four fields. A longer form at the moment of capture is a deal nobody logs. */
-export function NewDeal({ people, meId }: { people: { id: number; name: string }[]; meId: number }) {
+export function NewDeal({ people, meId, types }: {
+  people: { id: number; name: string }[];
+  meId: number;
+  types: { key: string; label: string }[];
+}) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [company, setCompany] = useState('');
   const [city, setCity] = useState('');
   const [value, setValue] = useState('');
   const [owner, setOwner] = useState(String(meId));
+  const [type, setType] = useState('');
   const [err, setErr] = useState<string | null>(null);
   const [pending, start] = useTransition();
 
@@ -20,9 +25,11 @@ export function NewDeal({ people, meId }: { people: { id: number; name: string }
     e.preventDefault();
     setErr(null);
     start(async () => {
-      const r = await createDeal({ company, city, value, ownerId: Number(owner) });
+      const r = await createDeal({
+        company, city, value, ownerId: Number(owner), accountType: type || undefined,
+      });
       if (!r.ok) { setErr(r.error ?? 'Could not create it'); return; }
-      setOpen(false); setCompany(''); setCity(''); setValue('');
+      setOpen(false); setCompany(''); setCity(''); setValue(''); setType('');
       startNav();
       if (r.id) router.push(`/sales/${r.id}`);
     });
@@ -49,6 +56,14 @@ export function NewDeal({ people, meId }: { people: { id: number; name: string }
         <label htmlFor="city" className="block text-[10px] uppercase tracking-wide text-ink-400 mb-1">City</label>
         <input id="city" value={city} onChange={(e) => setCity(e.target.value)} placeholder="Bengaluru"
                className="text-[12px] rounded-md border border-ink-200 bg-surface px-2.5 py-1.5 w-[130px]" />
+      </div>
+      <div>
+        <label htmlFor="atype" className="block text-[10px] uppercase tracking-wide text-ink-400 mb-1">Type</label>
+        <select id="atype" value={type} onChange={(e) => setType(e.target.value)}
+                className="text-[12px] rounded-md border border-ink-200 bg-surface px-2 py-1.5 w-[150px]">
+          <option value="">Not set</option>
+          {types.map((t) => <option key={t.key} value={t.key}>{t.label}</option>)}
+        </select>
       </div>
       <div>
         <label htmlFor="value" className="block text-[10px] uppercase tracking-wide text-ink-400 mb-1">Value ₹</label>

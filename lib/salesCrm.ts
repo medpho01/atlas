@@ -12,6 +12,8 @@ export type Deal = {
   website: string | null;
   city: string | null;
   state: string | null;
+  account_type: string | null;
+  account_type_label: string | null;
   stage_key: string;
   stage_label: string | null;
   stage_probability: number | null;
@@ -49,6 +51,8 @@ export type DealFilters = {
   q?: string;
   /** 'open' hides won and lost, which is what a board is for. */
   show?: 'open' | 'all';
+  /** An account-type key — insurer, broker, healthtech … */
+  type?: string;
 };
 
 export async function getPipeline(id?: number): Promise<Pipeline | null> {
@@ -92,6 +96,8 @@ export async function getDeals(pipelineId: number, f: DealFilters = {}): Promise
   if (f.show !== 'all') where.push(`d.stage_outcome = 'open'`);
   if (f.owner) where.push(`d.owner_id = ${push(f.owner)}`);
   if (f.tag) where.push(`${push(f.tag)} = ANY(d.tags)`);
+  if (f.type === 'none') where.push(`d.account_type IS NULL`);
+  else if (f.type) where.push(`d.account_type = ${push(f.type)}`);
   if (f.q && f.q.trim()) {
     const q = push(`%${f.q.trim().toLowerCase()}%`);
     where.push(`(lower(d.company) LIKE ${q} OR lower(d.city) LIKE ${q}
@@ -212,4 +218,31 @@ export async function getUnlinkedStores(q: string): Promise<{ id: number; name: 
     ORDER BY s."storeName"
     LIMIT 20
   `, [like]);
+}
+
+
+export type AccountType = { key: string; label: string };
+
+/**
+ * The kinds of company we sell to.
+ *
+ * Read from the table rather than a constant, so the list can be changed
+ * without a deploy. Inactive types still resolve on a deal that already holds
+ * them — retiring one greys it out of the picker, it does not rewrite history.
+ */
+export async function getAccountTypes(): Promise<AccountType[]> {
+  return query<AccountType>(
+    `SELECT key, label FROM atlas.sales_account_type WHERE active ORDER BY sort_order, label`);
+}
+
+/** How many open deals sit on each type, for the board's filter row. */
+export async function getTypeCounts(pipelineId: number) {
+  return query<{ key: string; label: string; n: number }>(`
+    SELECT t.key, t.label, COUNT(d.deal_id)::int AS n
+    FROM atlas.sales_account_type t
+    LEFT JOIN analytics.v_sales_deal d
+      ON d.account_type = t.key AND d.pipeline_id = $1 AND d.stage_outcome = 'open'
+    WHERE t.active
+    GROUP BY 1, 2 ORDER BY 3 DESC, t.label
+  `, [pipelineId]);
 }

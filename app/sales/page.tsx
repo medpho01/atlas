@@ -6,6 +6,7 @@ import { ChipButton } from '@/components/ui/Toggle';
 import { InfoTip } from '@/components/ui/InfoTip';
 import {
   getPipeline, listSalesPipelines, getDeals, getBoardSummary, getTags, getAssignableUsers,
+  getAccountTypes, getTypeCounts,
 } from '@/lib/salesCrm';
 import { Board } from './Board';
 import { NewDeal } from './NewDeal';
@@ -37,7 +38,9 @@ function Metric({ label, value, sub, tone }: {
 export default async function SalesPage({
   searchParams,
 }: {
-  searchParams: { mine?: string; tag?: string; q?: string; show?: string; pipeline?: string };
+  searchParams: {
+    mine?: string; tag?: string; q?: string; show?: string; pipeline?: string; type?: string;
+  };
 }) {
   const gate = await requireView('salesCrm', '/sales');
   if (gate.blocked) return <RoleBlocked area="Sales CRM" detail="sales, accounts and admin" />;
@@ -61,16 +64,19 @@ export default async function SalesPage({
   const mine = searchParams.mine === '1';
   const show = searchParams.show === 'all' ? 'all' as const : 'open' as const;
 
-  const [deals, summary, tags, people] = await Promise.all([
+  const [deals, summary, tags, people, types, typeCounts] = await Promise.all([
     getDeals(pipeline.id, {
       owner: mine ? gate.user.id : undefined,
       tag: searchParams.tag,
       q: searchParams.q,
+      type: searchParams.type,
       show,
     }),
     getBoardSummary(pipeline.id),
     getTags(),
     getAssignableUsers(),
+    getAccountTypes(),
+    getTypeCounts(pipeline.id),
   ]);
 
   const link = (patch: Record<string, string | undefined>) => {
@@ -81,6 +87,7 @@ export default async function SalesPage({
       q: searchParams.q,
       show: show === 'all' ? 'all' : undefined,
       pipeline: searchParams.pipeline,
+      type: searchParams.type,
       ...patch,
     };
     for (const [k, v] of Object.entries(merged)) if (v) p.set(k, v);
@@ -147,6 +154,24 @@ export default async function SalesPage({
           <ChipButton href={link({ mine: '1' })} active={mine}>Mine</ChipButton>
         </div>
 
+        {/* What kind of company, which is what decides who sells to them and
+            how — an insurer buys nothing like a health-tech app. Only the
+            types that actually have deals get a chip. */}
+        {typeCounts.some((t) => t.n > 0) && (
+          <>
+            <span className="w-px h-5 bg-ink-200" />
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <span className="text-[11px] uppercase tracking-wide text-ink-400 mr-0.5">Type</span>
+              <ChipButton href={link({ type: undefined })} active={!searchParams.type}>All</ChipButton>
+              {typeCounts.filter((t) => t.n > 0).map((t) => (
+                <ChipButton key={t.key} href={link({ type: t.key })} active={searchParams.type === t.key}>
+                  {t.label} <span className="text-ink-400">{t.n}</span>
+                </ChipButton>
+              ))}
+            </div>
+          </>
+        )}
+
         {tags.length > 0 && (
           <>
             <span className="w-px h-5 bg-ink-200" />
@@ -171,7 +196,7 @@ export default async function SalesPage({
 
         {canEdit && (
           <div className="ml-auto">
-            <NewDeal people={people} meId={gate.user.id} />
+            <NewDeal people={people} meId={gate.user.id} types={types} />
           </div>
         )}
       </div>

@@ -284,13 +284,16 @@ export function CloseDeal({ deal, stages, stores, preselect, canEdit }: {
   );
 }
 
-export function DealFields({ deal, canEdit }: { deal: Deal; canEdit: boolean }) {
+export function DealFields({ deal, canEdit, types }: {
+  deal: Deal; canEdit: boolean; types: { key: string; label: string }[];
+}) {
   const [v, setV] = useState(deal.value_inr ?? '');
   const [close, setClose] = useState(deal.expected_close ?? '');
   const [name, setName] = useState(deal.contact_name ?? '');
   const [role, setRole] = useState(deal.contact_role ?? '');
   const [phone, setPhone] = useState(deal.contact_phone ?? '');
   const [email, setEmail] = useState(deal.contact_email ?? '');
+  const [type, setType] = useState(deal.account_type ?? '');
   const [saved, setSaved] = useState(false);
   const [pending, start] = useTransition();
   if (!canEdit) return null;
@@ -301,7 +304,7 @@ export function DealFields({ deal, canEdit }: { deal: Deal; canEdit: boolean }) 
       await updateDeal({
         dealId: deal.deal_id, value: String(v).replace(/\D/g, ''), expectedClose: close,
         contactName: name, contactRole: role, contactPhone: phone, contactEmail: email,
-        city: deal.city ?? '', website: deal.website ?? '',
+        city: deal.city ?? '', website: deal.website ?? '', accountType: type,
       });
       setSaved(true); setTimeout(() => setSaved(false), 1600);
     });
@@ -320,6 +323,13 @@ export function DealFields({ deal, canEdit }: { deal: Deal; canEdit: boolean }) 
                  className="mt-1 w-full text-[13px] rounded-md border border-ink-200 bg-surface px-2 py-1.5" />
         </label>
       </div>
+      <label className="block text-[11px] text-ink-500">Account type
+        <select value={type} onChange={(e) => setType(e.target.value)}
+                className="mt-1 w-full text-[13px] rounded-md border border-ink-200 bg-surface px-2 py-1.5">
+          <option value="">Not set</option>
+          {types.map((t) => <option key={t.key} value={t.key}>{t.label}</option>)}
+        </select>
+      </label>
       <label className="block text-[11px] text-ink-500">Contact
         <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Ankit Mehrotra"
                className="mt-1 w-full text-[13px] rounded-md border border-ink-200 bg-surface px-2.5 py-1.5" />

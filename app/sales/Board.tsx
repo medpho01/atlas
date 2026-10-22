@@ -91,6 +91,15 @@ function Card({ deal, stages, canEdit }: { deal: Deal; stages: Stage[]; canEdit:
         <div className="text-[11px] text-ink-500 mt-0.5">
           {[deal.city, deal.source].filter(Boolean).join(' · ') || 'No location yet'}
         </div>
+        {/* What kind of company. An insurer and a health-tech app buy the same
+            thing for different reasons, so this belongs on the card rather
+            than two clicks away. */}
+        {deal.account_type_label && (
+          <div className="text-[10px] font-semibold text-ink-600 mt-1.5 inline-block
+                          px-1.5 py-px rounded border border-ink-200 bg-ink-50">
+            {deal.account_type_label}
+          </div>
+        )}
 
         {(deal.tags.length > 0 || deal.value_inr) && (
           <div className="flex items-center gap-1.5 mt-2 flex-wrap">
