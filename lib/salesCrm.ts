@@ -12,10 +12,14 @@ export type Deal = {
   account_id: number | null;
   account_lifecycle: string | null;
   meetings_done: number;
+  first_met_on: string | null;
   last_met_on: string | null;
   next_meeting_on: string | null;
   opd_book_cr: string | null;
   premium_book_cr: string | null;
+  primary_contact: string | null;
+  primary_contact_role: string | null;
+  decision_maker: string | null;
   company: string;
   website: string | null;
   city: string | null;

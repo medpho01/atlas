@@ -14,6 +14,9 @@ const inr = (v: string | null) => {
   return `₹${n.toLocaleString('en-IN')}`;
 };
 
+const daysAgo = (iso: string) =>
+  Math.round((Date.now() - new Date(`${iso}T00:00:00Z`).getTime()) / 86400000);
+
 const initials = (name: string) =>
   name.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]!.toUpperCase()).join('');
 
@@ -100,6 +103,22 @@ function Card({ deal, stages, canEdit }: { deal: Deal; stages: Stage[]; canEdit:
             {deal.account_type_label}
           </div>
         )}
+
+        {/* When we last spoke and what is booked. A board that shows only a
+            value tells you what a deal is worth, never whether anybody is
+            working it — which is the question a pipeline review opens with. */}
+        <div className="flex items-center gap-1.5 mt-2 text-[10px]">
+          <span className={deal.last_met_on ? 'text-ink-600' : 'text-ink-400'}>
+            {deal.last_met_on ? `Met ${daysAgo(deal.last_met_on)}d ago` : 'Never met'}
+          </span>
+          <span className="text-ink-300">·</span>
+          <span className={deal.next_meeting_on ? 'text-success-600 font-semibold' : 'text-ink-400'}>
+            {deal.next_meeting_on ? `Next ${deal.next_meeting_on.slice(5)}` : 'None booked'}
+          </span>
+          {deal.opd_book_cr && (
+            <span className="ml-auto text-ink-500 num">₹{Number(deal.opd_book_cr)}Cr OPD</span>
+          )}
+        </div>
 
         {(deal.tags.length > 0 || deal.value_inr) && (
           <div className="flex items-center gap-1.5 mt-2 flex-wrap">

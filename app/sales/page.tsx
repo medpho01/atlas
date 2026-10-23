@@ -9,6 +9,7 @@ import {
   getAccountTypes, getTypeCounts,
 } from '@/lib/salesCrm';
 import { Board } from './Board';
+import { DealTable } from './DealTable';
 import { NewDeal } from './NewDeal';
 
 export const dynamic = 'force-dynamic';
@@ -39,7 +40,8 @@ export default async function SalesPage({
   searchParams,
 }: {
   searchParams: {
-    mine?: string; tag?: string; q?: string; show?: string; pipeline?: string; type?: string;
+    mine?: string; tag?: string; q?: string; show?: string; pipeline?: string;
+    type?: string; view?: string;
   };
 }) {
   const gate = await requireView('salesCrm', '/sales');
@@ -63,6 +65,7 @@ export default async function SalesPage({
   const canEdit = canManage(gate.user, 'salesCrm');
   const mine = searchParams.mine === '1';
   const show = searchParams.show === 'all' ? 'all' as const : 'open' as const;
+  const table = searchParams.view === 'table';
 
   const [deals, summary, tags, people, types, typeCounts] = await Promise.all([
     getDeals(pipeline.id, {
@@ -88,6 +91,7 @@ export default async function SalesPage({
       show: show === 'all' ? 'all' : undefined,
       pipeline: searchParams.pipeline,
       type: searchParams.type,
+      view: searchParams.view === 'table' ? 'table' : undefined,
       ...patch,
     };
     for (const [k, v] of Object.entries(merged)) if (v) p.set(k, v);
@@ -188,6 +192,15 @@ export default async function SalesPage({
         )}
 
         <span className="w-px h-5 bg-ink-200" />
+        {/* A board answers what stage things are at; a table answers who we
+            have not met and what is unsized. Both read the same rows. */}
+        <div className="flex items-center gap-1.5">
+          <span className="text-[11px] uppercase tracking-wide text-ink-400 mr-0.5">View</span>
+          <ChipButton href={link({ view: undefined })} active={table === false}>Board</ChipButton>
+          <ChipButton href={link({ view: 'table' })} active={table === true}>Table</ChipButton>
+        </div>
+
+        <span className="w-px h-5 bg-ink-200" />
         <div className="flex items-center gap-1.5">
           <span className="text-[11px] uppercase tracking-wide text-ink-400 mr-0.5">Show</span>
           <ChipButton href={link({ show: undefined })} active={show === 'open'}>Open only</ChipButton>
@@ -201,11 +214,15 @@ export default async function SalesPage({
         )}
       </div>
 
-      <Board
-        stages={show === 'all' ? pipeline.stages : pipeline.stages.filter((s) => s.outcome === 'open')}
-        deals={deals}
-        canEdit={canEdit}
-      />
+      {table ? (
+        <DealTable deals={deals} />
+      ) : (
+        <Board
+          stages={show === 'all' ? pipeline.stages : pipeline.stages.filter((s) => s.outcome === 'open')}
+          deals={deals}
+          canEdit={canEdit}
+        />
+      )}
 
       {deals.length === 0 && (
         <div className="rounded-xl border border-ink-200 bg-surface px-5 py-12 text-center">

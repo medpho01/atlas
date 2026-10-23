@@ -42,7 +42,7 @@ SELECT
   d.expected_close::text                 AS expected_close,
   d.source,
   d.owner_id,
-  u.name                                 AS owner,
+  u.name                                 AS owner_name,
   d.contact_name, d.contact_role, d.contact_phone, d.contact_email,
   d.store_id,
   s."storeName"                          AS store_name,
@@ -76,11 +76,27 @@ SELECT
   -- won deal hands the next team numbers rather than a company name.
   (SELECT COUNT(*)::int FROM atlas.meeting m
      WHERE m.account_id = d.account_id AND m.happened_on IS NOT NULL)      AS meetings_done,
+  (SELECT MIN(m.happened_on)::text FROM atlas.meeting m
+     WHERE m.account_id = d.account_id)                                    AS first_met_on,
   (SELECT MAX(m.happened_on)::text FROM atlas.meeting m
      WHERE m.account_id = d.account_id)                                    AS last_met_on,
   (SELECT MIN(m.scheduled_on)::text FROM atlas.meeting m
      WHERE m.account_id = d.account_id
        AND m.scheduled_on >= atlas.ist_today())                            AS next_meeting_on,
+  -- Who we actually talk to now lives on the account, where several people
+  -- and a decision maker can exist. The deal's own four contact columns stay
+  -- as the fallback for rows written before that was true.
+  COALESCE((SELECT c.name FROM atlas.account_contact c
+             WHERE c.account_id = d.account_id
+             ORDER BY c.is_decision_maker DESC, c.id LIMIT 1),
+           d.contact_name)                 AS primary_contact,
+  COALESCE((SELECT c.role FROM atlas.account_contact c
+             WHERE c.account_id = d.account_id
+             ORDER BY c.is_decision_maker DESC, c.id LIMIT 1),
+           d.contact_role)                 AS primary_contact_role,
+  (SELECT c.name FROM atlas.account_contact c
+     WHERE c.account_id = d.account_id AND c.is_decision_maker
+     ORDER BY c.id LIMIT 1)                AS decision_maker,
   a.opd_book_cr,
   a.premium_book_cr,
   a.lifecycle                            AS account_lifecycle
