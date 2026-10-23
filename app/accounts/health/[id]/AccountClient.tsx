@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useTransition } from 'react';
-import { addNote, addTask, toggleTask, addContact, removeContact, startActivation } from '../actions';
+import { addNote, addTask, toggleTask, addContact, removeContact, startActivation } from '../../actions';
 import type { AccountTask } from '@/lib/accountHealth';
 
 const KINDS = [['call', 'Call'], ['email', 'Email'], ['meeting', 'Meeting'], ['note', 'Note']] as const;

@@ -17,7 +17,7 @@ export function BookSearch({ q: initial }: { q: string }) {
     else next.delete('q');
     startNav();
     const qs = next.toString();
-    router.push(`/accounts/book${qs ? `?${qs}` : ''}`);
+    router.push(`/accounts${qs ? `?${qs}` : ''}`);
   };
 
   return (

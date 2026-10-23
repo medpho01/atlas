@@ -3,6 +3,7 @@ import { requireView } from '@/lib/guard';
 import { canManage } from '@/lib/access';
 import { RoleBlocked } from '@/components/RoleBlocked';
 import { PageHeader } from '@/components/ui/PageHeader';
+import { AccountsTabs } from '@/components/ui/AccountsTabs';
 import { ChipButton } from '@/components/ui/Toggle';
 import { listTasks, listAccounts, getAccountPeople } from '@/lib/accountHealth';
 import { TaskRow } from './TaskList';
@@ -43,6 +44,7 @@ export default async function TasksPage({
 
   return (
     <div className="px-6 lg:px-8 py-6 max-w-[1200px] mx-auto">
+      <AccountsTabs active="/accounts/tasks" />
       <div className="text-[13px] text-ink-500 mb-3">
         <Link href="/accounts" className="hover:text-ink-900">Account health</Link>
         <span className="text-ink-300"> / </span>

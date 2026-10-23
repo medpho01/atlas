@@ -42,7 +42,7 @@ const date = (v: string | undefined | null) => {
 export async function createAccount(input: {
   name: string; city?: string; accountType?: string; ownerId?: number;
 }) {
-  const user = await gate('/accounts/book');
+  const user = await gate('/accounts');
   if (!user) return { ok: false as const, error: 'Not allowed' };
 
   const name = clean(input.name);
@@ -54,7 +54,7 @@ export async function createAccount(input: {
     RETURNING id
   `, [name, clean(input.city), clean(input.accountType), input.ownerId ?? null, user.id]);
 
-  revalidatePath('/accounts/book');
+  revalidatePath('/accounts');
   return { ok: true as const, id: row!.id };
 }
 
@@ -70,7 +70,7 @@ export async function updateAccount(input: {
   city?: string;
   website?: string;
 }) {
-  const user = await gate(`/accounts/book/${input.accountId}`);
+  const user = await gate(`/accounts/${input.accountId}`);
   if (!user) return { ok: false as const, error: 'Not allowed' };
 
   const cadence: Cadence | null =
@@ -88,7 +88,7 @@ export async function updateAccount(input: {
   `, [input.accountId, input.ownerId ?? null, cadence,
       clean(input.city), clean(input.website)]);
 
-  revalidatePath(`/accounts/book/${input.accountId}`);
+  revalidatePath(`/accounts/${input.accountId}`);
   return { ok: true as const };
 }
 
@@ -101,7 +101,7 @@ export async function updateAccount(input: {
 export async function updateSizing(input: {
   accountId: number; premiumBookCr?: string; opdBookCr?: string; avgTicketInr?: string;
 }) {
-  const user = await gate(`/accounts/book/${input.accountId}`);
+  const user = await gate(`/accounts/${input.accountId}`);
   if (!user) return { ok: false as const, error: 'Not allowed' };
 
   await query(`
@@ -110,14 +110,14 @@ export async function updateSizing(input: {
     WHERE id = $1
   `, [input.accountId, num(input.premiumBookCr), num(input.opdBookCr), num(input.avgTicketInr)]);
 
-  revalidatePath(`/accounts/book/${input.accountId}`);
-  revalidatePath('/accounts/book');
+  revalidatePath(`/accounts/${input.accountId}`);
+  revalidatePath('/accounts');
   return { ok: true as const };
 }
 
 /** Moving stage is deliberate and logged — it is the handover between teams. */
 export async function moveStage(input: { accountId: number; stage: string; reason?: string }) {
-  const user = await gate(`/accounts/book/${input.accountId}`);
+  const user = await gate(`/accounts/${input.accountId}`);
   if (!user) return { ok: false as const, error: 'Not allowed' };
   if (!(STAGES as readonly string[]).includes(input.stage)) {
     return { ok: false as const, error: 'Unknown stage' };
@@ -133,8 +133,8 @@ export async function moveStage(input: { accountId: number; stage: string; reaso
     WHERE id = $1
   `, [input.accountId, stage, clean(input.reason)]);
 
-  revalidatePath(`/accounts/book/${input.accountId}`);
-  revalidatePath('/accounts/book');
+  revalidatePath(`/accounts/${input.accountId}`);
+  revalidatePath('/accounts');
   return { ok: true as const };
 }
 
@@ -142,7 +142,7 @@ export async function addContact(input: {
   accountId: number; name: string; role?: string; phone?: string;
   email?: string; decisionMaker?: boolean;
 }) {
-  const user = await gate(`/accounts/book/${input.accountId}`);
+  const user = await gate(`/accounts/${input.accountId}`);
   if (!user) return { ok: false as const, error: 'Not allowed' };
   const name = clean(input.name);
   if (!name) return { ok: false as const, error: 'A name is needed' };
@@ -154,16 +154,16 @@ export async function addContact(input: {
   `, [input.accountId, name, clean(input.role), clean(input.phone),
       clean(input.email), !!input.decisionMaker, user.id]);
 
-  revalidatePath(`/accounts/book/${input.accountId}`);
+  revalidatePath(`/accounts/${input.accountId}`);
   return { ok: true as const };
 }
 
 export async function removeContact(input: { accountId: number; contactId: number }) {
-  const user = await gate(`/accounts/book/${input.accountId}`);
+  const user = await gate(`/accounts/${input.accountId}`);
   if (!user) return { ok: false as const, error: 'Not allowed' };
   await query(`DELETE FROM atlas.account_contact WHERE id = $1 AND account_id = $2`,
     [input.contactId, input.accountId]);
-  revalidatePath(`/accounts/book/${input.accountId}`);
+  revalidatePath(`/accounts/${input.accountId}`);
   return { ok: true as const };
 }
 
@@ -183,7 +183,7 @@ export async function logMeeting(input: {
   nextStepDue?: string;
   nextStepOwnerId?: number;
 }) {
-  const user = await gate(`/accounts/book/${input.accountId}`);
+  const user = await gate(`/accounts/${input.accountId}`);
   if (!user) return { ok: false as const, error: 'Not allowed' };
 
   const kind = ['meeting', 'call', 'mbr', 'qbr'].includes(input.kind ?? '')
@@ -214,8 +214,8 @@ export async function logMeeting(input: {
         input.nextStepOwnerId ?? user.id, meeting!.id, user.id]);
   }
 
-  revalidatePath(`/accounts/book/${input.accountId}`);
-  revalidatePath('/accounts/book');
+  revalidatePath(`/accounts/${input.accountId}`);
+  revalidatePath('/accounts');
   return { ok: true as const };
 }
 
@@ -223,7 +223,7 @@ export async function logMeeting(input: {
 export async function setService(input: {
   accountId: number; stream: string; status: string; note?: string;
 }) {
-  const user = await gate(`/accounts/book/${input.accountId}`);
+  const user = await gate(`/accounts/${input.accountId}`);
   if (!user) return { ok: false as const, error: 'Not allowed' };
   if (!['discussed', 'contracted', 'live', 'paused'].includes(input.status)) {
     return { ok: false as const, error: 'Unknown status' };
@@ -241,16 +241,16 @@ export async function setService(input: {
       updated_at    = now()
   `, [input.accountId, input.stream, input.status, clean(input.note), user.id]);
 
-  revalidatePath(`/accounts/book/${input.accountId}`);
+  revalidatePath(`/accounts/${input.accountId}`);
   return { ok: true as const };
 }
 
 export async function clearService(input: { accountId: number; stream: string }) {
-  const user = await gate(`/accounts/book/${input.accountId}`);
+  const user = await gate(`/accounts/${input.accountId}`);
   if (!user) return { ok: false as const, error: 'Not allowed' };
   await query(`DELETE FROM atlas.account_service WHERE account_id = $1 AND stream = $2`,
     [input.accountId, input.stream]);
-  revalidatePath(`/accounts/book/${input.accountId}`);
+  revalidatePath(`/accounts/${input.accountId}`);
   return { ok: true as const };
 }
 
@@ -258,7 +258,7 @@ export async function addTask(input: {
   accountId: number; title: string; department?: string; assigneeId?: number;
   dueOn?: string; plannedStart?: string; phase?: string; detail?: string;
 }) {
-  const user = await gate(`/accounts/book/${input.accountId}`);
+  const user = await gate(`/accounts/${input.accountId}`);
   if (!user) return { ok: false as const, error: 'Not allowed' };
   const title = clean(input.title);
   if (!title) return { ok: false as const, error: 'A title is needed' };
@@ -271,12 +271,12 @@ export async function addTask(input: {
       input.assigneeId ?? null, date(input.dueOn), date(input.plannedStart),
       input.phase === 'onboarding' ? 'onboarding' : 'managed', user.id]);
 
-  revalidatePath(`/accounts/book/${input.accountId}`);
+  revalidatePath(`/accounts/${input.accountId}`);
   return { ok: true as const };
 }
 
 export async function toggleTask(input: { accountId: number; taskId: number; done: boolean }) {
-  const user = await gate(`/accounts/book/${input.accountId}`);
+  const user = await gate(`/accounts/${input.accountId}`);
   if (!user) return { ok: false as const, error: 'Not allowed' };
 
   await query(`
@@ -286,7 +286,7 @@ export async function toggleTask(input: { accountId: number; taskId: number; don
      WHERE id = $1 AND account_id = $2
   `, [input.taskId, input.accountId, input.done, user.id]);
 
-  revalidatePath(`/accounts/book/${input.accountId}`);
-  revalidatePath('/accounts/book');
+  revalidatePath(`/accounts/${input.accountId}`);
+  revalidatePath('/accounts');
   return { ok: true as const };
 }

@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import {
   logMeeting, addContact, removeContact, setService, clearService,
   updateAccount, updateSizing, moveStage, addTask, toggleTask,
-} from '../actions';
+} from '../lifecycleActions';
 import {
   CADENCES, CADENCE_LABEL, MEETING_KIND_LABEL, SERVICE_STATUS_LABEL,
   STAGE_LABEL, STAGES, LINE_LABEL, LINES,

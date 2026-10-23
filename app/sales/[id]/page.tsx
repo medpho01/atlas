@@ -8,7 +8,7 @@ import {
   getAccountTypes,
 } from '@/lib/salesCrm';
 import { getAccount, getContacts, getMeetings } from '@/lib/lifecycle';
-import { Meetings, Contacts, Sizing } from '@/app/accounts/book/[id]/AccountBookClient';
+import { Meetings, Contacts, Sizing } from '@/app/accounts/[id]/AccountBookClient';
 import { Composer, Tasks, Tags, Owner, CloseDeal, DealFields, Activity } from './DealClient';
 
 export const dynamic = 'force-dynamic';
@@ -189,7 +189,7 @@ export default async function DealPage({
             <>
               <Sizing account={account} canEdit={canEdit} />
               <Contacts accountId={account.account_id} contacts={contacts} canEdit={canEdit} />
-              <Link href={`/accounts/book/${account.account_id}`}
+              <Link href={`/accounts/${account.account_id}`}
                     className="text-[12px] text-brand-600 font-medium px-1">
                 Open the full account →
               </Link>

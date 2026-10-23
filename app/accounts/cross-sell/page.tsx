@@ -3,6 +3,7 @@ import { requireView } from '@/lib/guard';
 import { canManage } from '@/lib/access';
 import { RoleBlocked } from '@/components/RoleBlocked';
 import { PageHeader } from '@/components/ui/PageHeader';
+import { AccountsTabs } from '@/components/ui/AccountsTabs';
 import { ChipButton } from '@/components/ui/Toggle';
 import { listAccounts, getAccountPeople, LINES, LINE_LABEL } from '@/lib/accountHealth';
 import { Activate } from './Activate';
@@ -45,6 +46,7 @@ export default async function CrossSellPage({
 
   return (
     <div className="px-6 lg:px-8 py-6 max-w-[1500px] mx-auto">
+      <AccountsTabs active="/accounts/cross-sell" />
       <div className="text-[13px] text-ink-500 mb-3">
         <Link href="/accounts" className="hover:text-ink-900">Account health</Link>
         <span className="text-ink-300"> / </span>

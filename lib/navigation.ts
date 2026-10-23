@@ -18,9 +18,9 @@ export type NavItem = {
   /** Extra paths that should light this item up, e.g. /pincode/560103 → Pincodes. */
   alsoActiveOn?: string[];
   /**
-   * Paths under this item's href that belong to a DIFFERENT item. Account
-   * health lives at /accounts and the accounts book at /accounts/book, so
-   * without this the health item lights up on every page of the book too.
+   * Paths under this item's href that belong to a DIFFERENT item, for the day
+   * two items share a prefix again. Nothing uses it now that the accounts
+   * screens are one item with tabs.
    */
   notActiveOn?: string[];
 };
@@ -71,10 +71,10 @@ export const NAV: NavGroup[] = [
     noun: 'accounts & deals',
     items: [
       { href: '/sales', label: 'Sales CRM', feature: 'salesCrm', alsoActiveOn: ['/sales'] },
-      { href: '/accounts/book', label: 'Accounts', feature: 'accountHealth' },
-      { href: '/accounts', label: 'Account health', feature: 'accountHealth',
-        alsoActiveOn: ['/accounts/tasks', '/accounts/cross-sell'],
-        notActiveOn: ['/accounts/book'] },
+      // One item for the whole book: the list, the health report, the task
+      // list and the cross-sell list are four questions about the same rows,
+      // and they are tabs inside it rather than four things to choose between.
+      { href: '/accounts', label: 'Accounts', feature: 'accountHealth' },
       { href: '/catalogue', label: 'Catalogue', feature: 'catalogue' },
       { href: '/pricing', label: 'Packages & Pricing', feature: 'pricing' },
       { href: '/crm', label: 'Provider onboarding', feature: 'providerPipeline' },

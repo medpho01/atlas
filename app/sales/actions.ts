@@ -228,7 +228,7 @@ export async function moveDeal(input: {
   audit(me.id, '/sales', `move:${to.key}`);
   revalidatePath('/sales');
   revalidatePath(`/sales/${deal.id}`);
-  revalidatePath('/accounts/book');
+  revalidatePath('/accounts');
   return { ok: true };
 }
 

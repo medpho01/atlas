@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
-import { createAccount } from './actions';
+import { createAccount } from './lifecycleActions';
 import { startNav } from '@/components/ui/NavProgress';
 
 /**
@@ -33,7 +33,7 @@ export function NewAccount({ people, meId, types }: {
       if (!r.ok) { setErr(r.error ?? 'Could not create it'); return; }
       setOpen(false); setName(''); setCity(''); setType('');
       startNav();
-      if (r.id) router.push(`/accounts/book/${r.id}`);
+      if (r.id) router.push(`/accounts/${r.id}`);
     });
   };
 

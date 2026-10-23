@@ -96,10 +96,20 @@ broken until Oct 2026 — if the stream reads zero, re-apply
 
 ---
 
-# The accounts book — `/accounts/book`
+# The accounts book — `/accounts`
 
 The spine. One row per company, from first meeting to quarterly review, in
 `atlas.account`.
+
+Four views, one nav item: **Accounts** (every company, any stage), **Health**
+(volumes by line and month, at `/accounts/health`), **Tasks**, and **Not
+activated**. They are four questions about the same rows, so they are tabs
+rather than four things to choose between in the sidebar.
+
+Two detail screens, keyed differently on purpose: `/accounts/<account_id>` is
+the account — meetings, people, sizing, cadence — and
+`/accounts/health/<store_id>` is the store's volume history, which only exists
+once an account has become a store.
 
 ## Why it exists
 
