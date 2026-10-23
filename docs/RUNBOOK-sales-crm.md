@@ -100,8 +100,12 @@ cd ~/atlas && git pull \
   && docker compose exec -T atlas-db psql -U atlas -d atlas -v ON_ERROR_STOP=1 \
        -f /docker-entrypoint-initdb.d/30_role_access.sql \
        -f /docker-entrypoint-initdb.d/31_sales_crm.sql \
+       -f /docker-entrypoint-initdb.d/35_sales_account_type.sql \
   && docker compose up -d --build atlas-web
 ```
+
+`35` adds the account types and rebuilds `v_sales_deal`; it is idempotent, so
+re-running it on a database that already has them changes nothing.
 
 `30` seeds the role matrix with `ON CONFLICT DO NOTHING`, so it is a starting
 point and never a reset — an admin who moves a screen keeps that change through
