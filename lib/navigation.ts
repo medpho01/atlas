@@ -17,6 +17,12 @@ export type NavItem = {
   feature: Feature;
   /** Extra paths that should light this item up, e.g. /pincode/560103 → Pincodes. */
   alsoActiveOn?: string[];
+  /**
+   * Paths under this item's href that belong to a DIFFERENT item. Account
+   * health lives at /accounts and the accounts book at /accounts/book, so
+   * without this the health item lights up on every page of the book too.
+   */
+  notActiveOn?: string[];
 };
 
 export type NavGroup = {
@@ -67,7 +73,8 @@ export const NAV: NavGroup[] = [
       { href: '/sales', label: 'Sales CRM', feature: 'salesCrm', alsoActiveOn: ['/sales'] },
       { href: '/accounts/book', label: 'Accounts', feature: 'accountHealth' },
       { href: '/accounts', label: 'Account health', feature: 'accountHealth',
-        alsoActiveOn: ['/accounts/tasks', '/accounts/cross-sell'] },
+        alsoActiveOn: ['/accounts/tasks', '/accounts/cross-sell'],
+        notActiveOn: ['/accounts/book'] },
       { href: '/catalogue', label: 'Catalogue', feature: 'catalogue' },
       { href: '/pricing', label: 'Packages & Pricing', feature: 'pricing' },
       { href: '/crm', label: 'Provider onboarding', feature: 'providerPipeline' },
@@ -96,6 +103,9 @@ export function navFor(role: Role | undefined): NavGroup[] {
 
 export function isActive(pathname: string, item: NavItem): boolean {
   if (item.href === '/') return pathname === '/';
+  const excluded = item.notActiveOn?.some(
+    (p) => pathname === p || pathname.startsWith(`${p}/`));
+  if (excluded) return false;
   if (pathname === item.href || pathname.startsWith(`${item.href}/`)) return true;
   return !!item.alsoActiveOn?.some((p) => pathname === p || pathname.startsWith(`${p}/`));
 }
