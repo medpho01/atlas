@@ -44,6 +44,13 @@ async function validType(key?: string | null): Promise<string | null> {
 export async function createDeal(input: {
   company: string; city?: string; website?: string; accountType?: string;
   value?: string; expectedClose?: string; source?: string; ownerId?: number | null;
+  // Sizing and the first contact, captured here because the moment somebody
+  // opens an account is the moment they know these — asking later means a
+  // board full of companies nobody can rank.
+  premiumBookCr?: string; opdBookCr?: string; avgTicketInr?: string;
+  contactName?: string; contactRole?: string; contactPhone?: string;
+  contactEmail?: string; contactIsDecisionMaker?: boolean;
+  firstMeetingOn?: string;
 }): Promise<R & { id?: number }> {
   const { me, error } = await gate();
   if (!me) return { ok: false, error: error! };
@@ -80,17 +87,49 @@ export async function createDeal(input: {
     // Every deal gets the account row it is one chapter of, straight away.
     // Created here rather than by a trigger so the id comes back and the two
     // can never drift apart in the first place.
+    const num = (v?: string) => {
+      const t = (v ?? '').replace(/[, ]/g, '').trim();
+      if (t === '') return null;
+      const n = Number(t);
+      return Number.isFinite(n) && n >= 0 ? n : null;
+    };
+
     const account = await queryOne<{ id: number }>(`
       INSERT INTO atlas.account (name, city, website, account_type, lifecycle,
-                                 owner_id, source, created_by)
+                                 owner_id, source, premium_book_cr, opd_book_cr,
+                                 avg_ticket_inr, created_by)
       VALUES ($1, NULLIF(btrim($2), ''), NULLIF(btrim($3), ''), $4, 'sales', $5,
-              NULLIF(btrim($6), ''), $7)
+              NULLIF(btrim($6), ''), $7, $8, $9, $10)
       RETURNING id
     `, [company, input.city ?? '', input.website ?? '', accountType,
-        input.ownerId ?? me.id, input.source ?? '', me.id]);
+        input.ownerId ?? me.id, input.source ?? '',
+        num(input.premiumBookCr), num(input.opdBookCr), num(input.avgTicketInr), me.id]);
+
     if (account) {
       await query(`UPDATE atlas.sales_deal SET account_id = $2 WHERE id = $1`,
         [row.id, account.id]);
+
+      const contact = (input.contactName ?? '').trim();
+      if (contact) {
+        await query(`
+          INSERT INTO atlas.account_contact
+            (account_id, name, role, phone, email, is_decision_maker, created_by)
+          VALUES ($1, $2, NULLIF(btrim($3), ''), NULLIF(btrim($4), ''),
+                  NULLIF(btrim($5), ''), $6, $7)
+        `, [account.id, contact.slice(0, 120), input.contactRole ?? '',
+            input.contactPhone ?? '', input.contactEmail ?? '',
+            !!input.contactIsDecisionMaker, me.id]);
+      }
+
+      // A first meeting date given at creation is a meeting that happened —
+      // it is how the funnel-age and "first met" columns start counting.
+      const met = (input.firstMeetingOn ?? '').trim();
+      if (/^\d{4}-\d{2}-\d{2}$/.test(met)) {
+        await query(`
+          INSERT INTO atlas.meeting (account_id, kind, happened_on, title, created_by)
+          VALUES ($1, 'meeting', $2::date, 'First meeting', $3)
+        `, [account.id, met, me.id]);
+      }
     }
   }
   audit(me.id, '/sales', 'create-deal');

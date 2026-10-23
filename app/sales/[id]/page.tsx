@@ -16,6 +16,26 @@ export const dynamic = 'force-dynamic';
 const inr = (v: string | null) =>
   v == null ? '—' : `₹${Number(v).toLocaleString('en-IN')}`;
 
+const sinceDays = (iso: string) =>
+  Math.round((Date.now() - new Date(`${iso}T00:00:00Z`).getTime()) / 86400000);
+
+/** One date, stated plainly. No sparkline, no trend arrow — it is a date. */
+function MeetingStat({ label, value, sub, tone }: {
+  label: string; value: string; sub?: string; tone?: 'good' | 'warn' | 'bad';
+}) {
+  const border = tone === 'bad' ? 'border-danger-100 bg-danger-50'
+    : tone === 'warn' ? 'border-ink-200 bg-surface'
+    : tone === 'good' ? 'border-success-100 bg-success-50'
+    : 'border-ink-200 bg-surface';
+  return (
+    <div className={`rounded-xl border ${border} px-3 py-2.5`}>
+      <div className="text-[10px] uppercase tracking-wide text-ink-500">{label}</div>
+      <div className="text-[15px] font-bold num text-ink-900 mt-0.5">{value}</div>
+      {sub && <div className="text-[10px] text-ink-500 mt-0.5 truncate">{sub}</div>}
+    </div>
+  );
+}
+
 export default async function DealPage({
   params, searchParams,
 }: {
@@ -120,6 +140,24 @@ export default async function DealPage({
                 <span className="text-[11px] text-danger-500 font-medium">Lost: {deal.lost_reason}</span>
               )}
             </div>
+          </div>
+
+          {/* The dates a salesperson is actually asked for in a pipeline
+              review: when it started, when we last spoke, what is booked, and
+              what we owe them. All of it comes off the account, so none of it
+              resets when the deal closes. */}
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+            <MeetingStat label="Meetings done" value={String(deal.meetings_done ?? 0)}
+                         sub={account?.first_met_on ? `since ${account.first_met_on}` : 'none logged'} />
+            <MeetingStat label="First meeting" value={account?.first_met_on ?? '—'} />
+            <MeetingStat label="Last meeting" value={deal.last_met_on ?? '—'}
+                         sub={deal.last_met_on ? `${sinceDays(deal.last_met_on)} days ago` : 'never met'} />
+            <MeetingStat label="Next meeting" value={deal.next_meeting_on ?? '—'}
+                         sub={deal.next_meeting_on ? 'booked' : 'nothing booked'}
+                         tone={deal.next_meeting_on ? 'good' : 'warn'} />
+            <MeetingStat label="Follow-up due" value={deal.next_task_due ?? '—'}
+                         sub={deal.next_task ?? 'nothing owed'}
+                         tone={deal.next_task_late ? 'bad' : undefined} />
           </div>
 
           <Composer dealId={deal.deal_id} canEdit={canEdit} />
