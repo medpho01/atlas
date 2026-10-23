@@ -7,6 +7,8 @@ import {
   getDeal, getNotes, getTasks, getPipeline, getAssignableUsers, getUnlinkedStores,
   getAccountTypes,
 } from '@/lib/salesCrm';
+import { getAccount, getContacts, getMeetings } from '@/lib/lifecycle';
+import { Meetings, Contacts, Sizing } from '@/app/accounts/book/[id]/AccountBookClient';
 import { Composer, Tasks, Tags, Owner, CloseDeal, DealFields, Activity } from './DealClient';
 
 export const dynamic = 'force-dynamic';
@@ -35,6 +37,14 @@ export default async function DealPage({
     canEdit ? getUnlinkedStores('') : Promise.resolve([]),
     getAccountTypes(),
   ]);
+
+  // The account this deal is one chapter of. Its meetings, people and book
+  // sizing are shown here rather than on a screen sales has no reason to open
+  // — and they stay behind when the deal closes and onboarding picks it up.
+  const accountId = deal.account_id;
+  const [account, meetings, contacts] = accountId
+    ? await Promise.all([getAccount(accountId), getMeetings(accountId), getContacts(accountId)])
+    : [null, [], []];
 
   const stages = pipeline?.stages ?? [];
   const idx = stages.findIndex((s) => s.key === deal.stage_key);
@@ -114,6 +124,17 @@ export default async function DealPage({
 
           <Composer dealId={deal.deal_id} canEdit={canEdit} />
           <Activity notes={notes} />
+
+          {accountId && (
+            <>
+              <Meetings accountId={accountId} meetings={meetings}
+                        people={people} canEdit={canEdit} />
+              <p className="text-[11px] text-ink-500 -mt-1 px-1">
+                Meetings belong to the account, not to this deal, so the history and the count
+                survive the handover to onboarding. Quick call logs above stay with the deal.
+              </p>
+            </>
+          )}
         </div>
 
         {/* side */}
@@ -125,6 +146,17 @@ export default async function DealPage({
           <CloseDeal deal={deal} stages={stages} stores={stores}
                      preselect={searchParams.close ?? null} canEdit={canEdit} />
           <DealFields deal={deal} canEdit={canEdit} types={types} />
+
+          {account && (
+            <>
+              <Sizing account={account} canEdit={canEdit} />
+              <Contacts accountId={account.account_id} contacts={contacts} canEdit={canEdit} />
+              <Link href={`/accounts/book/${account.account_id}`}
+                    className="text-[12px] text-brand-600 font-medium px-1">
+                Open the full account →
+              </Link>
+            </>
+          )}
 
           {deal.store_id ? (
             <div className="rounded-xl border border-success-100 bg-success-50 p-4">

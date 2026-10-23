@@ -9,13 +9,15 @@ import { CADENCES, STAGES, type Cadence, type Stage } from '@/lib/lifecycle';
 /**
  * Everything that writes to the account spine.
  *
- * One guard for all of them: account health's manage capability. The accounts
- * team owns the row once it is live, and sales reaches the same account through
- * its deal, so a second permission here would only ever disagree with the first.
+ * Either capability opens it: the accounts team owns the row once it is live,
+ * and sales owns the same row while it is still a deal — they reach these
+ * panels from the deal page. Requiring only accountHealth would have locked
+ * sales out of the meetings they themselves logged.
  */
 async function gate(path: string) {
   const g = await requireView('accountHealth', path);
-  if (g.blocked || !canManage(g.user, 'accountHealth')) return null;
+  if (g.blocked) return null;
+  if (!canManage(g.user, 'accountHealth') && !canManage(g.user, 'salesCrm')) return null;
   return g.user;
 }
 

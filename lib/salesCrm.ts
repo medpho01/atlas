@@ -8,6 +8,14 @@ export type Pipeline = { id: number; name: string; stages: Stage[]; is_default: 
 export type Deal = {
   deal_id: number;
   pipeline_id: number;
+  /** The atlas.account this deal is one chapter of — see lib/lifecycle. */
+  account_id: number | null;
+  account_lifecycle: string | null;
+  meetings_done: number;
+  last_met_on: string | null;
+  next_meeting_on: string | null;
+  opd_book_cr: string | null;
+  premium_book_cr: string | null;
   company: string;
   website: string | null;
   city: string | null;

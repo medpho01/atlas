@@ -76,6 +76,22 @@ export async function createDeal(input: {
   if (row) {
     await query(`INSERT INTO atlas.sales_stage_event (deal_id, to_key, moved_by) VALUES ($1, $2, $3)`,
       [row.id, first.key, me.id]);
+
+    // Every deal gets the account row it is one chapter of, straight away.
+    // Created here rather than by a trigger so the id comes back and the two
+    // can never drift apart in the first place.
+    const account = await queryOne<{ id: number }>(`
+      INSERT INTO atlas.account (name, city, website, account_type, lifecycle,
+                                 owner_id, source, created_by)
+      VALUES ($1, NULLIF(btrim($2), ''), NULLIF(btrim($3), ''), $4, 'sales', $5,
+              NULLIF(btrim($6), ''), $7)
+      RETURNING id
+    `, [company, input.city ?? '', input.website ?? '', accountType,
+        input.ownerId ?? me.id, input.source ?? '', me.id]);
+    if (account) {
+      await query(`UPDATE atlas.sales_deal SET account_id = $2 WHERE id = $1`,
+        [row.id, account.id]);
+    }
   }
   audit(me.id, '/sales', 'create-deal');
   revalidatePath('/sales');
@@ -129,6 +145,39 @@ export async function moveDeal(input: {
     WHERE id = $1
   `, [deal.id, to.key, to.outcome, input.storeId ?? null, input.lostReason ?? '']);
 
+  // The store Atlas is being pointed at may already have an account — 36 gave
+  // every live store one. Two rows for one company cannot both hold the
+  // store_id, so the deal's account folds into the store's, which is the row
+  // the rest of Atlas already references.
+  if (to.outcome === 'won' && input.storeId) {
+    const dealAccount = await queryOne<{ account_id: number | null }>(
+      `SELECT account_id FROM atlas.sales_deal WHERE id = $1`, [deal.id]);
+    const storeAccount = await queryOne<{ id: number }>(
+      `SELECT id FROM atlas.account WHERE store_id = $1`, [input.storeId]);
+
+    if (dealAccount?.account_id && storeAccount && storeAccount.id !== dealAccount.account_id) {
+      await query(`SELECT atlas.merge_account($1, $2)`, [dealAccount.account_id, storeAccount.id]);
+    } else if (dealAccount?.account_id && !storeAccount) {
+      await query(`UPDATE atlas.account SET store_id = $2, updated_at = now() WHERE id = $1`,
+        [dealAccount.account_id, input.storeId]);
+    }
+  }
+
+  // Winning hands the account to onboarding — not straight to managed. The
+  // weeks between signing and the first order are the ones nobody could see,
+  // and skipping them here would put the account back out of sight.
+  await query(`
+    UPDATE atlas.account SET
+      lifecycle     = CASE WHEN $2 = 'won'  THEN 'onboarding'
+                           WHEN $2 = 'lost' THEN 'lost'
+                           ELSE lifecycle END,
+      mou_signed_on = CASE WHEN $2 = 'won' THEN COALESCE(mou_signed_on, atlas.ist_today())
+                           ELSE mou_signed_on END,
+      closed_reason = CASE WHEN $2 = 'lost' THEN NULLIF(btrim($3), '') ELSE closed_reason END,
+      updated_at    = now()
+    WHERE id = (SELECT account_id FROM atlas.sales_deal WHERE id = $1)
+  `, [deal.id, to.outcome, input.lostReason ?? '']);
+
   await query(`INSERT INTO atlas.sales_stage_event (deal_id, from_key, to_key, moved_by)
                VALUES ($1, $2, $3, $4)`, [deal.id, deal.stage_key, to.key, me.id]);
   await query(`INSERT INTO atlas.sales_note (deal_id, kind, body, author_id)
@@ -140,6 +189,7 @@ export async function moveDeal(input: {
   audit(me.id, '/sales', `move:${to.key}`);
   revalidatePath('/sales');
   revalidatePath(`/sales/${deal.id}`);
+  revalidatePath('/accounts/book');
   return { ok: true };
 }
 

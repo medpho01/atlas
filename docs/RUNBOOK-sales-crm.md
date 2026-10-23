@@ -101,8 +101,19 @@ cd ~/atlas && git pull \
        -f /docker-entrypoint-initdb.d/30_role_access.sql \
        -f /docker-entrypoint-initdb.d/31_sales_crm.sql \
        -f /docker-entrypoint-initdb.d/35_sales_account_type.sql \
+       -f /docker-entrypoint-initdb.d/36_account_lifecycle.sql \
+       -f /docker-entrypoint-initdb.d/37_deal_account.sql \
   && docker compose up -d --build atlas-web
 ```
+
+`37` joins a deal to the account it is one chapter of. Two things follow from
+it. Winning a deal moves its account to **onboarding**, not straight to
+managed — the weeks between signing and the first order are exactly what the
+board could not see before. And because every live store already has an
+account, winning onto one **merges**: the deal's account folds into the
+store's with `atlas.merge_account`, carrying its meetings, contacts,
+contracted lines and book sizes, and the store's account survives because it
+is the row the rest of Atlas references.
 
 `35` adds the account types and rebuilds `v_sales_deal`; it is idempotent, so
 re-running it on a database that already has them changes nothing.
