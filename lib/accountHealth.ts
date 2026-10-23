@@ -12,14 +12,8 @@ import { query, queryOne } from './db';
 
 export type LineStatus = 'never' | 'stopped' | 'declining' | 'growing' | 'active';
 
-export const LINE_LABEL: Record<string, string> = {
-  LAB_ORDER: 'Diagnostics',
-  APPOINTMENT: 'Consultations',
-  PHARMA_ORDER: 'Pharmacy',
-};
-
-/** The order the lines read in, everywhere. */
-export const LINES = ['LAB_ORDER', 'APPOINTMENT', 'PHARMA_ORDER'] as const;
+// One definition, in a file a client component may also import.
+export { LINES, LINE_LABEL } from './lifecycleKinds';
 
 export const STATUS_LABEL: Record<LineStatus, string> = {
   never: 'Never ordered',

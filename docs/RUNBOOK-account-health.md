@@ -93,3 +93,74 @@ months, so a mirror that stopped in April shows nothing for October. Check
 through its order's store, falling back to the patient's store. That branch was
 broken until Oct 2026 — if the stream reads zero, re-apply
 `/atlas-sql/account_views.sql` (note: `/atlas-sql`, not the init directory).
+
+---
+
+# The accounts book — `/accounts/book`
+
+The spine. One row per company, from first meeting to quarterly review, in
+`atlas.account`.
+
+## Why it exists
+
+A prospect was `atlas.sales_deal`, keyed by a typed company name. A customer
+was a console `store_id`. Between them — the weeks where a signed account is
+being brought live — Atlas had no row at all, which is why nothing could carry
+a promise from the meeting that made it to the team that has to keep it.
+
+`atlas.account` is created by sales, linked to a store at go-live, and never
+replaced. Deals, meetings, contacts, contracted services and tasks all point at
+it, so a handover moves a pointer instead of re-keying a history. Atlas still
+cannot create a store: `src` is read-only, `store_id` stays nullable, and
+going live is the moment it gets filled in.
+
+## What is stored, and where
+
+| | Table |
+|---|---|
+| The company, its stage, owner, book sizes and cadence | `atlas.account` |
+| Who we talk to, and who decides | `atlas.account_contact` |
+| Every meeting, with its notes and next step | `atlas.meeting` |
+| What they are entitled to order | `atlas.account_service` |
+| Work, with a department and a phase | `atlas.account_task` |
+| The teams that own steps | `atlas.department` |
+
+## Three rules worth knowing
+
+**A meeting is an object, not a note.** First met, last met, next booked, how
+many, and what was agreed each time all come from one table, shared by all
+three stages, so the count never resets at a handover. A next step with a date
+also writes a task — an agreement nobody is chased for is a note.
+
+**Contracted is not the same as ordered.** `analytics.v_account_line` knows what
+an account ordered; only a person knows what it may order. The gap is the
+cross-sell list and the never-activated line, and the account screen marks the
+second in amber.
+
+**Share is in services, not rupees.** `share_pct` needs both an OPD book and an
+average ticket, typed by a human; without them the column is blank rather than
+resting on an invented constant. No ₹ appears on anything we delivered, for the
+same reason as the rest of this file.
+
+## Deploying
+
+```bash
+cd ~/atlas && git pull \
+  && docker compose exec -T atlas-db psql -U atlas -d atlas -v ON_ERROR_STOP=1 \
+       -f /docker-entrypoint-initdb.d/36_account_lifecycle.sql \
+  && docker compose up -d --build atlas-web
+```
+
+`36` backfills: one account per existing deal, one per live store, existing
+tasks follow their store, and every line an account has actually ordered is
+recorded as live. It is idempotent — the inserts all skip what is already there.
+
+## When something looks wrong
+
+**Every date renders as `[object Date]`.** A column was added to
+`analytics.v_account_lifecycle` without `::text`. Dates leave that view as text
+because everything that reads them renders them.
+
+**Changing the cadence blanked the book sizes.** It cannot now — owner/cadence
+and the sizing are separate actions — but that was the shape of the bug, and
+any new field added to `updateAccount` should ask which form owns it.

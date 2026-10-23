@@ -65,6 +65,7 @@ export const NAV: NavGroup[] = [
     noun: 'accounts & deals',
     items: [
       { href: '/sales', label: 'Sales CRM', feature: 'salesCrm', alsoActiveOn: ['/sales'] },
+      { href: '/accounts/book', label: 'Accounts', feature: 'accountHealth' },
       { href: '/accounts', label: 'Account health', feature: 'accountHealth',
         alsoActiveOn: ['/accounts/tasks', '/accounts/cross-sell'] },
       { href: '/catalogue', label: 'Catalogue', feature: 'catalogue' },
