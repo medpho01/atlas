@@ -65,6 +65,7 @@ export const NAV: NavGroup[] = [
       { href: '/nurses', label: 'Nurses', feature: 'directory' },
       { href: '/quality', label: 'Quality', feature: 'directory' },
       { href: '/nabl', label: 'NABL labs', feature: 'directory' },
+      { href: '/franchisees', label: 'Franchisee networks', feature: 'directory' },
     ],
   },
   {
