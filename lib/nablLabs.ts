@@ -2,13 +2,22 @@ import 'server-only';
 import { query, queryOne } from './db';
 
 /**
- * The NABL accredited-laboratory directory.
+ * The NABL accredited diagnostic centres.
  *
- * Reference data, not supply: a row here is a lab NABL has accredited, which
- * is a different claim from a lab LabStack can send an order to. The screen
- * says so, and `onboarded` marks the ones we have matched to a provider —
- * matched on pincode and name, so it is a strong hint rather than a fact.
+ * NABL accredits 11,142 labs, but 8,502 of them are industrial: corrugated
+ * box R&D, fertiliser chemistry, electrical calibration. None of that is
+ * supply Atlas can use, so every read here is scoped to the Medical field —
+ * the pathology and imaging centres a patient is sent to. The full snapshot
+ * stays in the table; this module simply never asks for the rest.
+ *
+ * Reference data, not supply: a row here is a centre NABL has accredited,
+ * which is a different claim from one LabStack can send an order to.
+ * `onboarded` marks the ones matched to a provider by pincode and name, so it
+ * is a strong hint rather than a fact.
  */
+
+/** Everything this module reads is a diagnostic centre. */
+const DIAGNOSTIC_ONLY = `n.field = 'Medical'`;
 
 export type NablLab = {
   nabl_id: string;
@@ -36,7 +45,8 @@ export type NablLab = {
 
 export type NablFilters = {
   q?: string;
-  field?: string;
+  /** One discipline from the medical list — Haematology, Molecular Testing… */
+  discipline?: string;
   state?: string;
   city?: string;
   /** 'yes' or 'no' — whether we appear to have it already. */
@@ -52,11 +62,13 @@ export const PAGE_SIZE = 50;
 const MATCH = 'n.matched_lab_name';
 
 function buildWhere(f: NablFilters) {
-  const where: string[] = [];
+  const where: string[] = [DIAGNOSTIC_ONLY];
   const params: any[] = [];
   const push = (v: any) => `$${params.push(v)}`;
 
-  if (f.field) where.push(`n.field = ${push(f.field)}`);
+  // discipline is a comma-separated list on the row, so a centre accredited
+  // for several shows under each of them.
+  if (f.discipline) where.push(`n.discipline ILIKE ${push(`%${f.discipline}%`)}`);
   if (f.state) where.push(`n.state = ${push(f.state)}`);
   if (f.city) where.push(`n.city_key = ${push(f.city)}`);
   if (f.q && f.q.trim()) {
@@ -68,7 +80,7 @@ function buildWhere(f: NablFilters) {
   if (f.onboarded === 'yes') where.push(`n.matched_lab_id IS NOT NULL`);
   if (f.onboarded === 'no') where.push(`n.matched_lab_id IS NULL`);
 
-  return { clause: where.length ? `WHERE ${where.join(' AND ')}` : '', params };
+  return { clause: `WHERE ${where.join(' AND ')}`, params };
 }
 
 export async function listNablLabs(f: NablFilters = {}) {
@@ -95,20 +107,26 @@ export async function listNablLabs(f: NablFilters = {}) {
   return { rows, total: total?.n ?? 0, page, pages: Math.ceil((total?.n ?? 0) / PAGE_SIZE) };
 }
 
-/** The filter rows: fields, the states with the most labs, and freshness. */
+/** The filter rows: disciplines, the busiest states, and how fresh this is. */
 export async function getNablFacets() {
-  const [fields, states, meta] = await Promise.all([
-    query<{ field: string; n: number }>(`
-      SELECT COALESCE(field, 'Unstated') AS field, COUNT(*)::int AS n
-      FROM atlas.nabl_lab GROUP BY 1 ORDER BY 2 DESC`),
+  const [disciplines, states, meta] = await Promise.all([
+    query<{ discipline: string; n: number }>(`
+      WITH one AS (
+        SELECT trim(unnest(string_to_array(discipline, ','))) AS discipline
+        FROM atlas.nabl_lab n WHERE ${DIAGNOSTIC_ONLY} AND discipline <> ''
+      )
+      SELECT discipline, COUNT(*)::int AS n
+      FROM one GROUP BY 1 ORDER BY 2 DESC LIMIT 10`),
     query<{ state: string; n: number }>(`
       SELECT COALESCE(state, 'Unstated') AS state, COUNT(*)::int AS n
-      FROM atlas.nabl_lab GROUP BY 1 ORDER BY 2 DESC LIMIT 12`),
-    queryOne<{ total: number; pulled_on: string; matched: number }>(`
+      FROM atlas.nabl_lab n WHERE ${DIAGNOSTIC_ONLY}
+      GROUP BY 1 ORDER BY 2 DESC LIMIT 12`),
+    queryOne<{ total: number; pulled_on: string; matched: number; imaging: number }>(`
       SELECT COUNT(*)::int AS total,
              MAX(pulled_on)::text AS pulled_on,
-             COUNT(*) FILTER (WHERE matched_lab_id IS NOT NULL)::int AS matched
-      FROM atlas.nabl_lab`),
+             COUNT(*) FILTER (WHERE matched_lab_id IS NOT NULL)::int AS matched,
+             COUNT(*) FILTER (WHERE discipline ILIKE '%MI CAB%')::int AS imaging
+      FROM atlas.nabl_lab n WHERE ${DIAGNOSTIC_ONLY}`),
   ]);
-  return { fields, states, meta };
+  return { disciplines, states, meta };
 }

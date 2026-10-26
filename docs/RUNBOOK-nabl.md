@@ -2,9 +2,15 @@
 
 *Directory › NABL labs — `/nabl`*
 
-Every laboratory NABL has accredited: 11,142 of them, with contact person,
-phone, email, address, pincode, coordinates, discipline and a link to the
-certificate and scope PDFs.
+The 2,640 pathology and imaging centres NABL has accredited, with contact
+person, phone, email, address, pincode, coordinates, discipline and a link to
+the certificate and scope PDFs.
+
+**The screen shows the Medical field only.** NABL accredits 11,142 labs, but
+8,502 of them are industrial — fertiliser chemistry, electrical calibration,
+corrugated box testing — and none of that is supply Atlas can use. The full
+snapshot stays in `atlas.nabl_lab`; `lib/nablLabs.ts` simply never asks for the
+rest, so a future screen can use the industrial rows without a re-pull.
 
 ## Where it comes from
 

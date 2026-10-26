@@ -15,7 +15,7 @@ export default async function NablPage({
   searchParams,
 }: {
   searchParams: {
-    q?: string; field?: string; state?: string; city?: string;
+    q?: string; discipline?: string; state?: string; city?: string;
     onboarded?: string; page?: string;
   };
 }) {
@@ -31,7 +31,7 @@ export default async function NablPage({
   const link = (patch: Record<string, string | undefined>) => {
     const p = new URLSearchParams();
     const merged: Record<string, string | undefined> = {
-      q: searchParams.q, field: searchParams.field, state: searchParams.state,
+      q: searchParams.q, discipline: searchParams.discipline, state: searchParams.state,
       city: searchParams.city, onboarded: searchParams.onboarded,
       page: undefined, ...patch,
     };
@@ -49,17 +49,18 @@ export default async function NablPage({
   return (
     <div className="px-6 lg:px-8 py-6 max-w-[1700px] mx-auto">
       <PageHeader
-        title="NABL accredited labs"
-        subtitle="Every laboratory NABL has accredited, with its contact, discipline and certificate."
+        title="NABL diagnostic centres"
+        subtitle="Every pathology and imaging centre NABL has accredited, with its contact, discipline and certificate."
         actions={
           <InfoTip
-            title="NABL labs"
-            shows="The public NABL accreditation directory, loaded into Atlas."
+            title="NABL diagnostic centres"
+            shows="The medical field of the NABL accreditation register: pathology and imaging only."
             computed={
               <>
-                <b>On our network</b> is a match on pincode plus a close name match against an
-                active LabStack lab — a strong hint, not a fact, so check before acting on it.
-                An accredited lab is not a provider until somebody onboards it.
+                NABL also accredits 8,502 industrial labs — fertiliser chemistry, electrical
+                calibration, corrugated box testing. None of that is supply, so this screen never
+                shows it. <b>On our network</b> is a match on pincode plus a close name match
+                against an active LabStack lab: a strong hint, not a fact.
               </>
             }
             drives="Nothing automatically. This is reference data for finding and vetting supply; onboarding still happens in Provider onboarding."
@@ -69,16 +70,14 @@ export default async function NablPage({
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-5">
         <div className="rounded-xl border border-ink-200 bg-surface px-4 py-3">
-          <div className="text-[10px] uppercase tracking-wide text-ink-500">Accredited labs</div>
+          <div className="text-[10px] uppercase tracking-wide text-ink-500">Diagnostic centres</div>
           <div className="text-[22px] font-extrabold mt-1 num text-ink-900">{n(facets.meta?.total ?? 0)}</div>
-          <div className="text-[11px] text-ink-500 mt-0.5">in the directory</div>
+          <div className="text-[11px] text-ink-500 mt-0.5">pathology and imaging, accredited</div>
         </div>
         <div className="rounded-xl border border-ink-200 bg-surface px-4 py-3">
-          <div className="text-[10px] uppercase tracking-wide text-ink-500">Medical</div>
-          <div className="text-[22px] font-extrabold mt-1 num text-ink-900">
-            {n(facets.fields.find((f) => f.field === 'Medical')?.n ?? 0)}
-          </div>
-          <div className="text-[11px] text-ink-500 mt-0.5">the rest are testing and calibration</div>
+          <div className="text-[10px] uppercase tracking-wide text-ink-500">Imaging centres</div>
+          <div className="text-[22px] font-extrabold mt-1 num text-ink-900">{n(facets.meta?.imaging ?? 0)}</div>
+          <div className="text-[11px] text-ink-500 mt-0.5">CT, MRI, ultrasound, radiography</div>
         </div>
         <div className="rounded-xl border border-success-100 bg-success-50 px-4 py-3">
           <div className="text-[10px] uppercase tracking-wide text-ink-500">Look like ours</div>
@@ -92,19 +91,8 @@ export default async function NablPage({
         </div>
       </div>
 
-      <div className="mt-5 mb-4 flex flex-wrap items-center gap-x-4 gap-y-2 rounded-lg
+      <div className="mt-5 mb-3 flex flex-wrap items-center gap-x-4 gap-y-2 rounded-lg
                       border border-ink-200 bg-surface px-4 py-2.5">
-        <div className="flex items-center gap-1.5 flex-wrap">
-          <span className="text-[11px] uppercase tracking-wide text-ink-400 mr-0.5">Field</span>
-          <ChipButton href={link({ field: undefined })} active={!searchParams.field}>All</ChipButton>
-          {facets.fields.slice(0, 5).map((f) => (
-            <ChipButton key={f.field} href={link({ field: f.field })} active={searchParams.field === f.field}>
-              {f.field} <span className="text-ink-400">{n(f.n)}</span>
-            </ChipButton>
-          ))}
-        </div>
-
-        <span className="w-px h-5 bg-ink-200" />
         <div className="flex items-center gap-1.5">
           <span className="text-[11px] uppercase tracking-wide text-ink-400 mr-0.5">On our network</span>
           <ChipButton href={link({ onboarded: undefined })} active={!searchParams.onboarded}>All</ChipButton>
@@ -114,8 +102,19 @@ export default async function NablPage({
 
         <div className="ml-auto">
           <EntitySearch basePath="/nabl" initial={searchParams.q}
-                        placeholder="Lab, city, pincode, certificate" width="w-[260px]" />
+                        placeholder="Centre, city, pincode, certificate" width="w-[260px]" />
         </div>
+      </div>
+
+      <div className="mb-3 flex flex-wrap items-center gap-1.5">
+        <span className="text-[11px] uppercase tracking-wide text-ink-400 mr-0.5">Discipline</span>
+        <ChipButton href={link({ discipline: undefined })} active={!searchParams.discipline}>All</ChipButton>
+        {facets.disciplines.map((d) => (
+          <ChipButton key={d.discipline} href={link({ discipline: d.discipline })}
+                      active={searchParams.discipline === d.discipline}>
+            {d.discipline} <span className="text-ink-400">{n(d.n)}</span>
+          </ChipButton>
+        ))}
       </div>
 
       <div className="mb-4 flex flex-wrap items-center gap-1.5">
@@ -129,11 +128,11 @@ export default async function NablPage({
       </div>
 
       <div className="rounded-xl border border-ink-200 bg-surface overflow-x-auto">
-        <table className="w-full min-w-[1280px] text-[13px]">
+        <table className="w-full min-w-[1240px] text-[13px]">
           <thead>
             <tr className="border-b border-ink-200">
-              <th className="text-left text-[10px] uppercase tracking-wide text-ink-500 font-semibold px-4 py-2.5">Laboratory</th>
-              <th className="text-left text-[10px] uppercase tracking-wide text-ink-500 font-semibold px-3 py-2.5">Field · discipline</th>
+              <th className="text-left text-[10px] uppercase tracking-wide text-ink-500 font-semibold px-4 py-2.5">Centre</th>
+              <th className="text-left text-[10px] uppercase tracking-wide text-ink-500 font-semibold px-3 py-2.5">Discipline</th>
               <th className="text-left text-[10px] uppercase tracking-wide text-ink-500 font-semibold px-3 py-2.5">Where</th>
               <th className="text-left text-[10px] uppercase tracking-wide text-ink-500 font-semibold px-3 py-2.5">Contact</th>
               <th className="text-left text-[10px] uppercase tracking-wide text-ink-500 font-semibold px-3 py-2.5">Certificate</th>
@@ -149,9 +148,8 @@ export default async function NablPage({
                     {[l.cab_id, l.certificate_no].filter(Boolean).join(' · ')}
                   </div>
                 </td>
-                <td className="px-3 py-2.5 text-[12px] text-ink-600 max-w-[280px]">
-                  <div className="font-medium text-ink-700">{l.field ?? '—'}</div>
-                  <div className="text-[11px] text-ink-500 mt-0.5 line-clamp-2">{l.discipline ?? '—'}</div>
+                <td className="px-3 py-2.5 text-[12px] text-ink-600 max-w-[300px]">
+                  <div className="line-clamp-3">{l.discipline ?? '—'}</div>
                 </td>
                 <td className="px-3 py-2.5 text-[12px] text-ink-600 max-w-[240px]">
                   <div>{[l.city, l.state].filter(Boolean).join(', ') || '—'}</div>
@@ -215,9 +213,10 @@ export default async function NablPage({
       )}
 
       <p className="text-[11px] text-ink-500 mt-4 max-w-[96ch] leading-relaxed">
-        Loaded from the public NABL accreditation directory on {facets.meta?.pulled_on ?? 'the date shown above'}.
-        Accreditation status and certificate links are NABL&rsquo;s; a certificate link opens their portal,
-        where both the certificate and the scope PDF can be downloaded.
+        The medical field of the NABL accreditation register, loaded on{' '}
+        {facets.meta?.pulled_on ?? 'the date shown above'}. Industrial testing and calibration labs
+        are excluded. A certificate link opens NABL&rsquo;s portal, where both the certificate and
+        the scope PDF can be downloaded.
       </p>
     </div>
   );
