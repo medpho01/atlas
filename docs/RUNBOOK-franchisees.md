@@ -16,23 +16,27 @@ active console lab — so the two screens mean the same thing by it.
 | Chain | Centres | How it was obtained |
 |---|---|---|
 | Thyrocare | 2,311 | The whole network is embedded in `thyrocare.com/location` as page data. One request. |
+| Metropolis | 2,672 | 459 city pages under `/labs/<state>/<city>`, six per page, crawled in-page. 3,544 rows before de-duplicating on address and phone. |
+
+Metropolis gives an address, a landline and a closing time but no centre name —
+every card is headed "Metropolis Healthcare Ltd" — so the name is built as
+`Metropolis Healthcare — <locality>`, the locality being the address segment
+before the city, skipping landmark and shop-number fragments.
 
 ## The other chains
 
-**Metropolis** publishes centres on 459 city pages under `/labs/<state>/<city>`,
-six per page, with address, landline and closing time. The `limit` parameter is
-ignored, so Mumbai alone is 61 requests and the full network is well over a
-thousand. Scrapable, but it is a crawl rather than a pull.
+**Redcliffe** does publish a register, at
+`app.redcliffelabs.com/api/v1/sample/labccs/`: 1,292 centres with coordinates,
+email, NABL certificate number and opening hours. Page size is fixed at nine
+and cannot be raised, so it is 144 requests — and the API starts refusing after
+a burst. Pull it slowly, around one request every two seconds, and resume
+rather than restart.
 
 **Pathkind** returns centres from a search API that needs a pincode or city per
 call, so it needs a city sweep driven from a list we supply.
 
-**Redcliffe** publishes no centre register. Its sitemaps are 350,000 SEO pages
-for tests by locality; the business is home-collection led, so there may be
-very few physical centres to list.
-
-All three are bot-protected against plain `curl`; the Thyrocare pull was done
-through a browser for that reason.
+Every one of these is bot-protected against plain `curl`; all the pulls were
+done through a browser for that reason.
 
 ## Loading a chain
 

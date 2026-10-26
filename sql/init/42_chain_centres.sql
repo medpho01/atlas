@@ -12,8 +12,10 @@
 
 CREATE TABLE IF NOT EXISTS atlas.chain_centre (
   chain        text NOT NULL,
-  -- The chain's own id where it has one, else a hash of name+pincode. It only
-  -- has to be stable within a chain, which is what makes a refresh an update.
+  -- The chain's own id where it has one, else a hash of name, pincode and
+  -- address. The address is in the hash because two centres of one chain can
+  -- genuinely share a name and a pincode — two branches of the same locality —
+  -- and without it they collide into one row.
   external_id  text NOT NULL,
 
   name         text NOT NULL,
@@ -78,10 +80,9 @@ BEGIN
     chain, external_id, name, address, city, state, pincode, phone, whatsapp,
     open_hours, map_link, latitude, longitude, city_key, phone_digits,
     source_url, pulled_on, updated_at)
-  SELECT
+  SELECT DISTINCT ON (s.chain, id.external_id)
     s.chain,
-    COALESCE(NULLIF(btrim(s.external_id), ''),
-             md5(lower(coalesce(s.name, '')) || '|' || coalesce(s.pincode, ''))),
+    id.external_id,
     s.name, s.address, s.city, s.state, NULLIF(btrim(s.pincode), ''),
     s.phone, s.whatsapp, s.open_hours, s.map_link,
     NULLIF(btrim(s.latitude), '')::double precision,
@@ -90,6 +91,12 @@ BEGIN
     NULLIF(regexp_replace(coalesce(s.phone, ''), '\D', '', 'g'), ''),
     s.source_url, atlas.ist_today(), now()
   FROM atlas.chain_centre_stage s
+  CROSS JOIN LATERAL (
+    SELECT COALESCE(
+      NULLIF(btrim(s.external_id), ''),
+      md5(lower(coalesce(s.name, '')) || '|' || coalesce(s.pincode, '')
+          || '|' || lower(coalesce(s.address, '')))) AS external_id
+  ) id
   WHERE s.chain = p_chain AND coalesce(btrim(s.name), '') <> ''
   ON CONFLICT (chain, external_id) DO UPDATE SET
     name = EXCLUDED.name, address = EXCLUDED.address, city = EXCLUDED.city,
