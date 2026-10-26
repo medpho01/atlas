@@ -66,24 +66,66 @@ Hamirpur, which exists in both Himachal Pradesh and Uttar Pradesh, is left
 blank rather than guessed: a wrong state on a sales screen is worse than an
 empty one. `load_chain_centres` calls it at the end of every load.
 
+## Deploying
+
+Everything the screen needs is in the repo — the four CSVs are committed, so
+production never re-scrapes.
+
+```bash
+cd ~/atlas && git pull \
+  && docker compose exec -T atlas-db psql -U atlas -d atlas -v ON_ERROR_STOP=1 \
+       -f /docker-entrypoint-initdb.d/42_chain_centres.sql \
+  && docker compose exec -T atlas-db psql -U atlas -d atlas -v ON_ERROR_STOP=1 \
+       -f /docker-entrypoint-initdb.d/43_chain_state_fill.sql \
+  && docker compose exec -T atlas-db psql -U atlas -d atlas -v ON_ERROR_STOP=1 \
+       -f /docker-entrypoint-initdb.d/44_chain_centre_email.sql \
+  && for chain in Thyrocare Metropolis Pathkind Redcliffe; do \
+       docker compose exec -T atlas-db psql -U atlas -d atlas \
+         -c "\copy atlas.chain_centre_stage FROM '/dev/stdin' WITH (FORMAT csv, HEADER true)" \
+         < sql/reports/chain-centres-$(echo $chain | tr A-Z a-z).csv \
+       && docker compose exec -T atlas-db psql -U atlas -d atlas \
+            -c "SELECT atlas.load_chain_centres('$chain')"; \
+     done \
+  && docker compose up -d --build atlas-web
+```
+
+Run `42` before `43`: the loader calls `fill_chain_centre_states()`, which `43`
+defines. It is resolved at call time, so creating the loader first is fine, but
+loading a chain before `43` exists is not.
+
+Then check it landed:
+
+```bash
+docker compose exec -T atlas-db psql -U atlas -d atlas -c \
+  "SELECT chain, COUNT(*) centres, COUNT(DISTINCT city_key) cities,
+          COUNT(*) FILTER (WHERE coalesce(state,'') <> '') with_state,
+          COUNT(*) FILTER (WHERE matched_lab_id IS NOT NULL) matched,
+          MAX(pulled_on) pulled
+     FROM atlas.chain_centre GROUP BY chain ORDER BY 2 DESC"
+```
+
+Expect 2,672 Metropolis, 2,311 Thyrocare, 2,206 Pathkind and 1,280 Redcliffe.
+`matched` will be small — around 27 in all — and that is a property of our own
+data, not of the pull: most active console labs carry no pincode, and the match
+needs one. Raising it means filling in pincodes on the console side.
+
 ## Loading a chain
 
 Stage a CSV with the columns of `atlas.chain_centre_stage`, then fold it in:
 
 ```bash
-for chain in thyrocare metropolis pathkind redcliffe; do
-  docker compose exec -T atlas-db psql -U atlas -d atlas \
-    -c "\copy atlas.chain_centre_stage FROM '/dev/stdin' WITH (FORMAT csv, HEADER true)" \
-    < sql/reports/chain-centres-$chain.csv
-  docker compose exec -T atlas-db psql -U atlas -d atlas \
-    -c "SELECT atlas.load_chain_centres('$(echo ${chain:0:1} | tr a-z A-Z)${chain:1}')"
-done
+docker compose exec -T atlas-db psql -U atlas -d atlas \
+  -c "\copy atlas.chain_centre_stage FROM '/dev/stdin' WITH (FORMAT csv, HEADER true)" \
+  < sql/reports/chain-centres-thyrocare.csv
+docker compose exec -T atlas-db psql -U atlas -d atlas \
+  -c "SELECT atlas.load_chain_centres('Thyrocare')"
 ```
 
 `\copy` maps CSV columns **by position, not by header name**, so every chain's
 CSV carries the staging table's columns in the staging table's order, with a
 column the chain doesn't publish written empty rather than omitted.
-`scripts/scrape/stage_order.py` normalises a CSV to that order and is idempotent.
+`scripts/scrape/stage_order.py` normalises a CSV to that order and is
+idempotent.
 
 `load_chain_centres` works **one chain at a time**: it upserts that chain's
 rows, deletes the ones that chain no longer lists, and re-runs the console
@@ -98,4 +140,12 @@ matches on `chain` exactly. Check with
 
 **Shared phones.** A number used by several centres of one chain is flagged,
 not removed: it is usually one franchisee running several branches, which is
-worth knowing rather than hiding.
+worth knowing rather than hiding. The exception is Redcliffe, where 62 centres
+share Redcliffe's own switchboard — there the flag is telling you the number
+is not a franchisee contact at all.
+
+**A chain shows far fewer centres than you expect.** Check the pull before
+the loader. Both sources that paginate have a way of ending a crawl early
+without erroring: Pathkind repeats its first page at `?page=0`, and Redcliffe
+rate-limits mid-sweep. A short CSV is the symptom; the counts above are what
+a complete one looks like.
