@@ -4,6 +4,7 @@ import { useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import { createDeal } from './actions';
 import { startNav } from '@/components/ui/NavProgress';
+import { DuplicateWarning } from '@/components/ui/DuplicateWarning';
 
 /**
  * Opening an account.
@@ -92,6 +93,7 @@ export function NewDeal({ people, meId, types }: {
                 <label htmlFor="d-company" className={lbl}>Account name</label>
                 <input id="d-company" autoFocus required value={f.company} onChange={set('company')}
                        placeholder="Alliance Insurance" className={field} />
+                <div className="mt-2"><DuplicateWarning name={f.company} /></div>
               </div>
               <div>
                 <label htmlFor="d-type" className={lbl}>Type of customer</label>

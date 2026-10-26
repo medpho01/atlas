@@ -31,7 +31,9 @@ export async function listAccounts(f: AccountFilters = {}): Promise<Account[]> {
   if (f.reviewDue) where.push(`a.next_review_on::date < atlas.ist_today()`);
   if (f.q) {
     const like = push(`%${f.q.trim()}%`);
-    where.push(`(a.name ILIKE ${like} OR a.city ILIKE ${like})`);
+    where.push(`(a.name ILIKE ${like} OR a.city ILIKE ${like}
+                 OR EXISTS (SELECT 1 FROM atlas.account_contact c
+                             WHERE c.account_id = a.account_id AND c.name ILIKE ${like}))`);
   }
 
   return query<Account>(`
@@ -183,4 +185,32 @@ export async function getPeople() {
     WHERE active AND role IN ('admin', 'sales', 'accounts', 'network_lead', 'network', 'operations')
     ORDER BY name
   `);
+}
+
+/**
+ * Companies that look like this one.
+ *
+ * Both books write into the same account table, so "Alliance Insurance" typed
+ * on the sales board and "Alliance Insurance Co" typed on the accounts book
+ * are the duplicate worth catching — at the moment somebody types the name,
+ * not in a clean-up months later. Trigram similarity rather than LIKE, so a
+ * missing "Pvt Ltd" or a swapped word still matches.
+ */
+export async function findSimilar(name: string, limit = 5) {
+  const q = (name ?? '').trim();
+  if (q.length < 3) return [];
+  return query<{
+    account_id: number; name: string; city: string | null;
+    lifecycle: Stage; owner: string | null; deal_id: number | null; score: number;
+  }>(`
+    SELECT a.id AS account_id, a.name, a.city, a.lifecycle, u.name AS owner,
+           (SELECT d.id FROM atlas.sales_deal d WHERE d.account_id = a.id ORDER BY d.id LIMIT 1) AS deal_id,
+           similarity(lower(a.name), lower($1)) AS score
+    FROM atlas.account a
+    LEFT JOIN atlas.users u ON u.id = a.owner_id
+    WHERE similarity(lower(a.name), lower($1)) > 0.3
+       OR lower(a.name) LIKE '%' || lower($1) || '%'
+    ORDER BY score DESC, a.name
+    LIMIT $2
+  `, [q, limit]);
 }

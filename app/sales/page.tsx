@@ -11,6 +11,7 @@ import {
 import { Board } from './Board';
 import { DealTable } from './DealTable';
 import { NewDeal } from './NewDeal';
+import { EntitySearch } from '@/components/ui/EntitySearch';
 
 export const dynamic = 'force-dynamic';
 
@@ -207,11 +208,11 @@ export default async function SalesPage({
           <ChipButton href={link({ show: 'all' })} active={show === 'all'}>Include closed</ChipButton>
         </div>
 
-        {canEdit && (
-          <div className="ml-auto">
-            <NewDeal people={people} meId={gate.user.id} types={types} />
-          </div>
-        )}
+        <div className="ml-auto flex items-center gap-2">
+          <EntitySearch basePath="/sales" initial={searchParams.q}
+                        placeholder="Company, city or contact" />
+          {canEdit && <NewDeal people={people} meId={gate.user.id} types={types} />}
+        </div>
       </div>
 
       {table ? (

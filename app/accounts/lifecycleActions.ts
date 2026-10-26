@@ -290,3 +290,11 @@ export async function toggleTask(input: { accountId: number; taskId: number; don
   revalidatePath('/accounts');
   return { ok: true as const };
 }
+
+/** Companies already on the book that look like the one being typed. */
+export async function checkDuplicate(name: string) {
+  const g = await requireView('accountHealth', '/accounts');
+  if (g.blocked) return [];
+  const { findSimilar } = await import('@/lib/lifecycle');
+  return findSimilar(name);
+}

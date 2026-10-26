@@ -11,7 +11,7 @@ import {
   listAccounts, getStageCounts, getPeople, STAGE_LABEL, STAGES, type Stage,
 } from '@/lib/lifecycle';
 import { NewAccount } from './NewAccount';
-import { BookSearch } from './BookSearch';
+import { EntitySearch } from '@/components/ui/EntitySearch';
 
 export const dynamic = 'force-dynamic';
 
@@ -165,7 +165,8 @@ export default async function BookPage({
         </div>
 
         <div className="ml-auto flex items-center gap-2">
-          <BookSearch q={searchParams.q ?? ''} />
+          <EntitySearch basePath="/accounts" initial={searchParams.q}
+                        placeholder="Company, city or contact" />
           {canEdit && <NewAccount people={people} meId={gate.user.id} types={types} />}
         </div>
       </div>

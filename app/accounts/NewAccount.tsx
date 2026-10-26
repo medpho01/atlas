@@ -4,6 +4,7 @@ import { useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import { createAccount } from './lifecycleActions';
 import { startNav } from '@/components/ui/NavProgress';
+import { DuplicateWarning } from '@/components/ui/DuplicateWarning';
 
 /**
  * Three fields. An account starts in sales with a name and nothing else —
@@ -47,7 +48,12 @@ export function NewAccount({ people, meId, types }: {
   }
 
   return (
-    <form onSubmit={submit} className="flex flex-wrap items-end gap-2">
+    <form onSubmit={submit} className="flex flex-wrap items-end gap-2 relative">
+      {name.trim().length > 2 && (
+        <div className="absolute top-full right-0 mt-2 w-[460px] z-20 shadow-lg">
+          <DuplicateWarning name={name} />
+        </div>
+      )}
       <div>
         <label htmlFor="an" className="block text-[10px] uppercase tracking-wide text-ink-400 mb-1">Company</label>
         <input id="an" autoFocus value={name} onChange={(e) => setName(e.target.value)}

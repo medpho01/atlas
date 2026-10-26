@@ -167,6 +167,11 @@ recorded as live. It is idempotent — the inserts all skip what is already ther
 
 ## When something looks wrong
 
+**A task is missing from one screen.** It cannot be now — a trigger fills
+whichever of `store_id` / `account_id` the writer left out, so a task written
+from either screen is visible on both. Before `38` the two screens each saw
+only their own half.
+
 **Every date renders as `[object Date]`.** A column was added to
 `analytics.v_account_lifecycle` without `::text`. Dates leave that view as text
 because everything that reads them renders them.
