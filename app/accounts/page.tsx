@@ -8,7 +8,8 @@ import { ChipButton } from '@/components/ui/Toggle';
 import { InfoTip } from '@/components/ui/InfoTip';
 import { getAccountTypes } from '@/lib/salesCrm';
 import {
-  listAccounts, getStageCounts, getPeople, STAGE_LABEL, STAGES, type Stage,
+  listAccounts, getStageCounts, getPeople, getAccountTypeCounts,
+  STAGE_LABEL, STAGES, type Stage,
 } from '@/lib/lifecycle';
 import { NewAccount } from './NewAccount';
 import { EntitySearch } from '@/components/ui/EntitySearch';
@@ -59,7 +60,7 @@ export default async function BookPage({
     ? searchParams.stage as Stage : undefined;
   const mine = searchParams.mine === '1';
 
-  const [accounts, counts, types, people] = await Promise.all([
+  const [accounts, counts, types, people, typeCounts] = await Promise.all([
     listAccounts({
       stage,
       owner: mine ? gate.user.id : undefined,
@@ -70,6 +71,7 @@ export default async function BookPage({
     getStageCounts(),
     getAccountTypes(),
     getPeople(),
+    getAccountTypeCounts(),
   ]);
 
   const count = (s: Stage) => counts.find((c) => c.lifecycle === s)?.n ?? 0;
@@ -157,11 +159,14 @@ export default async function BookPage({
         <div className="flex items-center gap-1.5 flex-wrap">
           <span className="text-[11px] uppercase tracking-wide text-ink-400 mr-0.5">Type</span>
           <ChipButton href={link({ type: undefined })} active={!searchParams.type}>All</ChipButton>
-          {types.slice(0, 5).map((t) => (
+          {typeCounts.filter((t) => t.n > 0).map((t) => (
             <ChipButton key={t.key} href={link({ type: t.key })} active={searchParams.type === t.key}>
-              {t.label}
+              {t.label} <span className="text-ink-400">{t.n}</span>
             </ChipButton>
           ))}
+          <ChipButton href={link({ type: 'none' })} active={searchParams.type === 'none'}>
+            Not set
+          </ChipButton>
         </div>
 
         <div className="ml-auto flex items-center gap-2">

@@ -21,6 +21,14 @@ async function gate(path: string) {
   return g.user;
 }
 
+/** A key that exists in the type master, or nothing. */
+async function validAccountType(key?: string | null): Promise<string | null> {
+  if (!key) return null;
+  const row = await queryOne<{ key: string }>(
+    `SELECT key FROM atlas.sales_account_type WHERE key = $1 AND active`, [key]);
+  return row?.key ?? null;
+}
+
 const clean = (v: string | undefined | null) => {
   const s = (v ?? '').trim();
   return s === '' ? null : s;
@@ -69,6 +77,8 @@ export async function updateAccount(input: {
   cadence?: string;
   city?: string;
   website?: string;
+  /** A key from atlas.sales_account_type, or '' to clear it. */
+  accountType?: string;
 }) {
   const user = await gate(`/accounts/${input.accountId}`);
   if (!user) return { ok: false as const, error: 'Not allowed' };
@@ -77,16 +87,24 @@ export async function updateAccount(input: {
     input.cadence && (CADENCES as readonly string[]).includes(input.cadence)
       ? input.cadence as Cadence : null;
 
+  // The type is set by whoever learns it — sales on the deal, or the accounts
+  // team cleaning up an account that predates the field. An empty string means
+  // "clear it", which is different from not sending the field at all.
+  const typeKey = input.accountType === undefined ? null
+    : (await validAccountType(input.accountType));
+  const clearType = input.accountType === '';
+
   await query(`
     UPDATE atlas.account SET
       owner_id       = COALESCE($2, owner_id),
       review_cadence = COALESCE($3, review_cadence),
       city           = COALESCE($4, city),
       website        = COALESCE($5, website),
+      account_type   = CASE WHEN $7 THEN NULL ELSE COALESCE($6, account_type) END,
       updated_at     = now()
     WHERE id = $1
   `, [input.accountId, input.ownerId ?? null, cadence,
-      clean(input.city), clean(input.website)]);
+      clean(input.city), clean(input.website), typeKey, clearType]);
 
   revalidatePath(`/accounts/${input.accountId}`);
   return { ok: true as const };

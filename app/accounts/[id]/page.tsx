@@ -7,6 +7,7 @@ import {
   getAccount, getContacts, getMeetings, getServices, getTasks,
   getPeople, getDepartments, STAGE_LABEL, CADENCE_LABEL,
 } from '@/lib/lifecycle';
+import { getAccountTypes } from '@/lib/salesCrm';
 import {
   Sizing, StageControl, Meetings, Contacts, Services, Tasks,
 } from './AccountBookClient';
@@ -47,9 +48,9 @@ export default async function AccountBookPage({ params }: { params: { id: string
   if (!account) notFound();
 
   const canEdit = canManage(gate.user, 'accountHealth');
-  const [contacts, meetings, services, tasks, people, departments] = await Promise.all([
+  const [contacts, meetings, services, tasks, people, departments, types] = await Promise.all([
     getContacts(id), getMeetings(id), getServices(id, account.store_id),
-    getTasks(id), getPeople(), getDepartments(),
+    getTasks(id), getPeople(), getDepartments(), getAccountTypes(),
   ]);
 
   const reviewIn = days(account.next_review_on);
@@ -116,7 +117,7 @@ export default async function AccountBookPage({ params }: { params: { id: string
         </div>
 
         <div className="flex-[1_1_320px] min-w-0 flex flex-col gap-4">
-          <StageControl account={account} people={people} canEdit={canEdit} />
+          <StageControl account={account} people={people} types={types} canEdit={canEdit} />
           <Contacts accountId={id} contacts={contacts} canEdit={canEdit} />
           <Services accountId={id} services={services} canEdit={canEdit} />
         </div>

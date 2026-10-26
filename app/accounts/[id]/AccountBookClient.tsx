@@ -102,8 +102,10 @@ export function Sizing({ account, canEdit }: { account: Account; canEdit: boolea
 
 // --------------------------------------------------------------- stage + owner
 
-export function StageControl({ account, people, canEdit }: {
-  account: Account; people: Person[]; canEdit: boolean;
+export function StageControl({ account, people, types, canEdit }: {
+  account: Account; people: Person[];
+  types: { key: string; label: string }[];
+  canEdit: boolean;
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
@@ -124,6 +126,11 @@ export function StageControl({ account, people, canEdit }: {
     router.refresh();
   });
 
+  const setType = (t: string) => start(async () => {
+    await updateAccount({ accountId: account.account_id, accountType: t });
+    startNav(); router.refresh();
+  });
+
   return (
     <div className={`${card} p-4 space-y-3`}>
       <div>
@@ -139,6 +146,14 @@ export function StageControl({ account, people, canEdit }: {
             </button>
           ))}
         </div>
+      </div>
+      <div>
+        <label htmlFor="atype" className={label}>Type of customer</label>
+        <select id="atype" value={account.account_type ?? ''} disabled={pending}
+                onChange={(e) => setType(e.target.value)} className={input}>
+          <option value="">Not set</option>
+          {types.map((t) => <option key={t.key} value={t.key}>{t.label}</option>)}
+        </select>
       </div>
       <div>
         <label htmlFor="own" className={label}>Owner</label>

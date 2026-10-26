@@ -26,7 +26,9 @@ export async function listAccounts(f: AccountFilters = {}): Promise<Account[]> {
   if (f.stage) where.push(`a.lifecycle = ${push(f.stage)}`);
   if (f.owner) where.push(`a.owner_id = ${push(f.owner)}`);
   if (f.unassigned) where.push(`a.owner_id IS NULL`);
-  if (f.type) where.push(`a.account_type = ${push(f.type)}`);
+  // 'none' is the cleanup queue: accounts nobody has typed yet.
+  if (f.type === 'none') where.push(`a.account_type IS NULL`);
+  else if (f.type) where.push(`a.account_type = ${push(f.type)}`);
   // The view hands dates out as text, so the comparison casts back.
   if (f.reviewDue) where.push(`a.next_review_on::date < atlas.ist_today()`);
   if (f.q) {
@@ -213,4 +215,15 @@ export async function findSimilar(name: string, limit = 5) {
     ORDER BY score DESC, a.name
     LIMIT $2
   `, [q, limit]);
+}
+
+/** How many accounts sit on each type, for the list's filter row. */
+export async function getAccountTypeCounts() {
+  return query<{ key: string; label: string; n: number }>(`
+    SELECT t.key, t.label, COUNT(a.id)::int AS n
+    FROM atlas.sales_account_type t
+    LEFT JOIN atlas.account a ON a.account_type = t.key
+    WHERE t.active
+    GROUP BY 1, 2 ORDER BY 3 DESC, t.label
+  `);
 }
