@@ -118,6 +118,13 @@ BEGIN
 
   GET DIAGNOSTICS n = ROW_COUNT;
   TRUNCATE atlas.nabl_lab_stage;
+
+  -- 41 adds the console match; call it when it exists so a refresh never
+  -- leaves the screen claiming a stale match.
+  IF to_regprocedure('atlas.match_nabl_labs()') IS NOT NULL THEN
+    PERFORM atlas.match_nabl_labs();
+  END IF;
+
   RETURN n;
 END;
 $$ LANGUAGE plpgsql;

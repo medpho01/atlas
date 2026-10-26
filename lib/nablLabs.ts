@@ -46,12 +46,10 @@ export type NablFilters = {
 
 export const PAGE_SIZE = 50;
 
-const MATCH = `
-  (SELECT l."labName" FROM src_local."Lab" l
-    WHERE l.active AND l.pincode = n.pincode
-      AND similarity(lower(l."labName"), lower(n.cab_name)) > 0.45
-    ORDER BY similarity(lower(l."labName"), lower(n.cab_name)) DESC
-    LIMIT 1)`;
+// Stored at load time by atlas.match_nabl_labs(), not computed per row: the
+// similarity join is the same work for every request and only changes when a
+// snapshot is loaded or a lab is onboarded.
+const MATCH = 'n.matched_lab_name';
 
 function buildWhere(f: NablFilters) {
   const where: string[] = [];
@@ -67,8 +65,8 @@ function buildWhere(f: NablFilters) {
                  OR n.pincode ILIKE ${like} OR n.certificate_no ILIKE ${like}
                  OR n.cab_id ILIKE ${like} OR n.discipline ILIKE ${like})`);
   }
-  if (f.onboarded === 'yes') where.push(`${MATCH} IS NOT NULL`);
-  if (f.onboarded === 'no') where.push(`${MATCH} IS NULL`);
+  if (f.onboarded === 'yes') where.push(`n.matched_lab_id IS NOT NULL`);
+  if (f.onboarded === 'no') where.push(`n.matched_lab_id IS NULL`);
 
   return { clause: where.length ? `WHERE ${where.join(' AND ')}` : '', params };
 }
@@ -109,11 +107,7 @@ export async function getNablFacets() {
     queryOne<{ total: number; pulled_on: string; matched: number }>(`
       SELECT COUNT(*)::int AS total,
              MAX(pulled_on)::text AS pulled_on,
-             COUNT(*) FILTER (WHERE EXISTS (
-               SELECT 1 FROM src_local."Lab" l
-                WHERE l.active AND l.pincode = nabl_lab.pincode
-                  AND similarity(lower(l."labName"), lower(nabl_lab.cab_name)) > 0.45
-             ))::int AS matched
+             COUNT(*) FILTER (WHERE matched_lab_id IS NOT NULL)::int AS matched
       FROM atlas.nabl_lab`),
   ]);
   return { fields, states, meta };

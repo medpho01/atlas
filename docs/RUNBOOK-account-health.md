@@ -83,6 +83,17 @@ cd ~/atlas && git pull \
 not the Stores & Orders work has landed, and merging that later is a no-op for
 these columns.
 
+## Why it is fast
+
+Every aggregate in `analytics.v_account_lifecycle` is a single pass joined in,
+never a correlated subquery. The first version joined `analytics.v_account`
+through a LATERAL with a twelve-month SUM nested inside it; Postgres cannot
+flatten that, so the activity matview was re-read once per account — 678ms for
+81 accounts, and growing with the book. As plain joins it is 13ms.
+
+The rule that keeps it that way: if a column needs data from another table,
+join an aggregate of that table, do not write a subquery that mentions `a.id`.
+
 ## When something looks wrong
 
 **Every account reads zero.** The snapshot is stale — these are calendar
@@ -164,6 +175,17 @@ cd ~/atlas && git pull \
 `36` backfills: one account per existing deal, one per live store, existing
 tasks follow their store, and every line an account has actually ordered is
 recorded as live. It is idempotent — the inserts all skip what is already there.
+
+## Why it is fast
+
+Every aggregate in `analytics.v_account_lifecycle` is a single pass joined in,
+never a correlated subquery. The first version joined `analytics.v_account`
+through a LATERAL with a twelve-month SUM nested inside it; Postgres cannot
+flatten that, so the activity matview was re-read once per account — 678ms for
+81 accounts, and growing with the book. As plain joins it is 13ms.
+
+The rule that keeps it that way: if a column needs data from another table,
+join an aggregate of that table, do not write a subquery that mentions `a.id`.
 
 ## When something looks wrong
 

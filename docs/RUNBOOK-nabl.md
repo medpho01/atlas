@@ -47,6 +47,19 @@ cd ~/atlas && git pull \
 `load_nabl_labs()` folds the staging table in on `nabl_id`, so a refresh
 updates rows in place and empties the staging table behind it.
 
+## The console match is stored, not computed
+
+`matched_lab_name` is written by `atlas.match_nabl_labs()` at load time.
+Computing it per row made /nabl the slowest screen in Atlas (1.1s); stored, the
+page is 48ms. `load_nabl_labs()` calls it, so a refresh never leaves a stale
+match, and it also clears marks for labs that were renamed or deactivated.
+
+Re-run it by hand after a provider refresh if the match matters:
+
+```bash
+docker compose exec -T atlas-db psql -U atlas -d atlas -c "SELECT atlas.match_nabl_labs()"
+```
+
 ## When something looks wrong
 
 **A certificate says "no link".** NABL holds a bare filename rather than a URL
