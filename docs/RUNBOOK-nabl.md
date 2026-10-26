@@ -19,9 +19,9 @@ we are entitled to poll. The public search reads a WordPress AJAX endpoint that
 returns the whole record per lab, so the pull is 23 requests, one every 1.5
 seconds, deduplicated on NABL's own row id. `robots.txt` allows it.
 
-The scripts are in the session scratchpad rather than the repo; the CSV they
-produce is committed at `sql/reports/nabl-labs.csv` so the table can be rebuilt
-without re-scraping.
+The pull is `scripts/scrape/nabl.py` and the workbook it feeds is
+`scripts/scrape/nabl_to_excel.py`; the CSV they produce is committed at
+`sql/reports/nabl-labs.csv` so the table can be rebuilt without re-scraping.
 
 **It is a snapshot, not a feed.** `pulled_on` carries the date and the screen
 shows it. Nothing refreshes by itself.

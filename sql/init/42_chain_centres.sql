@@ -79,7 +79,7 @@ BEGIN
   INSERT INTO atlas.chain_centre (
     chain, external_id, name, address, city, state, pincode, phone, whatsapp,
     open_hours, map_link, latitude, longitude, city_key, phone_digits,
-    source_url, pulled_on, updated_at)
+    source_url, email, pulled_on, updated_at)
   SELECT DISTINCT ON (s.chain, id.external_id)
     s.chain,
     id.external_id,
@@ -89,7 +89,7 @@ BEGIN
     NULLIF(btrim(s.longitude), '')::double precision,
     atlas.city_key(s.city),
     NULLIF(regexp_replace(coalesce(s.phone, ''), '\D', '', 'g'), ''),
-    s.source_url, atlas.ist_today(), now()
+    s.source_url, NULLIF(btrim(lower(s.email)), ''), atlas.ist_today(), now()
   FROM atlas.chain_centre_stage s
   CROSS JOIN LATERAL (
     SELECT COALESCE(
@@ -105,6 +105,7 @@ BEGIN
     map_link = EXCLUDED.map_link, latitude = EXCLUDED.latitude,
     longitude = EXCLUDED.longitude, city_key = EXCLUDED.city_key,
     phone_digits = EXCLUDED.phone_digits, source_url = EXCLUDED.source_url,
+    email = EXCLUDED.email,
     pulled_on = EXCLUDED.pulled_on, updated_at = now();
 
   GET DIAGNOSTICS n = ROW_COUNT;
@@ -115,6 +116,8 @@ BEGIN
   DELETE FROM atlas.chain_centre_stage WHERE chain = p_chain;
 
   PERFORM atlas.match_chain_centres(p_chain);
+  -- Defined in 43; resolved at call time, so the order of the files is fine.
+  PERFORM atlas.fill_chain_centre_states();
   RETURN n;
 END;
 $$ LANGUAGE plpgsql;

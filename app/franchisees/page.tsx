@@ -62,7 +62,7 @@ export default async function FranchiseesPage({
     <div className="px-6 lg:px-8 py-6 max-w-[1700px] mx-auto">
       <PageHeader
         title="Franchisee networks"
-        subtitle="The collection centres the national diagnostic chains publish, with address, phone and hours."
+        subtitle="The collection centres the national diagnostic chains publish, with address, contact and hours."
         actions={
           <InfoTip
             title="Franchisee networks"
@@ -80,13 +80,15 @@ export default async function FranchiseesPage({
         }
       />
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-5">
+      {/* Totals plus one card per chain — five across, so a fourth chain
+          doesn't silently drop off the end of the strip. */}
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3 mt-5">
         <div className="rounded-xl border border-ink-200 bg-surface px-4 py-3">
           <div className="text-[10px] uppercase tracking-wide text-ink-500">Centres</div>
           <div className="text-[22px] font-extrabold mt-1 num text-ink-900">{n(totals.centres)}</div>
           <div className="text-[11px] text-ink-500 mt-0.5">across {chains.length} chain{chains.length === 1 ? '' : 's'}</div>
         </div>
-        {chains.slice(0, 3).map((c) => (
+        {chains.slice(0, 4).map((c) => (
           <div key={c.chain} className="rounded-xl border border-ink-200 bg-surface px-4 py-3">
             <div className="text-[10px] uppercase tracking-wide text-ink-500">{c.chain}</div>
             <div className="text-[22px] font-extrabold mt-1 num text-ink-900">{n(c.centres)}</div>
@@ -107,6 +109,7 @@ export default async function FranchiseesPage({
                 <th className="text-right text-[10px] uppercase tracking-wide text-ink-500 font-semibold px-3 py-2.5">Cities</th>
                 <th className="text-right text-[10px] uppercase tracking-wide text-ink-500 font-semibold px-3 py-2.5">On our network</th>
                 <th className="text-right text-[10px] uppercase tracking-wide text-ink-500 font-semibold px-3 py-2.5">Shared phones</th>
+                <th className="text-right text-[10px] uppercase tracking-wide text-ink-500 font-semibold px-3 py-2.5">With email</th>
                 <th className="text-left text-[10px] uppercase tracking-wide text-ink-500 font-semibold px-4 py-2.5">Snapshot</th>
               </tr>
             </thead>
@@ -122,6 +125,7 @@ export default async function FranchiseesPage({
                   <td className="px-3 py-2.5 text-right num">{n(c.cities)}</td>
                   <td className="px-3 py-2.5 text-right num">{n(c.matched)}</td>
                   <td className="px-3 py-2.5 text-right num text-ink-600">{n(c.shared_phones)}</td>
+                  <td className="px-3 py-2.5 text-right num text-ink-600">{n(c.emails)}</td>
                   <td className="px-4 py-2.5 text-[12px] text-ink-500 num">{c.pulled_on}</td>
                 </tr>
               ))}
@@ -181,7 +185,7 @@ export default async function FranchiseesPage({
               <th className="text-left text-[10px] uppercase tracking-wide text-ink-500 font-semibold px-4 py-2.5">Centre</th>
               <th className="text-left text-[10px] uppercase tracking-wide text-ink-500 font-semibold px-3 py-2.5">Chain</th>
               <th className="text-left text-[10px] uppercase tracking-wide text-ink-500 font-semibold px-3 py-2.5">Address</th>
-              <th className="text-left text-[10px] uppercase tracking-wide text-ink-500 font-semibold px-3 py-2.5">Phone</th>
+              <th className="text-left text-[10px] uppercase tracking-wide text-ink-500 font-semibold px-3 py-2.5">Contact</th>
               <th className="text-left text-[10px] uppercase tracking-wide text-ink-500 font-semibold px-3 py-2.5">Hours</th>
               <th className="text-left text-[10px] uppercase tracking-wide text-ink-500 font-semibold px-4 py-2.5">On our network</th>
             </tr>
@@ -209,6 +213,12 @@ export default async function FranchiseesPage({
                     <div className="text-[10px] text-warn-600 mt-0.5">
                       shared by {c.phone_shared} centres
                     </div>
+                  )}
+                  {c.email && (
+                    <a href={`mailto:${c.email}`}
+                       className="block text-[11px] text-brand-400 hover:underline mt-0.5 break-all">
+                      {c.email}
+                    </a>
                   )}
                 </td>
                 <td className="px-3 py-2.5 text-[12px] text-ink-600 max-w-[180px]">

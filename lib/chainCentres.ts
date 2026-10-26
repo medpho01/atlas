@@ -24,6 +24,7 @@ export type ChainCentre = {
   pincode: string | null;
   phone: string | null;
   whatsapp: string | null;
+  email: string | null;
   open_hours: string | null;
   map_link: string | null;
   matched_lab_name: string | null;
@@ -65,7 +66,7 @@ function buildWhere(f: CentreFilters) {
     const like = push(`%${f.q.trim()}%`);
     where.push(`(c.name ILIKE ${like} OR c.city ILIKE ${like}
                  OR c.address ILIKE ${like} OR c.pincode ILIKE ${like}
-                 OR c.phone ILIKE ${like})`);
+                 OR c.phone ILIKE ${like} OR c.email ILIKE ${like})`);
   }
 
   return { clause: where.length ? `WHERE ${where.join(' AND ')}` : '', params };
@@ -78,7 +79,7 @@ export async function listCentres(f: CentreFilters = {}) {
 
   const rows = await query<ChainCentre>(`
     SELECT c.chain, c.external_id, c.name, c.address, c.city, c.state,
-           c.pincode, c.phone, c.whatsapp, c.open_hours, c.map_link,
+           c.pincode, c.phone, c.whatsapp, c.email, c.open_hours, c.map_link,
            c.matched_lab_name, c.pulled_on::text AS pulled_on,
            COALESCE(s.n, 1) AS phone_shared
     FROM atlas.chain_centre c
@@ -102,7 +103,7 @@ export async function listCentres(f: CentreFilters = {}) {
 export async function getChainSummary() {
   return query<{
     chain: string; centres: number; cities: number; states: number;
-    matched: number; shared_phones: number; pulled_on: string;
+    matched: number; shared_phones: number; emails: number; pulled_on: string;
   }>(`
     SELECT c.chain,
            COUNT(*)::int                                            AS centres,
@@ -110,6 +111,7 @@ export async function getChainSummary() {
            COUNT(DISTINCT c.state) FILTER (WHERE c.state <> '')::int AS states,
            COUNT(*) FILTER (WHERE c.matched_lab_id IS NOT NULL)::int AS matched,
            COUNT(*) FILTER (WHERE s.phone_digits IS NOT NULL)::int   AS shared_phones,
+           COUNT(*) FILTER (WHERE c.email IS NOT NULL)::int          AS emails,
            MAX(c.pulled_on)::text                                   AS pulled_on
     FROM atlas.chain_centre c
     LEFT JOIN (
