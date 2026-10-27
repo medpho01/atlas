@@ -1,13 +1,18 @@
 import './globals.css';
 import type { Metadata } from 'next';
-import { Inter } from 'next/font/google';
+import localFont from 'next/font/local';
 import { AppShell } from '@/components/AppShell';
 import { getSessionUser } from '@/lib/auth';
 import { ensureRoleAccess } from '@/lib/roleAccess';
 import { navFor } from '@/lib/navigation';
 
-const inter = Inter({
-  subsets: ['latin'],
+// Self-hosted rather than next/font/google: that fetches at BUILD time, so a
+// host that cannot reach fonts.googleapis.com cannot build at all. See
+// app/fonts/README.md.
+const inter = localFont({
+  src: './fonts/inter-latin.woff2',
+  weight: '100 900',
+  style: 'normal',
   variable: '--font-inter',
   display: 'swap',
 });
