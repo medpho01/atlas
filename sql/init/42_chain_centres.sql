@@ -116,8 +116,9 @@ BEGIN
   DELETE FROM atlas.chain_centre_stage WHERE chain = p_chain;
 
   PERFORM atlas.match_chain_centres(p_chain);
-  -- Defined in 43; resolved at call time, so the order of the files is fine.
+  -- Defined in 43 and 46; resolved at call time, so the file order is fine.
   PERFORM atlas.fill_chain_centre_states();
+  PERFORM atlas.fill_reference_geo();
   RETURN n;
 END;
 $$ LANGUAGE plpgsql;

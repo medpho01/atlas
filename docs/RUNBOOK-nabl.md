@@ -37,6 +37,19 @@ Provider onboarding.
 above 0.45 against an active `src_local."Lab"`. It is a strong hint — 61 labs
 match today — and it is meant to be checked, not trusted.
 
+## Finding a lab near a pincode
+
+Searching a pincode searches **near** it. An exact match rarely helps: 110016
+has 13 accredited centres at that exact code and 197 within 15 km, and 400001
+has none at all but 46 within 15 km. Entering six digits resolves to a point
+and returns what is in range, nearest first, defaulting to 15 km.
+
+NABL publishes coordinates for 2,614 of the 2,640 medical labs, so most
+distances are real rather than estimated — but 417 of those coordinates
+contradicted the lab's own pincode by more than 25 km and were replaced by the
+pincode centroid. Those rows show "approx.". See the same section in
+`RUNBOOK-franchisees.md`; both screens share `atlas.fill_reference_geo()`.
+
 ## Loading
 
 ```bash
@@ -46,6 +59,8 @@ cd ~/atlas && git pull \
   && docker compose exec -T atlas-db psql -U atlas -d atlas \
        -c "\copy atlas.nabl_lab_stage FROM '/dev/stdin' WITH (FORMAT csv, HEADER true)" \
        < sql/reports/nabl-labs.csv \
+  && docker compose exec -T atlas-db psql -U atlas -d atlas -v ON_ERROR_STOP=1 \
+       -f /docker-entrypoint-initdb.d/46_geo_radius.sql \
   && docker compose exec -T atlas-db psql -U atlas -d atlas -c "SELECT atlas.load_nabl_labs()" \
   && docker compose up -d --build atlas-web
 ```

@@ -80,6 +80,40 @@ Hamirpur, which exists in both Himachal Pradesh and Uttar Pradesh, is left
 blank rather than guessed: a wrong state on a sales screen is worse than an
 empty one. `load_chain_centres` calls it at the end of every load.
 
+## Finding supply near a pincode
+
+Searching a pincode on this screen searches **near** it, not **in** it. An
+exact match almost never helps — a request in 110016 is served by a centre in
+110017 — so a six-digit entry resolves to a point and returns what is within
+the radius, nearest first. Delhi 110016: 3 centres share the pincode, 134 are
+within 15 km.
+
+The radius defaults to 15 km and can be set to 5, 10, 15, 25 or 50.
+
+**Distances marked "approx." are measured from a pincode centroid**, not from
+the centre itself. Metropolis and Thyrocare publish no coordinates at all, so
+every one of their centres is placed at the middle of its pincode — an area
+that can be several kilometres across. Treat those as "in this neighbourhood",
+not as a routing distance.
+
+**Published coordinates are checked against the published pincode.** Of the
+5,823 reference rows that give their own coordinates, 560 sit more than 50 km
+from the pincode on the same row — one Pathkind centre is 9,584 km out, one
+NABL lab 272 km. Where the two disagree by more than 25 km the pincode wins,
+because a coordinate that contradicts its own address is the less trustworthy
+of the two. That reclassified 509 chain centres and 417 NABL labs from exact
+to approximate; `geo_source` records which.
+
+**A centre in the searched pincode always appears**, whatever its measured
+distance. Without that rule the radius search could return fewer rows than the
+exact search it replaced, which reads as data going missing rather than as a
+coordinate being wrong.
+
+`atlas.fill_reference_geo()` maintains `geo_lat`/`geo_lon`/`geo_source` and is
+called by both loaders. Re-run it after refreshing `atlas.pincode_directory`:
+a pincode that gains a centroid places rows that could not be placed before.
+
+
 ## Deploying
 
 Everything the screen needs is in the repo — the four CSVs are committed, so
@@ -95,6 +129,8 @@ cd ~/atlas && git pull \
        -f /docker-entrypoint-initdb.d/44_chain_centre_email.sql \
   && docker compose exec -T atlas-db psql -U atlas -d atlas -v ON_ERROR_STOP=1 \
        -f /docker-entrypoint-initdb.d/45_drop_redcliffe.sql \
+  && docker compose exec -T atlas-db psql -U atlas -d atlas -v ON_ERROR_STOP=1 \
+       -f /docker-entrypoint-initdb.d/46_geo_radius.sql \
   && for chain in Thyrocare Metropolis Pathkind Agilus; do \
        docker compose exec -T atlas-db psql -U atlas -d atlas \
          -c "\copy atlas.chain_centre_stage FROM '/dev/stdin' WITH (FORMAT csv, HEADER true)" \

@@ -14,6 +14,11 @@ import { query, queryOne } from './db';
  * which is a different claim from one LabStack can send an order to.
  * `onboarded` marks the ones matched to a provider by pincode and name, so it
  * is a strong hint rather than a fact.
+ *
+ * Searching by pincode means searching NEAR a pincode. An exact match almost
+ * never hits — the lab that can take an order from 110016 is usually in a
+ * neighbouring code — so a six-digit search resolves to a point and returns
+ * what is within the radius, nearest first.
  */
 
 /** Everything this module reads is a diagnostic centre. */
@@ -41,6 +46,11 @@ export type NablLab = {
   nabl_updated_on: string | null;
   /** A LabStack lab at the same pincode with a name that matches closely. */
   onboarded_as: string | null;
+  /** Km from the searched pincode, when one was given. */
+  km: number | null;
+  /** 'exact' when NABL published coordinates, 'pincode' when the distance is
+   *  measured from the centroid of the lab's pincode. */
+  geo_source: string | null;
 };
 
 export type NablFilters = {
@@ -51,10 +61,24 @@ export type NablFilters = {
   city?: string;
   /** 'yes' or 'no' — whether we appear to have it already. */
   onboarded?: string;
+  /** A six-digit pincode to measure from. Results come back nearest first. */
+  near?: string;
+  /** Radius in km around `near`. */
+  radius?: number;
   page?: number;
 };
 
 export const PAGE_SIZE = 50;
+
+/** Offered on the screen; the default is deliberately wider than a pincode. */
+export const RADIUS_CHOICES = [5, 10, 15, 25, 50];
+export const DEFAULT_RADIUS = 15;
+
+/** A six-digit pincode, or nothing. */
+export function asPincode(v?: string): string | null {
+  const t = (v ?? '').trim();
+  return /^\d{6}$/.test(t) ? t : null;
+}
 
 // Stored at load time by atlas.match_nabl_labs(), not computed per row: the
 // similarity join is the same work for every request and only changes when a
@@ -80,29 +104,63 @@ function buildWhere(f: NablFilters) {
   if (f.onboarded === 'yes') where.push(`n.matched_lab_id IS NOT NULL`);
   if (f.onboarded === 'no') where.push(`n.matched_lab_id IS NULL`);
 
-  return { clause: `WHERE ${where.join(' AND ')}`, params };
+  const near = asPincode(f.near);
+  if (near) {
+    const radius = f.radius ?? DEFAULT_RADIUS;
+    const p = push(near);
+    const r = push(radius);
+    // The bounding box is what the index can use; the exact distance then
+    // runs over the rows inside it. A degree of latitude is ~111 km, and
+    // longitude shrinks with latitude, hence the cos().
+    // Same pincode always counts, whatever the measured distance says. A few
+    // hundred rows publish coordinates that contradict their own pincode, and
+    // without this a radius search could return fewer rows than the exact
+    // search it replaced — which would read as data going missing.
+    where.push(`(n.pincode = ${p} OR n.geo_lat IS NOT NULL AND EXISTS (
+      SELECT 1 FROM atlas.pincode_point(${p}) pt
+       WHERE n.geo_lat BETWEEN pt.lat - (${r}::numeric / 111.0)
+                           AND pt.lat + (${r}::numeric / 111.0)
+         AND n.geo_lon BETWEEN pt.lon - (${r}::numeric / (111.0 * cos(radians(pt.lat))))
+                           AND pt.lon + (${r}::numeric / (111.0 * cos(radians(pt.lat))))
+         AND atlas.km_between(pt.lat, pt.lon, n.geo_lat, n.geo_lon) <= ${r}))`);
+  }
+
+  return { clause: `WHERE ${where.join(' AND ')}`, params, near };
 }
 
 export async function listNablLabs(f: NablFilters = {}) {
-  const { clause, params } = buildWhere(f);
+  const { clause, params, near } = buildWhere(f);
   const page = Math.max(1, f.page ?? 1);
   const offset = (page - 1) * PAGE_SIZE;
+
+  // The count runs off the WHERE clause alone, so its parameters are the ones
+  // fixed before the distance expression appends its own.
+  const countParams = [...params];
+
+  // With a pincode, distance replaces name as the sort: the nearest lab is
+  // the one worth calling first.
+  const kmSelect = near
+    ? `(SELECT ROUND(atlas.km_between(pt.lat, pt.lon, n.geo_lat, n.geo_lon)::numeric, 1)
+          FROM atlas.pincode_point($${params.push(near)}) pt)`
+    : `NULL::numeric`;
+  const order = near ? `km NULLS LAST, n.cab_name` : `n.cab_name`;
 
   const rows = await query<NablLab>(`
     SELECT n.nabl_id, n.cab_name, n.cab_id, n.certificate_no, n.field,
            n.application_status, n.validity, n.certificate_link,
            n.contact_name, n.phone, n.email, n.address, n.city, n.state,
            n.pincode, n.discipline, n.groupname, n.permanent_facility,
-           n.nabl_updated_on,
+           n.nabl_updated_on, n.geo_source,
+           ${kmSelect} AS km,
            ${MATCH} AS onboarded_as
     FROM atlas.nabl_lab n
     ${clause}
-    ORDER BY n.cab_name
+    ORDER BY ${order}
     LIMIT ${PAGE_SIZE} OFFSET ${offset}
   `, params);
 
   const total = await queryOne<{ n: number }>(
-    `SELECT COUNT(*)::int AS n FROM atlas.nabl_lab n ${clause}`, params);
+    `SELECT COUNT(*)::int AS n FROM atlas.nabl_lab n ${clause}`, countParams);
 
   return { rows, total: total?.n ?? 0, page, pages: Math.ceil((total?.n ?? 0) / PAGE_SIZE) };
 }

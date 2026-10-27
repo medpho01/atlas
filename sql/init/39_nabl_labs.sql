@@ -125,6 +125,10 @@ BEGIN
     PERFORM atlas.match_nabl_labs();
   END IF;
 
+  -- Defined in 46; resolved at call time, so the file order is fine.
+
+  PERFORM atlas.fill_reference_geo();
+
   RETURN n;
 END;
 $$ LANGUAGE plpgsql;

@@ -5,8 +5,10 @@ import { PageHeader } from '@/components/ui/PageHeader';
 import { ChipButton } from '@/components/ui/Toggle';
 import { InfoTip } from '@/components/ui/InfoTip';
 import { EntitySearch } from '@/components/ui/EntitySearch';
+import { NearPincode } from '@/components/ui/NearPincode';
 import {
   listCentres, getChainSummary, getCentreCities, PAGE_SIZE,
+  RADIUS_CHOICES, DEFAULT_RADIUS, asPincode,
 } from '@/lib/chainCentres';
 
 export const dynamic = 'force-dynamic';
@@ -18,15 +20,18 @@ export default async function FranchiseesPage({
 }: {
   searchParams: {
     q?: string; chain?: string; city?: string; state?: string;
-    matched?: string; phone?: string; page?: string;
+    matched?: string; phone?: string; near?: string; radius?: string;
+    page?: string;
   };
 }) {
   const gate = await requireView('directory', '/franchisees');
   if (gate.blocked) return <RoleBlocked area="Franchisee networks" detail="network, operations and admin" />;
 
   const page = Math.max(1, Number(searchParams.page) || 1);
+  const near = asPincode(searchParams.near);
+  const radius = Number(searchParams.radius) || DEFAULT_RADIUS;
   const [{ rows, total, pages }, chains, cities] = await Promise.all([
-    listCentres({ ...searchParams, page }),
+    listCentres({ ...searchParams, near: near ?? undefined, radius, page }),
     getChainSummary(),
     getCentreCities(searchParams.chain),
   ]);
@@ -45,7 +50,8 @@ export default async function FranchiseesPage({
     const merged: Record<string, string | undefined> = {
       q: searchParams.q, chain: searchParams.chain, city: searchParams.city,
       state: searchParams.state, matched: searchParams.matched,
-      phone: searchParams.phone, page: undefined, ...patch,
+      phone: searchParams.phone, near: searchParams.near,
+      radius: searchParams.radius, page: undefined, ...patch,
     };
     for (const [k, v] of Object.entries(merged)) if (v) p.set(k, v);
     const qs = p.toString();
@@ -162,9 +168,12 @@ export default async function FranchiseesPage({
           <ChipButton href={link({ phone: 'shared' })} active={searchParams.phone === 'shared'}>Shared</ChipButton>
         </div>
 
-        <div className="ml-auto">
+        <div className="ml-auto flex items-center gap-2 flex-wrap justify-end">
           <EntitySearch basePath="/franchisees" initial={searchParams.q}
                         placeholder="Centre, address, city, pincode, phone" width="w-[280px]" />
+          <NearPincode basePath="/franchisees" initial={near ?? undefined}
+                       radius={radius} choices={RADIUS_CHOICES}
+                       defaultRadius={DEFAULT_RADIUS} />
         </div>
       </div>
 
@@ -182,6 +191,9 @@ export default async function FranchiseesPage({
         <table className="w-full min-w-[1240px] text-[13px]">
           <thead>
             <tr className="border-b border-ink-200">
+              {near && (
+                <th className="text-right text-[10px] uppercase tracking-wide text-ink-500 font-semibold px-3 py-2.5">Distance</th>
+              )}
               <th className="text-left text-[10px] uppercase tracking-wide text-ink-500 font-semibold px-4 py-2.5">Centre</th>
               <th className="text-left text-[10px] uppercase tracking-wide text-ink-500 font-semibold px-3 py-2.5">Chain</th>
               <th className="text-left text-[10px] uppercase tracking-wide text-ink-500 font-semibold px-3 py-2.5">Address</th>
@@ -193,6 +205,16 @@ export default async function FranchiseesPage({
           <tbody>
             {rows.map((c) => (
               <tr key={`${c.chain}-${c.external_id}`} className="border-b border-ink-100 last:border-0 align-top hover:bg-ink-50/50">
+                {near && (
+                  <td className="px-3 py-2.5 text-right whitespace-nowrap">
+                    <div className="num font-semibold text-ink-900">
+                      {c.km === null ? '—' : `${c.km} km`}
+                    </div>
+                    {c.geo_source === 'pincode' && (
+                      <div className="text-[10px] text-ink-400 mt-0.5">approx.</div>
+                    )}
+                  </td>
+                )}
                 <td className="px-4 py-2.5">
                   <div className="font-semibold text-ink-900">{c.name}</div>
                   <div className="text-[11px] text-ink-500 mt-0.5">
