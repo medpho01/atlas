@@ -18,6 +18,7 @@ active console lab — so the two screens mean the same thing by it.
 | Metropolis | 2,672 | 430 | 459 city pages under `/labs/<state>/<city>`, six per page, crawled in-page. 3,544 rows before de-duplicating on address and phone. |
 | Thyrocare | 2,311 | 832 | The whole network is embedded in `thyrocare.com/location` as page data. One request. |
 | Pathkind | 2,206 | 466 | The locator's own state directory, `nearby.pathkindlabs.com/location/<state>`, paginated. Every page carries one JSON-LD `MedicalBusiness` per centre. |
+| Agilus | 1,078 | 273 | A flat index at `labs.agilusdiagnostics.com/?page=N`, six per page, 182 pages. Each card already holds the address, pincode, coordinates, hours and phone, so no centre page is fetched. |
 
 ### What each chain actually publishes
 
@@ -31,7 +32,16 @@ guesses. What is missing is missing at source:
 - **Thyrocare** gives no **state** at all. It is filled from the city by
   `atlas.fill_chain_centre_states()` (see below), which is why Thyrocare shows
   a state for about two thirds of its centres and a blank for the rest.
-- **Pathkind** is the cleanest of the four: name, phone, full address, pincode
+- **Agilus** is the most complete of the four: name, address, pincode,
+  coordinates, hours and phone on every one of its 1,078 centres, and 1,078
+  distinct numbers. Those numbers are call-tracking lines (`+9180372…`,
+  `+9180378…`) rather than the franchisee's own mobile — they route through
+  Agilus — but they are per-centre, which is what makes them worth having.
+  Its locator has a COCO/FOFO toggle, company-owned against franchise-owned,
+  which would be exactly the split we want; it only applies through the form's
+  POST, and passing `cot[]` on the query string silently returns everything,
+  so the distinction is not recorded.
+- **Pathkind** is the cleanest of the three published-as-data sources: name, phone, full address, pincode
   and coordinates on every centre, plus Pathkind's own numeric id in the centre
   URL, which is used as `external_id` so a renamed centre stays the same row.
 ## Why Redcliffe was dropped
@@ -77,7 +87,7 @@ cd ~/atlas && git pull \
        -f /docker-entrypoint-initdb.d/43_chain_state_fill.sql \
   && docker compose exec -T atlas-db psql -U atlas -d atlas -v ON_ERROR_STOP=1 \
        -f /docker-entrypoint-initdb.d/44_chain_centre_email.sql \
-  && for chain in Thyrocare Metropolis Pathkind; do \
+  && for chain in Thyrocare Metropolis Pathkind Agilus; do \
        docker compose exec -T atlas-db psql -U atlas -d atlas \
          -c "\copy atlas.chain_centre_stage FROM '/dev/stdin' WITH (FORMAT csv, HEADER true)" \
          < sql/reports/chain-centres-$(echo $chain | tr A-Z a-z).csv \
@@ -102,7 +112,8 @@ docker compose exec -T atlas-db psql -U atlas -d atlas -c \
      FROM atlas.chain_centre GROUP BY chain ORDER BY 2 DESC"
 ```
 
-Expect 2,672 Metropolis, 2,311 Thyrocare and 2,206 Pathkind — 7,189 in all.
+Expect 2,672 Metropolis, 2,311 Thyrocare, 2,206 Pathkind and 1,078 Agilus —
+8,267 in all.
 `matched` will be small — around 27 in all — and that is a property of our own
 data, not of the pull: most active console labs carry no pincode, and the match
 needs one. Raising it means filling in pincodes on the console side.

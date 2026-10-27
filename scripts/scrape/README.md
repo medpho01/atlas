@@ -14,7 +14,12 @@ two `*_to_excel.py`, which need `openpyxl` — and each writes a CSV in
 |---|---|---|
 | `nabl.py` | `nabl-india.org`'s `nabl_labs_frontend_search` AJAX endpoint, 23 requests | the NABL register, 11,142 labs |
 | `pathkind.py` | `nearby.pathkindlabs.com/location/<state>`, paginated | Pathkind's centres |
+| `agilus.py` | `labs.agilusdiagnostics.com/?page=N`, six per page | Agilus's centres |
 | `stage_order.py` | — | rewrites any chain CSV into staging-table column order |
+
+Agilus and Pathkind both run on the SingleInterface platform, so their
+scrapers look alike; Agilus needs no centre-page fetch because its index cards
+already carry the address, coordinates and phone.
 
 Thyrocare and Metropolis were pulled in-browser, because both block plain
 `curl`; `thyrocare_to_excel.py` and `nabl_to_excel.py` turn a pulled CSV into
@@ -28,6 +33,11 @@ Two things to know before refreshing anything:
   `?page=1` as the same page, so "stop when a page adds nothing new" ends every
   state after one page and quietly returns a tenth of the network. Stop on an
   empty page instead.
+- **A locator's filters may not survive the query string.** Agilus has a
+  COCO/FOFO toggle — company-owned versus franchise-owned, exactly the split
+  worth having — but it only applies through the form's POST, and passing
+  `cot[]` on the URL silently returns everything. A filter that appears to work
+  because the page still renders is worse than one that errors.
 
 Run them with `-I` — these scripts sit next to downloaded data, and `-I` keeps
 the interpreter from importing anything out of the working directory:
