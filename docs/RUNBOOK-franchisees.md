@@ -57,6 +57,12 @@ so there is nowhere else to look.
 It was also the weakest chain on reach: against three months of requests it
 added only 81 that the other three did not already cover within 10 km.
 
+Removing it needs `sql/init/45_drop_redcliffe.sql`, which is a plain DELETE.
+`load_chain_centres` only ever deletes within the chain it is loading — so that
+a Thyrocare refresh can never look like Metropolis going missing — which means
+loading the remaining chains does **not** clean up a chain we have stopped
+carrying. It would otherwise sit on the screen indefinitely.
+
 If it is ever worth revisiting, two things are worth knowing. The register
 answers in **two different record shapes** — the common one gives `address`,
 `city.name`, `area.pincode` and a `center_code`; the rarer one gives
@@ -87,6 +93,8 @@ cd ~/atlas && git pull \
        -f /docker-entrypoint-initdb.d/43_chain_state_fill.sql \
   && docker compose exec -T atlas-db psql -U atlas -d atlas -v ON_ERROR_STOP=1 \
        -f /docker-entrypoint-initdb.d/44_chain_centre_email.sql \
+  && docker compose exec -T atlas-db psql -U atlas -d atlas -v ON_ERROR_STOP=1 \
+       -f /docker-entrypoint-initdb.d/45_drop_redcliffe.sql \
   && for chain in Thyrocare Metropolis Pathkind Agilus; do \
        docker compose exec -T atlas-db psql -U atlas -d atlas \
          -c "\copy atlas.chain_centre_stage FROM '/dev/stdin' WITH (FORMAT csv, HEADER true)" \
