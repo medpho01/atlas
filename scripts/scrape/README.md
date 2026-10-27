@@ -14,7 +14,6 @@ two `*_to_excel.py`, which need `openpyxl` — and each writes a CSV in
 |---|---|---|
 | `nabl.py` | `nabl-india.org`'s `nabl_labs_frontend_search` AJAX endpoint, 23 requests | the NABL register, 11,142 labs |
 | `pathkind.py` | `nearby.pathkindlabs.com/location/<state>`, paginated | Pathkind's centres |
-| `redcliffe.py` | `app.redcliffelabs.com/api/v1/sample/labccs/`, nine per page | Redcliffe's centres |
 | `stage_order.py` | — | rewrites any chain CSV into staging-table column order |
 
 Thyrocare and Metropolis were pulled in-browser, because both block plain

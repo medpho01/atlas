@@ -18,7 +18,6 @@ active console lab — so the two screens mean the same thing by it.
 | Metropolis | 2,672 | 430 | 459 city pages under `/labs/<state>/<city>`, six per page, crawled in-page. 3,544 rows before de-duplicating on address and phone. |
 | Thyrocare | 2,311 | 832 | The whole network is embedded in `thyrocare.com/location` as page data. One request. |
 | Pathkind | 2,206 | 466 | The locator's own state directory, `nearby.pathkindlabs.com/location/<state>`, paginated. Every page carries one JSON-LD `MedicalBusiness` per centre. |
-| Redcliffe | 1,281 | — | `app.redcliffelabs.com/api/v1/sample/labccs/`, nine per page, 144 requests. |
 
 ### What each chain actually publishes
 
@@ -35,27 +34,26 @@ guesses. What is missing is missing at source:
 - **Pathkind** is the cleanest of the four: name, phone, full address, pincode
   and coordinates on every centre, plus Pathkind's own numeric id in the centre
   URL, which is used as `external_id` so a renamed centre stays the same row.
-- **Redcliffe** publishes **no phone for most centres**. Of the ones that do
-  carry a number, most carry Redcliffe's own switchboard rather than the
-  franchisee's line, so a Redcliffe row is a location, not a contact.
+## Why Redcliffe was dropped
 
-## Two traps in the Redcliffe API
+Redcliffe was loaded and then removed on 2026-10-27. Its register publishes
+**no phone number for collection centres at all** — the field is absent from
+that record type, not empty. The only numbers it carries belong to Redcliffe's
+own 74 pathology labs, and 62 of those are the same switchboard, so the whole
+chain yielded about twelve distinct contacts for 1,280 centres. There is no
+per-centre detail endpoint and the public network page is a JavaScript shell,
+so there is nowhere else to look.
 
-Both of these silently lose data rather than failing, so they are worth knowing
-before anyone refreshes it.
+It was also the weakest chain on reach: against three months of requests it
+added only 81 that the other three did not already cover within 10 km.
 
-**It answers in two different record shapes.** The common shape gives
-`address`, `city.name`, `area.pincode`, `area.state`, a `center_code` and a
-Google Maps cid link, and no phone. The rarer shape gives `lab_address`,
-`contact_number`, an operations email and a `goo.gl` link, and no structured
-city. A reader that knows only one shape returns a near-empty row for every
-record of the other — which is exactly what the first pull of this register
-did. `scripts/scrape/redcliffe.py` reads both and prefers whichever field is
-present.
-
-**It rate-limits after a burst.** Page size is fixed at nine and cannot be
-raised, so it is 144 requests; pull it at roughly one request every 1.5–2
-seconds and resume rather than restart.
+If it is ever worth revisiting, two things are worth knowing. The register
+answers in **two different record shapes** — the common one gives `address`,
+`city.name`, `area.pincode` and a `center_code`; the rarer one gives
+`lab_address`, `contact_number` and an email — and a reader that knows only one
+returns a near-empty row for every record of the other. And it rate-limits
+after a burst: page size is fixed at nine, so it is 144 requests at roughly one
+every 1.5–2 seconds.
 
 ## Filling in a missing state
 
@@ -79,7 +77,7 @@ cd ~/atlas && git pull \
        -f /docker-entrypoint-initdb.d/43_chain_state_fill.sql \
   && docker compose exec -T atlas-db psql -U atlas -d atlas -v ON_ERROR_STOP=1 \
        -f /docker-entrypoint-initdb.d/44_chain_centre_email.sql \
-  && for chain in Thyrocare Metropolis Pathkind Redcliffe; do \
+  && for chain in Thyrocare Metropolis Pathkind; do \
        docker compose exec -T atlas-db psql -U atlas -d atlas \
          -c "\copy atlas.chain_centre_stage FROM '/dev/stdin' WITH (FORMAT csv, HEADER true)" \
          < sql/reports/chain-centres-$(echo $chain | tr A-Z a-z).csv \
@@ -104,7 +102,7 @@ docker compose exec -T atlas-db psql -U atlas -d atlas -c \
      FROM atlas.chain_centre GROUP BY chain ORDER BY 2 DESC"
 ```
 
-Expect 2,672 Metropolis, 2,311 Thyrocare, 2,206 Pathkind and 1,280 Redcliffe.
+Expect 2,672 Metropolis, 2,311 Thyrocare and 2,206 Pathkind — 7,189 in all.
 `matched` will be small — around 27 in all — and that is a property of our own
 data, not of the pull: most active console labs carry no pincode, and the match
 needs one. Raising it means filling in pincodes on the console side.
@@ -140,12 +138,11 @@ matches on `chain` exactly. Check with
 
 **Shared phones.** A number used by several centres of one chain is flagged,
 not removed: it is usually one franchisee running several branches, which is
-worth knowing rather than hiding. The exception is Redcliffe, where 62 centres
-share Redcliffe's own switchboard — there the flag is telling you the number
-is not a franchisee contact at all.
+worth knowing rather than hiding. When a whole chain's numbers collapse onto
+one switchboard, though, the chain is not publishing franchisee contacts at
+all — that is what got Redcliffe dropped.
 
 **A chain shows far fewer centres than you expect.** Check the pull before
-the loader. Both sources that paginate have a way of ending a crawl early
-without erroring: Pathkind repeats its first page at `?page=0`, and Redcliffe
-rate-limits mid-sweep. A short CSV is the symptom; the counts above are what
+the loader. Pathkind repeats its first page at `?page=0`, which ends a
+"stop when nothing is new" crawl after one page per state without erroring. A short CSV is the symptom; the counts above are what
 a complete one looks like.
